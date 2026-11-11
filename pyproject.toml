@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rumo"
+version = "0.1.0"
+description = "Rumo - personal job-hunting tool"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi",
+  "uvicorn",
+  "sqlalchemy>=2",
+  "alembic",
+  "pydantic>=2",
+  "pydantic-settings",
+  "httpx",
+  "pgvector",
+  "psycopg[binary]",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio"]
+embeddings = ["sentence-transformers"]
+
+[tool.setuptools]
+packages = ["rumo_core", "api", "worker"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+  "db: tests that need the Postgres database",
+  "slow: slow tests",
+]

@@ -105,6 +105,21 @@ Fontes do MVP: Greenhouse, Lever, Ashby, Gupy (a confirmar estabilidade da API),
 - Lembrete de follow-up após X dias; anotações por vaga.
 - Relatórios: vagas encontradas/aplicadas/respondidas; taxa de resposta por país, fonte e faixa de nota (para checar se a nota prevê resposta).
 
+### 5.7 Otimizador de perfil do LinkedIn (pós-MVP, adicionado em 2026-11-11)
+
+**Escopo definido pelo usuário:** o sistema **não lê** o perfil do LinkedIn (sem scraping, sem URL); ele **sugere como o perfil deve ficar**, a partir do perfil canônico do próprio usuário, e propõe o preenchimento completo.
+
+- **Entrada:** o perfil canônico (seção 5.1) e as preferências de busca (cargo-alvo, países). Opcional: o usuário cola o texto atual de cada seção para receber um "antes/depois".
+- **Saída (um rascunho por seção do LinkedIn):** headline, sobre (About), experiências (bullets orientados a resultado), habilidades (ordem e quais fixar), formação, certificações, projetos, idioma do perfil, URL personalizada, sugestão de foto/banner e *open to work*.
+- **Pontos de vista de análise**, cada um com critérios explícitos e uma nota por seção, combinados em um relatório de melhorias priorizado:
+  1. **Recrutador:** leitura em 6–10 s, clareza do cargo-alvo, prova de impacto, senioridade.
+  2. **ATS / busca por palavras-chave:** cobertura de termos do cargo-alvo (extraídos das vagas coletadas), títulos padronizados, sem jargão interno.
+  3. **Gestor técnico:** profundidade, escopo e decisões técnicas.
+  4. **Internacional:** adaptação por mercado (EUA, Alemanha, Austrália, Brasil) e idioma.
+- **Regra anti-invenção da seção 5.5 vale integralmente:** cada linha sugerida aponta o item do perfil de origem; o que o usuário "deveria ter" vira lista de lacunas, nunca texto inventado.
+- **Fundamentação:** os critérios ficam em um arquivo de rubricas versionado (`rubrics/linkedin_*.md`), escrito a partir de boas práticas públicas de recrutamento e ATS. Não se afirma ter acesso a algoritmos proprietários do LinkedIn ou de ATS comerciais; as notas são **heurísticas explicadas**, não pontuações oficiais.
+- **Tela:** relatório com lista priorizada de melhorias, seção a seção, texto sugerido editável e botão de copiar.
+
 ## 6. Erros e resiliência
 - **Fontes isoladas**: falha de um conector não afeta os outros; retentativa com espera crescente; painel de saúde por fonte (última coleta, erros).
 - **Groq 429**: fila com controle de ritmo e retentativa; vaga exibida só com nota vetorial e selo "análise pendente".
