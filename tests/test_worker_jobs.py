@@ -18,6 +18,13 @@ from worker.jobs import (
 pytestmark = pytest.mark.db
 
 
+@pytest.fixture(autouse=True)
+def _fresh_state():
+    jobs._reset_state()
+    yield
+    jobs._reset_state()
+
+
 @pytest.fixture
 def uid():
     with SessionLocal() as s:
@@ -56,15 +63,18 @@ class FakeLLM:
 
     async def complete_json(self, messages, schema):
         self.calls += 1
-        await asyncio.sleep(0.05)
         if self.exc:
             raise self.exc
         return CanonicalProfile.model_validate({"summary": "Dev Python"})
 
 
+async def _run(uid, llm, **kw):
+    return await process_pending_imports(SessionLocal, llm, 1000, user_id=uid, **kw)
+
+
 async def test_import_success_sets_ready_and_extracted(uid):
     iid = _add_import(uid)
-    assert await process_pending_imports(SessionLocal, FakeLLM(), 1000) == 1
+    assert await _run(uid, FakeLLM()) == 1
     imp = _get(iid)
     assert imp.status == "ready"
     assert imp.extracted["summary"] == "Dev Python"
@@ -73,64 +83,91 @@ async def test_import_success_sets_ready_and_extracted(uid):
 
 async def test_import_llm_error_sets_error_and_no_extracted(uid):
     iid = _add_import(uid)
-    n = await process_pending_imports(
-        SessionLocal, FakeLLM(LLMInvalidResponse("bad")), 1000
-    )
+    n = await _run(uid, FakeLLM(LLMInvalidResponse("bad")))
     imp = _get(iid)
     assert n == 1 and imp.status == "error" and imp.extracted is None
     assert imp.error and "bad" not in imp.error
 
 
-async def test_import_rate_limited_goes_back_to_pending(uid):
+async def test_unexpected_error_marks_error_and_does_not_block_next(uid, caplog):
+    first = _add_import(uid)
+    second = _add_import(uid)
+    with caplog.at_level("ERROR"):
+        n = await _run(uid, FakeLLM(RuntimeError("kaboom")))
+    assert n == 1
+    imp = _get(first)
+    assert imp.status == "error" and imp.error == "Falha inesperada ao ler o currículo."
+    assert imp.extracted is None
+    assert _get(second).status == "pending"
+    assert sum("unexpected failure" in r.message for r in caplog.records) == 1
+    # the next import is picked up on the following tick
+    assert await _run(uid, FakeLLM()) == 1
+    assert _get(second).status == "ready"
+
+
+async def test_rate_limited_goes_back_to_pending_and_pauses(uid, caplog):
     iid = _add_import(uid)
-    n = await process_pending_imports(
-        SessionLocal, FakeLLM(LLMRateLimited("slow")), 1000
-    )
-    imp = _get(iid)
-    assert n == 0 and imp.status == "pending" and imp.extracted is None
+    llm = FakeLLM(LLMRateLimited("slow"))
+    now = [1000.0]
+    clock = lambda: now[0]  # noqa: E731
+    with caplog.at_level("WARNING"):
+        assert await _run(uid, llm, clock=clock) == 0
+        assert _get(iid).status == "pending" and llm.calls == 1
+        # paused: no claim, no LLM call, no extra warning
+        now[0] += 30
+        assert await _run(uid, llm, clock=clock) == 0
+        assert llm.calls == 1
+        assert sum("rate limited" in r.message for r in caplog.records) == 1
+    # pause over: works again
+    now[0] += 31
+    ok = FakeLLM()
+    assert await _run(uid, ok, clock=clock) == 1
+    assert _get(iid).status == "ready"
 
 
 async def test_no_llm_leaves_pending_without_crashing(uid, caplog):
     iid = _add_import(uid)
-    jobs._warned_no_llm = False
     with caplog.at_level("WARNING"):
-        assert await process_pending_imports(SessionLocal, None, 1000) == 0
-        assert await process_pending_imports(SessionLocal, None, 1000) == 0
+        assert await _run(uid, None) == 0
+        assert await _run(uid, None) == 0
     assert _get(iid).status == "pending"
     assert sum("GROQ_API_KEY" in r.message for r in caplog.records) == 1
 
 
-async def test_two_workers_do_not_take_same_import(uid):
-    iid = _add_import(uid)
-    llm = FakeLLM()
-    a, b = await asyncio.gather(
-        process_pending_imports(SessionLocal, llm, 1000),
-        process_pending_imports(SessionLocal, llm, 1000),
-    )
-    assert sorted([a, b]) == [0, 1]
-    assert llm.calls == 1
-    assert _get(iid).status == "ready"
+def test_claim_skips_row_locked_by_another_session(uid):
+    locked = _add_import(uid)
+    other = _add_import(uid)
+    with SessionLocal() as holder:
+        holder.execute(
+            select(ProfileImport).where(ProfileImport.id == locked).with_for_update()
+        ).scalar_one()
+        claimed = jobs._claim_import(SessionLocal, uid)
+        assert claimed is not None and claimed[0] == other
+        assert jobs._claim_import(SessionLocal, uid) is None  # only locked one left
+        holder.rollback()
+    assert _get(locked).status == "pending"
+    assert _get(other).status == "extracting"
 
 
 def test_startup_resets_stuck_extracting(uid):
     stuck = _add_import(uid, status="extracting")
     done = _add_import(uid, status="ready")
-    assert reset_stuck_imports(SessionLocal) >= 1
+    assert reset_stuck_imports(SessionLocal, user_id=uid) == 1
     assert _get(stuck).status == "pending"
     assert _get(done).status == "ready"
 
 
 class FakeEmbedder:
     dimensions = 1024
-    model_version = "fake@1"
 
-    def __init__(self, fail_on_call=None):
+    def __init__(self, fail_on_calls=(), version="fake@1"):
+        self.model_version = version
         self.calls: list[list[str]] = []
-        self.fail_on_call = fail_on_call
+        self.fail_on_calls = set(fail_on_calls)
 
     def embed(self, texts):
         self.calls.append(list(texts))
-        if self.fail_on_call == len(self.calls):
+        if len(self.calls) in self.fail_on_calls:
             raise RuntimeError("boom")
         return [[0.5] * 1024 for _ in texts]
 
@@ -157,10 +194,14 @@ def _embedded(uid):
         ).scalars().all()
 
 
+async def _embed(uid, emb, batch=2, **kw):
+    return await embed_pending_chunks(SessionLocal, emb, batch, user_id=uid, **kw)
+
+
 async def test_embed_fills_pending_in_batches(uid):
     _add_chunks(uid, 5)
     emb = FakeEmbedder()
-    assert await embed_pending_chunks(SessionLocal, emb, 2) == 5
+    assert await _embed(uid, emb) == 5
     assert [len(c) for c in emb.calls] == [2, 2, 1]
     rows = _embedded(uid)
     assert len(rows) == 5 and {r.model_version for r in rows} == {"fake@1"}
@@ -170,8 +211,20 @@ async def test_embed_current_version_first(uid):
     _add_chunks(uid, 2, version=1)
     _add_chunks(uid, 2, version=2)
     emb = FakeEmbedder()
-    await embed_pending_chunks(SessionLocal, emb, 2)
+    await _embed(uid, emb)
     assert all(t.startswith("t2-") for t in emb.calls[0])
+
+
+async def test_embed_reembeds_chunks_with_old_model_version(uid):
+    _add_chunks(uid, 2)
+    old = FakeEmbedder(version="old@1")
+    await _embed(uid, old)
+    assert {r.model_version for r in _embedded(uid)} == {"old@1"}
+    new = FakeEmbedder(version="new@2")
+    assert await _embed(uid, new) == 2
+    assert {r.model_version for r in _embedded(uid)} == {"new@2"}
+    # nothing left to do now
+    assert await _embed(uid, new) == 0
 
 
 async def test_embed_skips_when_nothing_pending_without_loading_model(
@@ -183,15 +236,59 @@ async def test_embed_skips_when_nothing_pending_without_loading_model(
         raise AssertionError("model must not be loaded")
 
     monkeypatch.setattr(embedder, "_load", boom)
-    assert await embed_pending_chunks(SessionLocal, embedder, 4) == 0
+    assert await _embed(uid, embedder, batch=4) == 0
 
 
-async def test_embed_failure_midway_keeps_committed_batches(uid):
+async def test_embed_skips_chunks_locked_by_another_session(uid):
+    _add_chunks(uid, 2)
+    with SessionLocal() as s:
+        first = s.execute(
+            select(ProfileChunk).where(ProfileChunk.user_id == uid).order_by(ProfileChunk.id)
+        ).scalars().first()
+        first_id = first.id
+    with SessionLocal() as holder:
+        holder.execute(
+            select(ProfileChunk).where(ProfileChunk.id == first_id).with_for_update()
+        ).scalar_one()
+        assert await _embed(uid, FakeEmbedder(), batch=10) == 1
+        holder.rollback()
+    assert [r.id for r in _embedded(uid)] != [first_id]
+
+
+async def test_embed_failure_midway_keeps_committed_batches_and_backs_off(
+    uid, caplog
+):
     _add_chunks(uid, 5)
-    emb = FakeEmbedder(fail_on_call=2)
-    with pytest.raises(RuntimeError):
-        await embed_pending_chunks(SessionLocal, emb, 2)
+    emb = FakeEmbedder(fail_on_calls={2})
+    now = [100.0]
+    clock = lambda: now[0]  # noqa: E731
+    with caplog.at_level("ERROR"):
+        assert await _embed(uid, emb, clock=clock) == 2  # no raise
     assert len(_embedded(uid)) == 2
+    assert sum("embedding failed" in r.message for r in caplog.records) == 1
+    # in backoff window (5s): nothing happens, embedder not called
+    calls = len(emb.calls)
+    now[0] += 4
+    assert await _embed(uid, emb, clock=clock) == 0
+    assert len(emb.calls) == calls
+    # backoff over: resumes and finishes (call 3+ succeed)
+    now[0] += 2
+    assert await _embed(uid, emb, clock=clock) == 3
+    assert len(_embedded(uid)) == 5
+
+
+async def test_embed_backoff_grows_exponentially_and_is_capped(uid):
+    _add_chunks(uid, 1)
+    emb = FakeEmbedder(fail_on_calls=set(range(1, 100)))
+    now = [0.0]
+    clock = lambda: now[0]  # noqa: E731
+    delays = []
+    for _ in range(9):
+        await _embed(uid, emb, clock=clock)
+        delays.append(jobs._embed_next_try - now[0])
+        now[0] = jobs._embed_next_try
+    assert delays[:4] == [5, 10, 20, 40]
+    assert max(delays) == jobs.EMBED_BACKOFF_CAP == delays[-1]
 
 
 def test_model_version_includes_max_tokens():
