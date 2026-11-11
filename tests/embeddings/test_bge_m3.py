@@ -28,7 +28,7 @@ def embedder():
 def test_dimensions_and_normalization(embedder):
     [v] = embedder.embed(["Engenheiro de software"])
     assert embedder.dimensions == 1024
-    assert embedder.model_version == "bge-m3@1"
+    assert embedder.model_version == "bge-m3@1:max512"
     assert len(v) == 1024
     assert math.isclose(math.sqrt(sum(x * x for x in v)), 1.0, abs_tol=1e-3)
 

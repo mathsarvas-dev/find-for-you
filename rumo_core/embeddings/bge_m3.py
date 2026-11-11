@@ -1,10 +1,10 @@
 class BgeM3Embedder:
     dimensions = 1024
-    model_version = "bge-m3@1"
 
     def __init__(self, model_name: str = "BAAI/bge-m3", max_tokens: int = 512):
         self.model_name = model_name
         self.max_tokens = max_tokens
+        self.model_version = f"bge-m3@1:max{max_tokens}"
         self._model = None
 
     def _load(self):

@@ -28,11 +28,19 @@ services:
         condition: service_healthy
 
   worker:
-    build: .
+    build:
+      context: .
+      args:
+        WITH_EMBEDDINGS: "1"
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://rumo:rumo@db:5432/rumo
     command: python -m worker.main
+    volumes:
+      - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
+
+volumes:
+  hf_cache:
