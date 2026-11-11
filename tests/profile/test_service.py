@@ -91,3 +91,75 @@ def test_versions_are_per_user(session):
     assert confirm_profile(session, u1, _profile(), None).version == 1
     assert confirm_profile(session, u2, _profile(), None).version == 1
     assert get_current_profile(session, u2).user_id == u2
+
+
+def _noid(job2="Lead"):
+    return CanonicalProfile.model_validate({
+        "summary": "Dev",
+        "experiences": [
+            {"company": "Acme", "title": "Dev",
+             "achievements": [{"text": "a"}]},
+            {"company": "Beta", "title": job2},
+        ],
+        "skills": [{"name": "Python"}],
+    })
+
+
+def test_empty_ids_confirm_twice_is_one_version(session):
+    uid = session.info["uids"][0]
+    a = confirm_profile(session, uid, _noid(), None)
+    b = confirm_profile(session, uid, _noid(), None)
+    assert a.id == b.id
+    chunks = _chunks(session, uid, 1)
+    assert all(ref for ref in chunks)
+    assert len(chunks) == 4
+
+
+def test_edit_with_empty_ids_keeps_other_ids_and_embeddings(session):
+    uid = session.info["uids"][0]
+    confirm_profile(session, uid, _noid(), None)
+    c1 = _chunks(session, uid, 1)
+    for c in c1.values():
+        c.embedding = [0.1] * 1024
+        c.model_version = "m1"
+    session.commit()
+    row = confirm_profile(session, uid, _noid(job2="Diretor"), None)
+    assert row.version == 2
+    c2 = _chunks(session, uid, 2)
+    assert set(c2) - set(c1) and len(set(c2) & set(c1)) == 3
+    changed = (set(c2) - set(c1)).pop()
+    assert c2[changed].embedding is None
+    for ref in set(c2) & set(c1):
+        assert c2[ref].embedding is not None
+
+
+def test_race_lost_returns_existing_without_duplicate(session, monkeypatch):
+    from rumo_core.profile import service
+    uid = session.info["uids"][0]
+    existing = confirm_profile(session, uid, _profile(), None)
+    real = service.get_current_profile
+    calls = []
+
+    def stale(s, u):
+        calls.append(1)
+        return None if len(calls) == 1 else real(s, u)
+
+    monkeypatch.setattr(service, "get_current_profile", stale)
+    row = confirm_profile(session, uid, _profile(), None)
+    assert row.id == existing.id
+    rows = session.scalars(select(Profile).where(Profile.user_id == uid)).all()
+    assert len(rows) == 1
+
+
+def test_value_error_rolls_back_pending_profile(session, monkeypatch):
+    from rumo_core.profile import service
+    uid = session.info["uids"][0]
+
+    def boom(*a, **k):
+        raise ValueError("x")
+
+    monkeypatch.setattr(service, "build_chunks", boom)
+    with pytest.raises(ValueError):
+        confirm_profile(session, uid, _profile(), None)
+    assert not session.new
+    assert get_current_profile(session, uid) is None

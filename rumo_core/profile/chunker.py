@@ -22,9 +22,14 @@ def _join(parts: list[str]) -> str:
     return "\n".join(p.strip() for p in parts if p and p.strip())
 
 
+RESERVED_REFS = ("summary", "skills")  # source_refs used by fixed chunks
+
+
 def _ref(item, section: str) -> str:
     if not item.id:
         raise ValueError(f"{section} item without id; run assign_ids first")
+    if item.id in RESERVED_REFS:
+        raise ValueError(f"{section} id {item.id!r} is a reserved source_ref")
     return item.id
 
 

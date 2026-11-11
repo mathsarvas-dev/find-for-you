@@ -12,6 +12,35 @@ from rumo_core.profile.chunker import build_chunks
 from rumo_core.profile.schema import CanonicalProfile
 
 
+def _fill_empty_ids(profile: CanonicalProfile) -> CanonicalProfile:
+    """Deterministically fill EMPTY ids (existing ids are kept), so confirming
+    the same content twice yields the same ids and hash. Id = sha1 of the
+    section and item content, plus an occurrence counter for identical items."""
+    out = profile.model_copy(deep=True)
+    seen: dict[str, int] = {}
+
+    def make(section: str, item) -> str:
+        content = json.dumps(
+            item.model_dump(exclude={"id"}), sort_keys=True, ensure_ascii=False
+        )
+        key = f"{section}:{content}"
+        n = seen.get(key, 0)
+        seen[key] = n + 1
+        return hashlib.sha1(f"{key}:{n}".encode("utf-8")).hexdigest()[:8]
+
+    for name in CanonicalProfile.model_fields:
+        value = getattr(out, name)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            for ach in getattr(item, "achievements", []):
+                if not ach.id:
+                    ach.id = make(f"{name}.achievement", ach)
+            if not item.id:
+                item.id = make(name, item)
+    return out
+
+
 def _profile_hash(profile: CanonicalProfile, narrative: str | None) -> str:
     payload = {"profile": profile.model_dump(), "narrative": narrative or ""}
     blob = json.dumps(payload, sort_keys=True, ensure_ascii=False)
@@ -69,6 +98,7 @@ def confirm_profile(
     """Confirm a profile. Idempotent against the latest version only: same
     hash as latest returns it; otherwise creates version max+1 (even if an
     older version had the same hash)."""
+    profile = _fill_empty_ids(profile)
     content_hash = _profile_hash(profile, narrative)
     for attempt in range(2):
         latest = get_current_profile(session, user_id)
@@ -85,4 +115,7 @@ def confirm_profile(
             session.rollback()
             if attempt == 1:
                 raise
+        except Exception:
+            session.rollback()  # e.g. ValueError from build_chunks
+            raise
     raise RuntimeError("unreachable")  # pragma: no cover

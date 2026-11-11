@@ -57,3 +57,10 @@ def test_missing_id_raises():
     p = CanonicalProfile.model_validate({"experiences": [{"company": "A"}]})
     with pytest.raises(ValueError):
         build_chunks(p, None)
+
+
+def test_reserved_source_ref_rejected():
+    p = CanonicalProfile.model_validate(
+        {"projects": [{"id": "skills", "name": "X"}]})
+    with pytest.raises(ValueError):
+        build_chunks(p, None)
