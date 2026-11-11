@@ -9,6 +9,10 @@ class TextExtractError(Exception):
     """Raised when text cannot be extracted; message is user-facing (PT-BR)."""
 
 
+class UnsupportedTypeError(TextExtractError):
+    """The file is neither a PDF nor a DOCX."""
+
+
 def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
@@ -40,7 +44,7 @@ def extract_text(data: bytes, content_type: str, filename: str) -> str:
         reader = _docx_text
         kind = "DOCX"
     else:
-        raise TextExtractError("Tipo de arquivo não suportado. Envie um PDF ou DOCX.")
+        raise UnsupportedTypeError("Tipo de arquivo não suportado. Envie um PDF ou DOCX.")
     try:
         text = _normalize(reader(data))
     except Exception as exc:  # any library failure -> user-facing error

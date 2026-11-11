@@ -72,3 +72,13 @@ def test_corrupt_file_raises():
         extract_text(b"%PDF-1.4 garbage", "application/pdf", "cv.pdf")
     with pytest.raises(TextExtractError):
         extract_text(b"PK\x03\x04garbage", "application/zip", "cv.docx")
+
+
+def test_unsupported_type_is_specific_subclass():
+    from rumo_core.profile.text_extract import UnsupportedTypeError
+
+    with pytest.raises(UnsupportedTypeError):
+        extract_text(b"hello", "text/plain", "a.txt")
+    with pytest.raises(TextExtractError) as ei:
+        extract_text(make_pdf(None), "application/pdf", "a.pdf")
+    assert not isinstance(ei.value, UnsupportedTypeError)

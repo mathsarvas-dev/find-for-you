@@ -14,12 +14,23 @@ app = FastAPI(title="Rumo")
 async def db_unavailable(request: Request, exc: OperationalError) -> JSONResponse:
     # Raised both while resolving the session dependency and while querying
     # (e.g. Postgres still starting): degrade instead of a 500.
-    return JSONResponse(status_code=503, content={"status": "degraded", "db": "down"})
+    if request.url.path == "/health":
+        return JSONResponse(
+            status_code=503, content={"status": "degraded", "db": "down"}
+        )
+    return JSONResponse(
+        status_code=503, content={"detail": "Banco de dados indisponível"}
+    )
 
 
 def current_user_id() -> int:
     """Single point to swap for real authentication in the SaaS."""
     return get_settings().default_user_id
+
+
+from api.profile import router as profile_router  # noqa: E402
+
+app.include_router(profile_router)
 
 
 @app.get("/health")
