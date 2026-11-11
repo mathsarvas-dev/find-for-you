@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
@@ -5,6 +6,7 @@ from api.main import app, current_user_id
 from rumo_core.db import get_session
 
 
+@pytest.mark.db
 def test_health_ok():
     r = TestClient(app).get("/health")
     assert r.status_code == 200

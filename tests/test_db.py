@@ -1,6 +1,6 @@
 import pytest
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Integer, MetaData, Table, select, text
+from sqlalchemy import Column, Integer, MetaData, Table, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, mapped_column
 

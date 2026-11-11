@@ -1,3 +1,5 @@
+import pytest
+
 from rumo_core.llm.ratelimit import RateLimiter
 
 
@@ -44,3 +46,9 @@ async def test_window_slides():
     for _ in range(3):
         await rl.acquire()
     assert t.sleeps == []
+
+
+@pytest.mark.parametrize("n", [0, -1])
+def test_non_positive_max_raises(n):
+    with pytest.raises(ValueError):
+        RateLimiter(n)

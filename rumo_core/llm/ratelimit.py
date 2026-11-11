@@ -9,6 +9,8 @@ class RateLimiter:
     """Sliding-window limiter: at most max_per_minute acquisitions per 60 s."""
 
     def __init__(self, max_per_minute: int, clock=time.monotonic, sleep=asyncio.sleep):
+        if max_per_minute <= 0:
+            raise ValueError("max_per_minute must be > 0")
         self.max = max_per_minute
         self._clock = clock
         self._sleep = sleep

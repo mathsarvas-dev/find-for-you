@@ -1,4 +1,5 @@
 import asyncio
+import math
 import re
 
 import httpx
@@ -11,6 +12,7 @@ from rumo_core.llm.ratelimit import RateLimiter
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 MAX_429_ATTEMPTS = 5
 MAX_VALIDATION_ATTEMPTS = 2
+MAX_RETRY_AFTER_SECONDS = 60.0
 _FENCE = re.compile(r"^```[a-zA-Z0-9_-]*\s*\n?(.*?)\n?```\s*$", re.DOTALL)
 
 
@@ -25,11 +27,20 @@ def _retry_after(response: httpx.Response, attempt: int) -> float:
     if raw is not None:
         try:
             value = float(raw.strip())
+            if not math.isfinite(value) or value > MAX_RETRY_AFTER_SECONDS:
+                raise LLMRateLimited(f"Groq asked to wait too long (Retry-After={raw!r})")
             if value >= 0:
                 return value
         except ValueError:
             pass
     return 2**attempt
+
+
+def _is_json_validate_failed(response: httpx.Response) -> bool:
+    try:
+        return response.json()["error"]["code"] == "json_validate_failed"
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 class GroqProvider:
@@ -62,6 +73,8 @@ class GroqProvider:
                 if attempt < MAX_429_ATTEMPTS - 1:
                     await self._sleep(_retry_after(resp, attempt))
                 continue
+            if resp.status_code == 400 and _is_json_validate_failed(resp):
+                raise LLMInvalidResponse("Groq json_validate_failed")
             if resp.status_code != 200:
                 raise LLMError(f"Groq returned HTTP {resp.status_code}")
             try:
@@ -75,9 +88,9 @@ class GroqProvider:
             raise LLMError("GROQ_API_KEY is not set")
         last: Exception | None = None
         for _ in range(MAX_VALIDATION_ATTEMPTS):
-            content = await self._request(messages)
             try:
+                content = await self._request(messages)
                 return schema.model_validate_json(_strip_fences(content))
-            except ValidationError as exc:
+            except (ValidationError, LLMInvalidResponse) as exc:
                 last = exc
         raise LLMInvalidResponse(f"Invalid JSON from model: {last}") from last

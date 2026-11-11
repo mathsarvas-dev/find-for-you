@@ -106,3 +106,67 @@ async def test_missing_api_key_raises_without_request():
     with pytest.raises(LLMError, match="GROQ_API_KEY"):
         await p.complete_json(MSGS, Out)
     assert reqs == []
+
+
+def _jvf():
+    return httpx.Response(
+        400, json={"error": {"code": "json_validate_failed", "message": "bad json"}}
+    )
+
+
+async def test_json_validate_failed_400_then_valid_succeeds():
+    p, reqs, _ = make([_jvf(), httpx.Response(200, json=body(GOOD))])
+    assert await p.complete_json(MSGS, Out) == Out(name="a", score=3)
+    assert len(reqs) == 2
+
+
+async def test_json_validate_failed_twice_raises_invalid_response():
+    p, reqs, _ = make([_jvf(), _jvf()])
+    with pytest.raises(LLMInvalidResponse):
+        await p.complete_json(MSGS, Out)
+    assert len(reqs) == 2
+
+
+async def test_other_400_raises_llm_error_without_retry():
+    p, reqs, _ = make([httpx.Response(400, json={"error": {"code": "other"}})])
+    with pytest.raises(LLMError) as ei:
+        await p.complete_json(MSGS, Out)
+    assert not isinstance(ei.value, LLMInvalidResponse)
+    assert len(reqs) == 1
+
+
+async def test_500_raises_llm_error():
+    p, reqs, _ = make([httpx.Response(500, text="boom")])
+    with pytest.raises(LLMError):
+        await p.complete_json(MSGS, Out)
+    assert len(reqs) == 1
+
+
+async def test_transport_error_raises_llm_error():
+    def handler(request):
+        raise httpx.ConnectError("down")
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    p = GroqProvider(Settings(database_url="x", groq_api_key="k"), client, NoLimit())
+    with pytest.raises(LLMError):
+        await p.complete_json(MSGS, Out)
+
+
+@pytest.mark.parametrize("value", ["inf", "nan", "3600", "60.5"])
+async def test_retry_after_too_large_raises_rate_limited_without_sleep(value):
+    p, reqs, sleeps = make([httpx.Response(429, headers={"Retry-After": value})])
+    with pytest.raises(LLMRateLimited):
+        await p.complete_json(MSGS, Out)
+    assert sleeps == []
+    assert len(reqs) == 1
+
+
+async def test_retry_after_60_sleeps_60():
+    p, _, sleeps = make(
+        [
+            httpx.Response(429, headers={"Retry-After": "60"}),
+            httpx.Response(200, json=body(GOOD)),
+        ]
+    )
+    await p.complete_json(MSGS, Out)
+    assert sleeps == [60.0]

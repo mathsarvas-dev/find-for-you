@@ -1,3 +1,10 @@
+import os
+
+# Must run before any rumo_core import: db.py builds the engine at import time.
+os.environ.setdefault(
+    "DATABASE_URL", "postgresql+psycopg://rumo:rumo@localhost:5432/rumo"
+)
+
 import subprocess
 import sys
 
