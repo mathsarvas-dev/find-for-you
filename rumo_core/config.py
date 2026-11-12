@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     fetch_timeout_seconds: float = Field(20, gt=0)
     fetch_max_bytes: int = Field(20_000_000, gt=0)
     llm_fill_batch: int = Field(3, gt=0)
+    match_batch: int = Field(3, gt=0)
+    match_top_n: int = Field(30, gt=0)
+    match_weight_profile: float = Field(1.0, ge=0)
+    match_weight_query: float = Field(0.0, ge=0)
+    match_max_attempts: int = Field(3, gt=0)
     # Comma-separated list of browser origins allowed to call the API.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
