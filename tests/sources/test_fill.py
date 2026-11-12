@@ -139,6 +139,49 @@ def test_non_salary_numbers_rejected(text, lo, hi):
     assert out.salary_min is None and out.salary_max is None
 
 
+@pytest.mark.parametrize("lo,hi,ok", [
+    (120000, 150000, True),
+    (120000, None, True),  # lower bound only: true, conservative
+    (150000, None, False),
+    (150000, 150000, False),
+    (120000, 120000, False),
+])
+def test_endpoints_match_positionally(lo, hi, ok):
+    text = "Salary $120,000 - $150,000 per year"
+    r = FillResult(salary_min=Decimal(lo), salary_max=Decimal(hi) if hi else None,
+                   salary_currency="USD", salary_period="year")
+    out = validate_fill(r, text, view(description=text))
+    assert (out.salary_min is not None) is ok
+    if ok and hi is None:
+        assert out.salary_max is None
+
+
+def test_single_amount_span_rejects_claimed_max():
+    text = "Salary: $120,000 per year"
+    r = FillResult(salary_min=Decimal(120000), salary_max=Decimal(150000),
+                   salary_currency="USD")
+    assert validate_fill(r, text, view(description=text)).salary_min is None
+    r = FillResult(salary_min=Decimal(120000), salary_currency="USD")
+    assert validate_fill(r, text, view(description=text)).salary_min == 120000
+
+
+@pytest.mark.parametrize("text", [
+    "Remote work is not available for this role.",
+    "Remote is not an option.",
+    "Remote: no.",
+    "Home-Office ist nicht möglich.",
+    "This position isn't remote.",
+    "We don't offer remote work.",
+    "We cannot offer remote work.",
+    "A vaga não é 100% remota.",
+    "Trabalho remoto não está disponível.",
+    "Remote candidates will not be considered.",
+])
+def test_work_model_negations_rejected(text):
+    out = validate_fill(FillResult(work_model="remote"), text, view(description=text))
+    assert out.work_model == "unknown"
+
+
 def test_genuine_salary_accepted():
     text = "Salary: $120,000 - $150,000 per year"
     r = FillResult(

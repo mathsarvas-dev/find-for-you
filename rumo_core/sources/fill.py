@@ -104,18 +104,26 @@ _MODEL_KEYWORDS = {
     "onsite": re.compile(
         r"\bon[- ]?site\b|\bpresencial\b|\bin[- ]office\b|\bvor[- ]ort\b", re.I),
 }
+# negation right BEFORE the keyword ("not remote", "isn't remote", "não é 100% remota")
 _NEGATION = re.compile(
-    r"\b(?:not|no|never|nicht|kein\w*|n[aã]o)\s+(?:\w+\s+){0,2}$", re.I)
+    r"(?:\b(?:not|no|never|cannot|nicht|kein\w*|n[aã]o)|n[’']t)\s+(?:[\w%]+\s+){0,3}$", re.I)
+# negation right AFTER it, same sentence ("remote work is not available", "remote: no")
+_NEGATION_AFTER = re.compile(
+    r"^\s*:?\s*(?:(?:work|working|is|are|ist|sind|est[aá]|[eé]|will|would|can|candidates?|"
+    r"role|position|vaga|option|possible)\s+){0,4}"
+    r"(?:not|no|nein|never|nicht|n[aã]o|\w+n[’']t)\b", re.I)
 
 
 def _work_model_supported(model: str, text: str) -> bool:
-    """A keyword of `model` occurs in `text` outside a negation ("not remote")."""
+    """A keyword of `model` occurs in `text` outside a negation ("not remote",
+    "remote is not an option")."""
     pat = _MODEL_KEYWORDS.get(model)
     if pat is None:
         return False
     for m in pat.finditer(text):
-        clause = _SENTENCE_END.split(text[max(0, m.start() - 40) : m.start()])[-1]
-        if not _NEGATION.search(clause):
+        before = _SENTENCE_END.split(text[max(0, m.start() - 40) : m.start()])[-1]
+        after = _SENTENCE_END.split(text[m.end() : m.end() + 60])[0]
+        if not _NEGATION.search(before) and not _NEGATION_AFTER.match(after):
             return True
     return False
 
@@ -161,8 +169,9 @@ def _validated_salary(r: FillResult, description: str):
     if hi is not None and lo > hi:
         return None
     for span in find_salary_spans(description):
-        amounts = {a for a in (span.min, span.max) if a is not None}
-        if span.currency != cur or not all(v in amounts for v in claimed):
+        # endpoints must match positionally: min is the span's lower bound, max
+        # (if claimed) its upper bound; a min-only claim on a range is true
+        if span.currency != cur or lo != span.min or (hi is not None and hi != span.max):
             continue
         # a period word must back the claimed period, otherwise drop the period
         period = r.salary_period if r.salary_period == span.period else None

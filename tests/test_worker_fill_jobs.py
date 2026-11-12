@@ -328,13 +328,20 @@ async def test_260_jobs_one_needing_one_call_per_tick(uid):
 
 
 async def test_60_jobs_two_needing_two_calls_one_attempt_each(uid):
-    needing = [_job(uid, 0), _job(uid, 1)]
-    for i in range(2, 60):
-        _job(uid, i, work_model="remote")
+    # the 2 needing jobs are the newest, so they sit in the FIRST (full, 50-row)
+    # window; 10 older rows force a second window that would re-pick them
+    for i in range(60):
+        _job(uid, i, work_model="unknown" if i >= 58 else "remote")
+    needing = [_job_id(uid, 58), _job_id(uid, 59)]
     llm = FakeLLM(exc=LLMInvalidResponse("bad"))
     assert await _run(uid, llm) == 2
     assert len(llm.calls) == 2
     assert [_get(j).fill_attempts for j in needing] == [1, 1]
+
+
+def _job_id(uid, i):
+    with SessionLocal() as s:
+        return s.scalar(select(Job.id).where(Job.user_id == uid, Job.external_id == f"e{i}"))
 
 
 async def test_persisted_amounts_have_two_decimals(uid):

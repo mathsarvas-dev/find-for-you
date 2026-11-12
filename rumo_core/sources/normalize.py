@@ -773,11 +773,6 @@ def find_salary_spans(text: str) -> list[SalaryInfo]:
     return spans
 
 
-def find_salary_amounts(text: str) -> list[Decimal]:
-    """Amounts (min and max) of all salary-shaped spans; see find_salary_spans."""
-    return [a for s in find_salary_spans(text) for a in (s.min, s.max) if a is not None]
-
-
 # --------------------------------------------------------------------------
 # normalize_job
 # --------------------------------------------------------------------------
