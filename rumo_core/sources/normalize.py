@@ -21,7 +21,7 @@ from rumo_core.sources.base import RawJob
 _MAX_TITLE = 300
 _MAX_LOCATION = 300
 _MAX_DEPARTMENT = 200
-_MAX_HTML = 1_000_000
+_MAX_HTML = 200_000
 _MAX_PAY_TEXT = 60_000
 _MAX_SCAN = 20_000
 _MAX_CANDIDATES = 300
@@ -126,8 +126,55 @@ def _tidy(text: str) -> str:
     return "\n".join(res).strip()
 
 
+_TAG_NAME = re.compile(r"(/?)([A-Za-z][A-Za-z0-9]{0,15})")
+
+
+def _sanitize_html(html: str) -> str:
+    """Linear pre-pass so the stdlib parser cannot go quadratic on junk markup.
+
+    Comments and declarations are dropped, tags are rewritten to bare names
+    (attributes are never needed), and any "<" that does not open a tag closed
+    by ">" before the next "<" is escaped to "&lt;".
+    """
+    out: list[str] = []
+    n = len(html)
+    pos = last = 0
+    gt = -1  # cached index of the next ">" at or after the scan position (n + 1: none)
+    while True:
+        i = html.find("<", pos)
+        if i == -1:
+            break
+        pos = i + 1
+        if html.startswith("<!--", i):
+            out.append(html[last:i])
+            j = html.find("-->", i + 4)
+            if j == -1:
+                last = n
+                break
+            last = pos = j + 3
+            continue
+        m = _TAG_NAME.match(html, i + 1)
+        bang = html[i + 1 : i + 2] in ("!", "?")
+        if gt < i:
+            gt = html.find(">", i)
+            if gt == -1:
+                gt = n + 1
+        if (not m and not bang) or gt > n or html.find("<", i + 1, gt) != -1:
+            out.append(html[last:i])
+            out.append("&lt;")
+            last = i + 1
+            continue
+        out.append(html[last:i])
+        if m and not bang:
+            selfclose = "/" if gt > 0 and html[gt - 1] == "/" and not m.group(1) else ""
+            out.append(f"<{m.group(1)}{m.group(2)}{selfclose}>")
+        last = pos = gt + 1
+    out.append(html[last:])
+    return "".join(out)
+
+
 def html_to_text(html: str) -> str:
-    """Plain text from HTML. Never raises; input is capped at 1 MB.
+    """Plain text from HTML. Never raises; input is capped at 200,000 chars.
 
     Drops script/style/noscript/template, turns block tags into line breaks and
     list items into "- " bullets, decodes entities and collapses whitespace.
@@ -135,7 +182,7 @@ def html_to_text(html: str) -> str:
     """
     if not html or not isinstance(html, str):
         return ""
-    html = html[:_MAX_HTML]
+    html = _sanitize_html(html[:_MAX_HTML])
     try:
         parser = _TextParser()
         parser.feed(html)
@@ -218,7 +265,7 @@ _REMOTE_PREFIX = re.compile(
     r"^(?:fully )?(?:remote|remoto)(?: ?[-–—:,] ?| ?\( ?| (?:in|within|from) | )(?P<r>.+?) ?\)?$",
     re.I,
 )
-_REMOTE_SUFFIX = re.compile(r"^(?P<r>.+?) ?[-–—,(]? ?\(? ?(?:remote|remoto) ?\)?$", re.I)
+_REMOTE_SUFFIX = re.compile(r"^(?P<r>.+?) ?[-–—,(]? ?\(? ?(?:remote|remoto|hybrid|on-?site|presencial) ?\)?$", re.I)
 
 
 def _fold(text: str) -> str:
@@ -288,7 +335,16 @@ def _parse_single(text: str) -> tuple[str | None, str | None]:
     return code, city
 
 
+_REGION_TOKENS = {t for w in _REGION_WORDS for t in w.split()} | {"fully", "only", "on", "site", "onsite", "presencial", "office", "in"}
+_MODEL_PREFIX = re.compile(r"^(?:hybrid|on-?site|presencial|h[ií]brid[oa]|vor ort|in-?office)(?: ?[-–—:,] ?| )(?=.)", re.I)
+
+
+def _is_region(part: str) -> bool:
+    return all(t in _REGION_TOKENS for t in re.findall(r"[a-z]+", _fold(part)))
+
+
 def _parse_part(part: str) -> tuple[str | None, str | None]:
+    part = _MODEL_PREFIX.sub("", part, count=1)
     m = _REMOTE_PREFIX.match(part) or _REMOTE_SUFFIX.match(part)
     return _parse_single(m.group("r") if m else part)
 
@@ -308,16 +364,17 @@ def parse_location(text: str) -> tuple[str | None, str | None]:
         return None, None
     results = [_parse_part(p) for p in parts]
     countries = {c for c, _ in results if c}
-    if any(not c and p.split(",")[-1].strip()[-2:] in _AMBIGUOUS and p[-3:-2] in " ,-" for (c, _), p in zip(results, parts)):
-        return None, None  # an unresolved "..., CA"-style part may be another country
     if len(countries) != 1:
         return None, None
     country = next(iter(countries))
     if len(parts) == 1:
         return results[0]
+    # several locations: any unresolved part that is not a pure region/remote
+    # word ("Toronto, ON", a bare city...) may be another country -> unknown
+    if not all(c or _is_region(p) for (c, _), p in zip(results, parts)):
+        return None, None
     cities = {city for c, city in results if c}
-    others_ok = all(c or _fold(p) in _REGION_WORDS or _fold(p).startswith("remote") for (c, _), p in zip(results, parts))
-    city = next(iter(cities)) if len(cities) == 1 and None not in cities and others_ok else None
+    city = next(iter(cities)) if len(cities) == 1 and None not in cities else None
     return country, city
 
 
@@ -342,7 +399,7 @@ _ROLE = r"(?:role|position|job|opportunity)"
 _FULLY = r"(?:fully|completely|entirely)"
 _EXPLICIT = {
     "remote": re.compile(
-        rf"\bthis\s+{_ROLE}\s+is\s+(?:an?\s+)?(?:{_FULLY}\s+|100\s?%\s+)?remote\b(?!-)"
+        rf"\b(?:this|the|our)\s+{_ROLE}\s+is\s+(?:an?\s+)?(?:{_FULLY}\s+|100\s?%\s+)?remote\b(?![- ]?(?:friendly|optional|eligible))"
         rf"|\b(?:{_FULLY}|100\s?%)\s+remote\s+{_ROLE}\b"
         rf"|\bthis\s+is\s+an?\s+remote\s+{_ROLE}\b"
         r"|\bremote[- ]first\s+(?:role|position|job)\b"
@@ -353,16 +410,16 @@ _EXPLICIT = {
     ),
     "hybrid": re.compile(
         r"\bhybrid\s+(?:role|position|job|work\s+model|work\s+schedule|setup|model)\b"
-        r"|\bthis\s+(?:role|position|job)\s+is\s+(?:an?\s+)?hybrid\b"
-        r"|\bthis\s+is\s+an?\s+hybrid\b"
+        r"|\b(?:this|the|our)\s+(?:role|position|job)\s+is\s+(?:an?\s+)?hybrid\b"
+        r"|\bthis\s+is\s+an?\s+hybrid\s+(?:role|position|job)\b"
         r"|\b(?:vaga|posi[cç][aã]o|modelo|regime|trabalho)\s+h[ií]brid[oa]\b"
         r"|\bhybrid(?:es)?\s+(?:arbeit\w*|modell)\b",
         re.I,
     ),
     "onsite": re.compile(
         r"\bon-?site\s+(?:required|role|position)\b"
-        r"|\bthis\s+(?:role|position|job)\s+is\s+(?:an?\s+)?on-?site\b"
-        r"|\bthis\s+is\s+an?\s+on-?site\b"
+        r"|\b(?:this|the|our)\s+(?:role|position|job)\s+is\s+(?:an?\s+)?on-?site\b"
+        r"|\bthis\s+is\s+an?\s+on-?site\s+(?:role|position|job)\b"
         r"|\b(?:vaga|trabalho|modelo|regime)\s+presencial\b"
         r"|\b(?:100\s?%|totalmente)\s+presencial\b"
         r"|\b(?:arbeit\w*|stelle|t[aä]tigkeit)\s+vor ort\b",
@@ -515,11 +572,11 @@ _CUR = (
     rf"|(?<![A-Za-z])(?:{_CCY})(?![A-Za-z]))"
 )
 _SUF = rf"(?:€|£|zł|(?<![A-Za-z])(?:{_CCY}|euros?|reais|dollars?)(?![A-Za-z]))"
-_NUM = r"(?:\d{1,3}(?:[.,'   ]\d{3})+|\d{1,9})(?:[.,]\d{1,2})?(?![.,]?\d)(?![  ']\d)"
+_NUM = r"(?:\d{1,3}(?:[.,]\d{3}){1,3}|\d{1,3}(?:[ '\u00a0\u202f]\d{3}){1,2}|\d{1,9})(?:[.,]\d{1,2})?(?![.,]?\d)(?![ \u00a0']\d)"
 _K = r"[kK](?![A-Za-z0-9])"
 _SEP = r"(?:\s{0,3}[-–—]\s{0,3}|\s(?:to|bis|a|at[eé])\s)"
 _SALARY_RE = re.compile(
-    rf"(?P<c1>{_CUR})\s?(?P<a1>{_NUM})(?P<k1>{_K})?"
+    rf"(?P<c1>{_CUR})\s?(?P<a1>{_NUM})(?P<k1>{_K})?(?:\s?/\s?[A-Za-z]{{1,5}}(?=\s{{0,3}}[-–—]))?"
     rf"(?:{_SEP}(?P<c2>{_CUR})?\s?(?P<a2>{_NUM})(?P<k2>{_K})?)?"
     r"|"
     rf"(?<![\d.,])(?P<b1>{_NUM})(?P<bk1>{_K})?(?:\s?(?P<c3a>{_SUF}))?"
@@ -536,7 +593,7 @@ _PERK = (
 _NONPAY_BEFORE = re.compile(rf"\b(?:{_EQUITY}|{_PERK})s?\b", re.I)
 # After the amount only an adjacent word counts, so "$120k + equity" or
 # "$120k + $1,500 learning budget" do not kill the real salary.
-_NONPAY_AFTER = re.compile(rf"^\s{{0,3}}(?:(?:in|of|per|annual|target|\w+)\s+)?(?:{_EQUITY}|{_PERK})s?\b", re.I)
+_NONPAY_AFTER = re.compile(rf"^\s{{0,3}}(?P<gap>(?:\w+\s+){{0,3}}?)(?:{_EQUITY}|{_PERK})s?\b", re.I)
 _UPTO = re.compile(r"(?:up\s+to|bis\s+zu|at[eé]|maximum|max\.?|no\s+more\s+than|capped\s+at)\s*$", re.I)
 _CODE_BEFORE = re.compile(rf"(?<![A-Za-z])({_CCY})\s?$")
 _CODE_AFTER = re.compile(rf"^\s?\(?({_CCY})(?![A-Za-z])")
@@ -613,7 +670,12 @@ def _candidate(text: str, m: re.Match):
     before = text[max(0, s - 80) : s]
     if _UNIT_AFTER.match(after) or _UPTO.search(before[-20:]):
         return None
-    if _NONPAY_BEFORE.search(_clause_before(text, s, 40)) or _NONPAY_AFTER.match(after):
+    if _NONPAY_BEFORE.search(_clause_before(text, s, 40)):
+        return None
+    na = _NONPAY_AFTER.match(after)
+    # bonus/equity/perk word right after the amount: skip it unless a salary
+    # word sits in its own window (between amount and that word, or just before)
+    if na and not (_PAY_RE.search(na.group("gap")) or _PAY_RE.search(before[-60:].rsplit(". ", 1)[-1])):
         return None
     explicit = _CODE_BEFORE.search(before[-5:]) or _CODE_AFTER.match(after)
     if explicit:

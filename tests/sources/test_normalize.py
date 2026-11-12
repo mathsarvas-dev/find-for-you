@@ -385,7 +385,7 @@ def test_parse_location_multi_country_is_unknown(text):
 @pytest.mark.parametrize(
     "text, expected",
     [
-        ("Berlin; Munich, Germany", ("DE", None)),
+        ("Berlin; Munich, Germany", (None, None)),
         ("Remote, Germany; Remote, Germany", ("DE", None)),
         ("Berlin, Germany; Berlin, Germany", ("DE", "Berlin")),
         ("Germany, Berlin", (None, None)),
@@ -543,4 +543,85 @@ def test_public_functions_are_fast_on_adversarial_input(payload):
     extract_salary(payload)
     has_pay_context(payload)
     normalize_job(make_raw(title=payload, location_text=payload, description_html=payload, department=payload))
+    assert time.perf_counter() - start < 1.5
+
+
+# ------------------------------------------------- fix round 2
+@pytest.mark.parametrize(
+    "text",
+    ["Toronto, ON / Austin, TX", "Austin, TX; Toronto, ON", "Austin, TX / London", "Berlin; Munich, Germany"],
+)
+def test_parse_location_unresolved_part_in_multi_location_is_unknown(text):
+    assert parse_location(text) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Hybrid - Berlin, Germany", ("DE", "Berlin")),
+        ("On-site - Austin, TX", ("US", "Austin")),
+        ("Hybrid: London, UK", ("GB", "London")),
+        ("Berlin, Germany (Hybrid)", ("DE", "Berlin")),
+        ("Presencial - São Paulo, Brasil", ("BR", "São Paulo")),
+    ],
+)
+def test_parse_location_strips_work_model_prefix(text, expected):
+    assert parse_location(text) == expected
+
+
+@pytest.mark.parametrize(
+    "desc, expected",
+    [
+        ("This is a hybrid of research and engineering.", "unknown"),
+        ("This is an on-site interview process.", "unknown"),
+        ("This is a hybrid role.", "hybrid"),
+        ("This is an on-site role.", "onsite"),
+        ("The position is remote.", "remote"),
+        ("The role is fully remote.", "remote"),
+        ("The role is on-site.", "onsite"),
+        ("The position is hybrid.", "hybrid"),
+        ("The role is remote friendly.", "unknown"),
+    ],
+)
+def test_work_model_description_needs_role_noun(desc, expected):
+    assert detect_work_model("Berlin", "Engineer", desc) == expected
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Eligible for $10,000 - $15,000 annual performance bonus", None),
+        ("$20,000 - $30,000 yearly performance bonus, salary $100,000-$120,000", (D(100000), D(120000), "USD", None)),
+        ("$100,000-$120,000 annual target bonus", None),
+        ("Salary range: $80/hr - $100/hr", (D(80), D(100), "USD", "hour")),
+        ("Salary $100,000 salary plus stipend", (D(100000), None, "USD", None)),
+        ("Base $100k-$120k, plus equity of $50k", (D(100000), D(120000), "USD", None)),
+    ],
+)
+def test_extract_salary_round2(text, expected):
+    assert sal(text) == expected
+
+
+def test_html_sanitizer_keeps_normal_markup():
+    assert html_to_text('<p class="x" title="ab">Hello <b>big</b> &amp; 1 < 2</p><!-- c --><p>Next<br/>line</p>').startswith("Hello big & 1 < 2")
+    assert html_to_text("a <!-- never closed") == "a"
+    assert html_to_text("x<y and <z") == "x<y and <z"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "<a " * 70_000, "<!--" * 50_000, '<a href="' * 30_000, "<div" * 60_000, "<a x='>" * 30_000, '<a x=">' * 30_000,
+        "<script>" * 30_000, "<style>" * 30_000, "<![CDATA[" * 20_000, "123 " * 50_000, "100'000 " * 25_000,
+        "Salary: " + "100 000 " * 25_000, "1 000" * 40_000, "$1,000 " * 28_000, "1.000.000.000," * 14_000,
+    ],
+    ids=["a-open", "comment-open", "href-open", "div-open", "squote", "dquote", "script-open", "style-open", "cdata", "3digit-chain", "apos-chain", "salary-space-chain", "nbsp-chain", "dollar-groups", "dot-chain"],
+)
+def test_round2_adversarial_shapes_are_fast(payload):
+    start = time.perf_counter()
+    html_to_text(payload)
+    extract_salary(payload)
+    parse_location(payload)
+    detect_work_model(payload, payload, payload)
+    normalize_job(make_raw(title=payload, location_text=payload, description_html=payload))
     assert time.perf_counter() - start < 1.5
