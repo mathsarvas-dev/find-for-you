@@ -7,6 +7,13 @@ from rumo_core.profile.schema import CanonicalProfile, Experience
 
 PREFERENCE_KEYS = ("salary_expectation", "work_authorization", "availability", "relocation")
 
+_PREF_LABELS = {
+    "salary_expectation": "pretensão salarial",
+    "work_authorization": "autorização de trabalho / visto",
+    "availability": "disponibilidade para começar",
+    "relocation": "disposição para mudança de cidade",
+}
+
 _DIGIT = re.compile(r"\d")
 
 _EXP_BASE = 10
@@ -94,6 +101,6 @@ def detect_gaps(
     for i, key in enumerate(PREFERENCE_KEYS):
         if key not in answered_preferences:
             gaps.append(_gap(
-                f"pref_{key}", None, f"preferência ainda não informada: {key}", _PRIO_PREF_BASE + i,
+                f"pref_{key}", None, f"preferência ainda não informada: {_PREF_LABELS[key]}", _PRIO_PREF_BASE + i,
             ))
     return sorted(gaps, key=lambda g: (g.priority, g.id))

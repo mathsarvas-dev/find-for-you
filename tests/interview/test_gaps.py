@@ -109,3 +109,15 @@ def test_gap_ids_unique():
     gaps = detect_gaps(CanonicalProfile(experiences=exps))
     ids = [g.id for g in gaps]
     assert len(ids) == len(set(ids))
+
+
+def test_preference_hints_are_pt_br_labels_without_raw_keys():
+    gaps = [g for g in detect_gaps(CanonicalProfile()) if g.kind.startswith("pref_")]
+    assert len(gaps) == len(PREFERENCE_KEYS)
+    for g in gaps:
+        key = g.kind.removeprefix("pref_")
+        assert key not in g.hint
+        assert "_" not in g.hint
+    hints = " ".join(g.hint for g in gaps)
+    for label in ("pretensão salarial", "visto", "começar", "mudança de cidade"):
+        assert label in hints

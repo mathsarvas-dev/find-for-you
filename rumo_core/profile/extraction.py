@@ -1,9 +1,9 @@
 """LLM-based resume -> CanonicalProfile extraction."""
 
 import json
-import re
 
 from rumo_core.llm.base import LLMProvider
+from rumo_core.profile.prompting import wrap_untrusted
 from rumo_core.profile.schema import CanonicalProfile, assign_ids, blank_ids
 
 _SCHEMA_JSON = json.dumps(CanonicalProfile.model_json_schema(), ensure_ascii=False)
@@ -30,10 +30,9 @@ async def extract_profile(
     truncated = len(text) > max_chars
     if truncated:
         text = text[:max_chars]
-    text = re.sub(r"</curriculo", r"<\/curriculo", text, flags=re.IGNORECASE)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": f"<curriculo>\n{text}\n</curriculo>"},
+        {"role": "user", "content": wrap_untrusted("curriculo", text)},
     ]
     profile = await llm.complete_json(messages, CanonicalProfile)
     profile = profile.model_copy(update={"notes": []})  # notes only come from the interview
