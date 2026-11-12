@@ -1,4 +1,5 @@
 import json
+import time
 from dataclasses import FrozenInstanceError, fields
 from decimal import Decimal
 from pathlib import Path
@@ -76,7 +77,7 @@ def test_html_to_text_real_fixture_snippet():
         ("Remote (Brazil)", ("BR", None)),
         ("US-Remote", ("US", None)),
         ("Remote, United States", ("US", None)),
-        ("Remote, Canada; Remote, United States", ("CA", None)),
+        ("Remote, Canada; Remote, United States", (None, None)),
         ("Remote, EMEA", (None, None)),
         ("Remote", (None, None)),
         ("Anywhere", (None, None)),
@@ -87,7 +88,8 @@ def test_html_to_text_real_fixture_snippet():
         ("Springfield, IL", (None, None)),
         ("Berlin or Remote", (None, None)),
         ("Berlin, DE", ("DE", "Berlin")),
-        ("San Francisco, CA | Seattle, WA", ("US", "San Francisco")),
+        ("San Francisco, CA | Seattle, WA", ("US", None)),
+        ("San Francisco, CA", ("US", "San Francisco")),
         ("Toronto, CA", ("CA", "Toronto")),
         ("Dublin, IE", ("IE", "Dublin")),
         ("Munich, Deutschland", ("DE", "Munich")),
@@ -128,7 +130,7 @@ def test_parse_location(text, expected):
         ("Berlin", "Engineer", "This is a hybrid role, 2 days per week.", "hybrid"),
         ("Lisboa", "Engenheiro", "Vaga presencial em Lisboa.", "onsite"),
         ("Berlin", "Engineer", "On-site required, five days.", "onsite"),
-        ("Berlin", "Engineer", "Fully remote. Also a hybrid role is available.", "unknown"),
+        ("Berlin", "Engineer", "This is a fully remote role. Also a hybrid role is available.", "unknown"),
         ("Remote, US", "Engineer", "On-site required.", "remote"),
     ],
 )
@@ -221,9 +223,9 @@ def sal(text):
         ("The range is $120-150k a year.", (D(120000), D(150000), "USD", "year")),
         ("€60.000 – 80.000 pro Jahr", (D(60000), D(80000), "EUR", "year")),
         ("Gehalt: 60.000 bis 80.000 € brutto", (D(60000), D(80000), "EUR", None)),
-        ("R$ 8.000 por mês", (D(8000), None, "BRL", "month")),
+        ("Salário: R$ 8.000 por mês", (D(8000), None, "BRL", "month")),
         ("Salário: R$ 8.000 a R$ 10.000", (D(8000), D(10000), "BRL", None)),
-        ("Pay: $45/hour", (D(45), None, "USD", "hour")),
+        ("Salary: $45/hour", (D(45), None, "USD", "hour")),
         ("Compensation of $45.50 per hour", (D("45.50"), None, "USD", "hour")),
         ("Pay range 1.000,50 EUR monthly", (D("1000.50"), None, "EUR", "month")),
         ("Salary £50,000 to £60,000", (D(50000), D(60000), "GBP", None)),
@@ -268,7 +270,9 @@ def test_extract_salary_returns_salaryinfo_with_decimals():
         ("Gehalt nach Vereinbarung", True),
         ("Salário compatível", True),
         ("Remuneração a combinar", True),
-        ("Paid $45/hour", True),
+        ("Paid $45/hour", False),
+        ("annual leave, hourly updates, per year", False),
+        ("Vergütung nach Absprache", True),
         ("We love pets and remote work", False),
         ("", False),
     ],
@@ -347,11 +351,14 @@ def test_normalize_all_real_fixture_jobs(name, capsys):
 def test_real_fixture_concrete_expectations():
     gl = {(j.title, j.location_text): normalize_job(j) for j in fixture_jobs("gitlab")}
     n = gl[("Associate Renewals Manager, SMB", "Remote, Canada; Remote, United States")]
-    assert (n.country, n.work_model, n.seniority, n.language) == ("CA", "remote", "manager", "en")
+    # two countries in the location -> unknown (the salary is US-only)
+    assert (n.country, n.work_model, n.seniority, n.language) == (None, "remote", "manager", "en")
     assert n.department == "Renewals"
     assert n.salary_known and n.salary_currency == "USD" and n.salary_min == D(53760) and n.salary_max == D(105000)
     n = gl[("Backend Engineer (Ruby), Plan: Spec-Driven Development", "Remote, United Kingdom")]
     assert (n.country, n.city, n.work_model, n.seniority) == ("GB", None, "remote", "unknown")
+    n = gl[("Backend Engineer (Ruby), Plan: Spec-Driven Development", "Remote, Poland")]
+    assert (n.country, n.salary_currency, n.salary_min, n.salary_max) == ("PL", "PLN", D(272000), D(408000))
 
     an = {(j.title, j.location_text): normalize_job(j) for j in fixture_jobs("anthropic")}
     n = an[("Account Executive, Startups", "Dublin, IE")]
@@ -359,4 +366,181 @@ def test_real_fixture_concrete_expectations():
     n = an[("Account Executive - Public Sector (ASEAN)", "Singapore")]
     assert n.country == "SG" and not n.salary_known
     n = an[("Activation Manager, Beneficial Deployments", "San Francisco, CA | New York City, NY")]
-    assert (n.country, n.city, n.seniority) == ("US", "San Francisco", "manager")
+    assert (n.country, n.city, n.seniority) == ("US", None, "manager")
+
+
+# ------------------------------------------------- fix round 1: new behaviours
+@pytest.mark.parametrize(
+    "text",
+    [
+        "USA, Canada", "Remote (US, Canada)", "Germany, Austria, Switzerland", "Brazil, Argentina",
+        "Spain, Portugal", "UK, Ireland", "Berlin, Germany; Paris, France", "Remote - US or Canada",
+        "Canada, Germany", "Germany, NY", "Remote, US; Remote, CA",
+    ],
+)
+def test_parse_location_multi_country_is_unknown(text):
+    assert parse_location(text) == (None, None)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Berlin; Munich, Germany", ("DE", None)),
+        ("Remote, Germany; Remote, Germany", ("DE", None)),
+        ("Berlin, Germany; Berlin, Germany", ("DE", "Berlin")),
+        ("Germany, Berlin", (None, None)),
+    ],
+)
+def test_parse_location_same_country_repeated(text, expected):
+    assert parse_location(text) == expected
+
+
+@pytest.mark.parametrize(
+    "title, expected",
+    [
+        ("Hybrid Cloud Engineer", "unknown"),
+        ("Remote Support Engineer", "unknown"),
+        ("Remote Sensing Scientist", "unknown"),
+        ("Remote Monitoring Technician", "unknown"),
+        ("Remotely Operated Vehicle Pilot", "unknown"),
+        ("Scientist, Remote Sensing", "unknown"),
+        ("Engineer (Remote)", "remote"),
+        ("Engineer [Hybrid]", "hybrid"),
+        ("Engineer - Remote", "remote"),
+        ("Engineer | Hybrid", "hybrid"),
+        ("Engineer, Remote", "remote"),
+        ("Engineer Remote", "remote"),
+        ("Remote - Senior Engineer", "remote"),
+        ("Engenheiro Híbrida", "hybrid"),
+    ],
+)
+def test_work_model_title_false_positives(title, expected):
+    assert detect_work_model("", title, "") == expected
+
+
+@pytest.mark.parametrize(
+    "desc, expected",
+    [
+        ("We build tools for fully remote teams.", "unknown"),
+        ("Our customers are 100% remote teams.", "unknown"),
+        ("We are a fully remote company; this role is based in our Berlin office.", "unknown"),
+        ("You can work fully remote on Fridays.", "unknown"),
+        ("This role is remote-friendly.", "unknown"),
+        ("This role is fully remote.", "remote"),
+        ("This is a 100% remote position.", "remote"),
+        ("A fully remote role with flexible hours.", "remote"),
+        ("This is a remote position.", "remote"),
+        ("Remote-first role.", "remote"),
+        ("Esta vaga é 100% remota.", "remote"),
+        ("Diese Stelle ist komplett remote.", "remote"),
+        ("Vaga híbrida em São Paulo.", "hybrid"),
+        ("This role is not remote.", "unknown"),
+        ("This is not a fully remote role.", "unknown"),
+    ],
+)
+def test_work_model_description_requires_role_statement(desc, expected):
+    assert detect_work_model("Berlin", "Engineer", desc) == expected
+
+
+@pytest.mark.parametrize(
+    "title",
+    ["Chief of Staff", "Assistant to the Director", "Director's Assistant", "Executive Assistant to the VP", "Assistente do Diretor"],
+)
+def test_seniority_exclusions(title):
+    assert detect_seniority(title) == "unknown"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("Compensation: $100,000 - $120,000 + equity", (D(100000), D(120000), "USD", None)),
+        ("Salary $100,000 - $120,000 + $20k bonus", (D(100000), D(120000), "USD", None)),
+        ("Salary: CHF 100'000 - 120'000", (D(100000), D(120000), "CHF", None)),
+        ("Gehalt: 60 000 - 80 000 EUR", (D(60000), D(80000), "EUR", None)),
+        ("Salary: USD$100,000-$120,000", (D(100000), D(120000), "USD", None)),
+        ("Gehalt 55.000€ - 65.000€", (D(55000), D(65000), "EUR", None)),
+        ("Salary: 272,000 - 408,000 PLN", (D(272000), D(408000), "PLN", None)),
+        ("Poland base salary range: 248,000zł - 372,000zł", (D(248000), D(372000), "PLN", None)),
+        ("Salary 800 000 - 900 000 SEK", (D(800000), D(900000), "SEK", None)),
+        ("Salary $100,000. Learning budget $2,000-$3,000.", (D(100000), None, "USD", None)),
+        # must be None
+        ("$1,500 learning budget", None),
+        ("Learning budget of $1,000-$2,000 per year", None),
+        ("$2,000 home office stipend", None),
+        ("Relocation allowance: $5,000 - $10,000", None),
+        ("We offer a $500 wellness allowance, salary competitive", None),
+        ("Gift cards of $50-$100 per year", None),
+        ("Salary up to $150k", None),
+        ("Gehalt bis zu 90.000 €", None),
+        ("Salário até R$ 12.000", None),
+        ("Salary: maximum $200,000", None),
+        ("The role pays $100,000 per year", None),
+        ("Annual $100,000", None),
+        ("$100 20 widgets salary", None),
+    ],
+)
+def test_extract_salary_fix_round(text, expected):
+    assert sal(text) == expected
+
+
+def test_extract_salary_conflicting_currency_ranges_is_none():
+    assert extract_salary("Salary: $100k-$120k USD. Poland: 300,000 - 400,000 PLN") is None
+
+
+def test_html_to_text_structure_fixes():
+    assert html_to_text("<table><tr><td>a</td><td>b</td></tr></table>") == "a b"
+    assert html_to_text("<ul><li></li><li>x</li><li> </li></ul>after") == "- x\n\nafter"
+    assert html_to_text("<ul><li></li></ul><p>Next</p>") == "Next"
+    assert html_to_text("<ul><li>Parent<ul><li>Child</li></ul></li><li>Two</li></ul>") == "- Parent\n- Child\n- Two"
+    assert "\x01" not in html_to_text("<li>a\x01b</li>")
+
+
+def test_fingerprint_keeps_plus_and_hash():
+    fps = {normalize_job(make_raw(title=t)).fingerprint for t in ("C++ Engineer", "C Engineer", "C# Engineer")}
+    assert len(fps) == 3
+
+
+def test_content_hash_field_boundaries_do_not_collide():
+    a = normalize_job(make_raw(title="a\x1fb", location_text="c")).content_hash
+    b = normalize_job(make_raw(title="a", location_text="b\x1fc")).content_hash
+    assert a != b
+
+
+def test_normalize_job_handles_none_fields():
+    n = normalize_job(make_raw(location_text=None, title=None, department=None))
+    assert n.country is None and n.seniority == "unknown"
+
+
+# ------------------------------------------------------------ timing / ReDoS
+BIG = 200_000
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "1" * BIG,
+        "$1 " * (BIG // 3),
+        "a" + " " * BIG + "-(remote!",
+        " " * BIG + "x",
+        "(" * BIG,
+        "<div>" * (BIG // 5),
+        "<li>" * (BIG // 4) + "x" + "</li>" * (BIG // 5),
+        "&" * BIG,
+        "$1,1" * (BIG // 4),
+        "1 " * (BIG // 2) + "EUR",
+        "Remote " * (BIG // 7),
+        "salary " * (BIG // 7) + "$1",
+    ],
+    ids=["digits", "dollar1", "spaces-dash-remote", "ws-letter", "parens", "nested-div", "nested-li", "amp", "dollar-comma", "digit-space", "remote-rep", "salary-rep"],
+)
+def test_public_functions_are_fast_on_adversarial_input(payload):
+    start = time.perf_counter()
+    html_to_text(payload)
+    parse_location(payload)
+    detect_work_model(payload, payload, payload)
+    detect_seniority(payload)
+    detect_language(payload)
+    extract_salary(payload)
+    has_pay_context(payload)
+    normalize_job(make_raw(title=payload, location_text=payload, description_html=payload, department=payload))
+    assert time.perf_counter() - start < 1.5
