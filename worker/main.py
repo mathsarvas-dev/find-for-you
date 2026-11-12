@@ -74,12 +74,16 @@ async def main() -> None:
     from rumo_core.config import get_settings
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
+    from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
     settings = get_settings()
     reset = await retry_startup(lambda: reset_stuck_imports(SessionLocal))
     if reset:
         logger.info("reset %d stuck imports to pending", reset)
+    reset_iv = await retry_startup(lambda: reset_working_sessions(SessionLocal))
+    if reset_iv:
+        logger.info("reset %d working interview sessions to generating", reset_iv)
     llm = build_llm(settings)
     embedder = BgeM3Embedder()  # model loads lazily, only when chunks are pending
     registry = JobRegistry()
@@ -88,6 +92,9 @@ async def main() -> None:
         "extract_imports",
         partial(process_pending_imports, SessionLocal, llm, settings.extract_max_chars),
         3,
+    )
+    registry.register(
+        "interview_turns", partial(process_interview_turns, SessionLocal, llm), 3
     )
     registry.register(
         "embed_chunks",
