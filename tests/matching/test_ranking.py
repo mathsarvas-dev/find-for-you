@@ -1,3 +1,4 @@
+import math
 import uuid
 
 import pytest
@@ -296,3 +297,66 @@ def test_top_candidate_ids_respects_filters_and_n(env):
     assert got[1][1] == pytest.approx(1 - (1 - 2 ** -0.5) / 2, abs=1e-6)
     all3 = top_candidate_ids(s, uid, f, model_version=MV, n=10)
     assert [j for j, _ in all3] == [best, second, third]
+
+
+def _finite_unit(x: float) -> bool:
+    return math.isfinite(x) and 0.0 <= x <= 1.0
+
+
+@db
+def test_zero_vector_chunk_ignored_and_scores_finite(env):
+    s, new_user, add_job, add_profile, _ = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV), ([0.0] * DIM, MV)])
+    a = add_job(uid, cid, embedding=e(0))
+    b = add_job(uid, cid, embedding=e(1))
+    page = rank_jobs(s, uid, F, model_version=MV)
+    assert page.chunks_used == 1
+    assert [(i.job.id, i.vec_score) for i in page.items] == [
+        (a, pytest.approx(1.0, abs=1e-6)), (b, pytest.approx(0.5, abs=1e-6)),
+    ]
+    assert all(_finite_unit(i.vec_score) for i in page.items)
+    got = top_candidate_ids(s, uid, F, model_version=MV, n=10)
+    assert all(_finite_unit(v) for _, v in got)
+
+    # only zero chunks -> not vectorized
+    uid2, cid2 = new_user()
+    add_profile(uid2, 1, [([0.0] * DIM, MV)])
+    add_job(uid2, cid2, embedding=e(0))
+    page2 = rank_jobs(s, uid2, F, model_version=MV)
+    assert page2.vectorized is False and page2.items == []
+
+
+@db
+def test_zero_vector_job_excluded_and_counted_missing(env):
+    s, new_user, add_job, add_profile, _ = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV)])
+    ok = add_job(uid, cid, embedding=e(1))
+    add_job(uid, cid, embedding=[0.0] * DIM)
+    page = rank_jobs(s, uid, F, model_version=MV)
+    assert [i.job.id for i in page.items] == [ok]
+    assert page.total == 1
+    assert page.missing_embeddings == 1
+    assert all(_finite_unit(i.vec_score) for i in page.items)
+    assert [j for j, _ in top_candidate_ids(s, uid, F, model_version=MV, n=10)] == [ok]
+
+
+def test_invalid_limit_offset_n_rejected():
+    with pytest.raises(ValueError):
+        rank_jobs(None, 1, F, model_version=MV, limit=0)
+    with pytest.raises(ValueError):
+        rank_jobs(None, 1, F, model_version=MV, offset=-1)
+    with pytest.raises(ValueError):
+        top_candidate_ids(None, 1, F, model_version=MV, n=0)
+
+
+@db
+def test_page_items_defer_job_embedding(env):
+    s, new_user, add_job, add_profile, _ = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV)])
+    add_job(uid, cid, embedding=e(0))
+    s.expunge_all()
+    page = rank_jobs(s, uid, F, model_version=MV)
+    assert "embedding" not in page.items[0].job.__dict__

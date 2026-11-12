@@ -9,7 +9,7 @@ Computed entirely in SQL through a LATERAL top-3 subquery per job.
 from dataclasses import dataclass
 
 from sqlalchemy import Select, and_, func, select, true
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, defer
 
 from rumo_core.matching.filters import SearchFilters, apply_filters
 from rumo_core.models import Job, Match, ProfileChunk
@@ -36,6 +36,13 @@ class RankPage:
     chunks_used: int
 
 
+def _check_page(limit: int, offset: int) -> None:
+    if limit < 1:
+        raise ValueError("limit deve ser >= 1.")
+    if offset < 0:
+        raise ValueError("offset deve ser >= 0.")
+
+
 def _status_cond(status: str):
     if status not in STATUSES:
         raise ValueError(f"status inválido: {status!r}")
@@ -51,6 +58,16 @@ def _chunk_conds(user_id: int, version: int, model_version: str):
         ProfileChunk.profile_version == version,
         ProfileChunk.embedding.is_not(None),
         ProfileChunk.model_version == model_version,
+        # zero vectors make cosine distance NaN
+        func.vector_norm(ProfileChunk.embedding) > 0,
+    )
+
+
+def _job_embedded(model_version: str):
+    return and_(
+        Job.embedding.is_not(None),
+        Job.model_version == model_version,
+        func.vector_norm(Job.embedding) > 0,
     )
 
 
@@ -64,7 +81,8 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
     """Subquery (job_id, vec_score) for the filtered, embedded jobs."""
     dist = ProfileChunk.embedding.cosine_distance(Job.embedding)
     top = (
-        select((1 - dist / 2).label("sim"))
+        # clamp float rounding into [0, 1]
+        select(func.greatest(0.0, func.least(1.0, 1 - dist / 2)).label("sim"))
         .where(*_chunk_conds(user_id, version, model_version))
         .order_by(dist)
         .limit(TOP_K)
@@ -74,7 +92,7 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
         select(Job.id.label("job_id"), func.avg(top.c.sim).label("vec_score"))
         .select_from(Job)
         .join(top, true())
-        .where(Job.embedding.is_not(None), Job.model_version == model_version)
+        .where(_job_embedded(model_version))
         .group_by(Job.id)
     )
     return _base_jobs(user_id, filters, status, stmt).subquery("scores")
@@ -83,9 +101,7 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
 def _missing(session: Session, user_id: int, filters: SearchFilters, *,
              model_version: str, status: str) -> int:
     stmt = select(func.count(Job.id)).where(
-        (Job.embedding.is_(None))
-        | (Job.model_version.is_(None))
-        | (Job.model_version != model_version)
+        func.coalesce(_job_embedded(model_version), False).is_(False)
     )
     return session.scalar(_base_jobs(user_id, filters, status, stmt)) or 0
 
@@ -106,6 +122,7 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
               model_version: str, status: str = "open",
               limit: int = 50, offset: int = 0) -> RankPage:
     _status_cond(status)
+    _check_page(limit, offset)
     missing = _missing(session, user_id, filters,
                        model_version=model_version, status=status)
     version, used = _usable(session, user_id, model_version)
@@ -126,6 +143,7 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
             Match.profile_version == version,
         ))
         .where(Job.user_id == user_id)
+        .options(defer(Job.embedding))
         .order_by(
             Match.ai_score.desc().nulls_last(),
             scores.c.vec_score.desc(),
@@ -145,8 +163,10 @@ def top_candidate_ids(session: Session, user_id: int, filters: SearchFilters, *,
                       status: str = "open") -> list[tuple[int, float]]:
     """The `n` best (job_id, vec_score) by vec_score only, same filters."""
     _status_cond(status)
+    if n < 1:
+        raise ValueError("n deve ser >= 1.")
     version, used = _usable(session, user_id, model_version)
-    if version is None or used == 0 or n <= 0:
+    if version is None or used == 0:
         return []
     scores = _scores(user_id, version, filters,
                      model_version=model_version, status=status)
