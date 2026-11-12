@@ -336,7 +336,7 @@ def _parse_single(text: str) -> tuple[str | None, str | None]:
 
 
 _REGION_TOKENS = {t for w in _REGION_WORDS for t in w.split()} | {"fully", "only", "on", "site", "onsite", "presencial", "office", "in"}
-_MODEL_PREFIX = re.compile(r"^(?:hybrid|on-?site|presencial|h[ií]brid[oa]|vor ort|in-?office)(?: ?[-–—:,] ?| )(?=.)", re.I)
+_MODEL_PREFIX = re.compile(r"^(?:hybrid|on-?site|presencial|h[ií]brid[oa]|vor ort|in-?office)(?: ?[-–—:,] ?| )(?:(?:in der|in|im|em|no|na|at) )?(?=.)", re.I)
 
 
 def _is_region(part: str) -> bool:
@@ -429,11 +429,24 @@ _EXPLICIT = {
 _NEGATION = re.compile(r"(?:\bnot|n't|\bnicht|\bn[aã]o|\bnever)\s+(?:a\s+|an\s+)?$", re.I)
 
 
+_CONDITIONAL = re.compile(r"\b(?:if|whether|unless|when|should|in case|ob|falls|se|caso|quando)\b", re.I)
+_ALTERNATIVE = re.compile(r"^\W{0,3}(?:or|oder|ou)\s+(?:fully\s+)?(?:remote|hybrid|on-?site|onsite|office|h[ií]brid\w*|presencial|vor ort)", re.I)
+
+
+def _is_statement(text: str, m: re.Match) -> bool:
+    """False for negated, conditional ("if the role is remote") or alternative ("remote or hybrid") phrasing."""
+    if _NEGATION.search(text[max(0, m.start() - 12) : m.start()]):
+        return False
+    pre = text[max(0, m.start() - 200) : m.start()]
+    pre = re.split(r"[.!?\n;:]", pre)[-1]
+    return not _CONDITIONAL.search(pre) and not _ALTERNATIVE.match(text[m.end() : m.end() + 30])
+
+
 def _signals(patterns: dict[str, re.Pattern], text: str, check_negation: bool = False) -> set[str]:
     found = set()
     for kind, pat in patterns.items():
         for m in pat.finditer(text):
-            if check_negation and _NEGATION.search(text[max(0, m.start() - 12) : m.start()]):
+            if check_negation and not _is_statement(text, m):
                 continue
             found.add(kind)
             break
@@ -593,7 +606,8 @@ _PERK = (
 _NONPAY_BEFORE = re.compile(rf"\b(?:{_EQUITY}|{_PERK})s?\b", re.I)
 # After the amount only an adjacent word counts, so "$120k + equity" or
 # "$120k + $1,500 learning budget" do not kill the real salary.
-_NONPAY_AFTER = re.compile(rf"^\s{{0,3}}(?P<gap>(?:\w+\s+){{0,3}}?)(?:{_EQUITY}|{_PERK})s?\b", re.I)
+_NONPAY_AFTER = re.compile(rf"^[ \t]{{0,3}}(?P<gap>(?:\w+[ \t]+){{0,3}}?)(?:{_EQUITY}|{_PERK})s?\b", re.I)
+_CONJ = re.compile(r"\b(?:plus|with|and|incl|including|inkl|mit|und|mais|com)\b", re.I)
 _UPTO = re.compile(r"(?:up\s+to|bis\s+zu|at[eé]|maximum|max\.?|no\s+more\s+than|capped\s+at)\s*$", re.I)
 _CODE_BEFORE = re.compile(rf"(?<![A-Za-z])({_CCY})\s?$")
 _CODE_AFTER = re.compile(rf"^\s?\(?({_CCY})(?![A-Za-z])")
@@ -673,10 +687,6 @@ def _candidate(text: str, m: re.Match):
     if _NONPAY_BEFORE.search(_clause_before(text, s, 40)):
         return None
     na = _NONPAY_AFTER.match(after)
-    # bonus/equity/perk word right after the amount: skip it unless a salary
-    # word sits in its own window (between amount and that word, or just before)
-    if na and not (_PAY_RE.search(na.group("gap")) or _PAY_RE.search(before[-60:].rsplit(". ", 1)[-1])):
-        return None
     explicit = _CODE_BEFORE.search(before[-5:]) or _CODE_AFTER.match(after)
     if explicit:
         code = explicit.group(1).upper()
@@ -689,6 +699,18 @@ def _candidate(text: str, m: re.Match):
             lo *= 1000
         elif k1 and not k2 and hi < 1000:
             hi *= 1000
+    if na and not _PAY_RE.search(na.group("gap")):
+        # A bonus/equity/perk word right after the amount disqualifies it, unless
+        # the word sits in a trailing "plus/with/and ..." clause after a RANGE
+        # that is itself clearly pay (currency code, period word or pay word).
+        conj = _CONJ.search(na.group("gap")) is not None
+        clearly_pay = (
+            explicit is not None
+            or any(pat.match(after) for _, pat in _PERIODS)
+            or _PAY_RE.search(before[-60:].rsplit(". ", 1)[-1]) is not None
+        )
+        if not (conj and hi is not None and clearly_pay):
+            return None
     if hi is None:  # a single amount needs a strong salary word in its own sentence
         pre = before.rsplit(". ", 1)[-1]
         post = after[:40].split(". ", 1)[0]
