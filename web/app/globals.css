@@ -1251,3 +1251,369 @@ kbd {
   .dropzone,
   .vector__bar span { transition: none; }
 }
+
+/* Fontes: cadastro de empresas, lista de empresas e vagas coletadas */
+
+.next-step--follow {
+  margin-top: var(--space-3);
+}
+
+.add-company__fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 7rem;
+  gap: var(--space-3) var(--space-4);
+  align-items: start;
+}
+
+.add-company .input[aria-invalid="true"] {
+  border-color: var(--danger);
+}
+
+.add-company__msg {
+  margin: var(--space-3) 0 0;
+}
+
+.add-company__foot {
+  margin-top: var(--space-3);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2) var(--space-4);
+}
+
+.add-company__status {
+  flex: 1 1 16rem;
+  font-size: var(--text-sm);
+}
+
+.add-company__status:empty {
+  display: none;
+}
+
+.sources__notice .actions {
+  margin-top: var(--space-3);
+  justify-content: flex-start;
+}
+
+.sources__empty {
+  padding: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.sources__jobs {
+  margin-top: var(--space-5);
+}
+
+.company-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--border);
+}
+
+.company {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--space-2) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+}
+
+.company + .company {
+  border-top: 1px solid var(--border);
+}
+
+.company__main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.company__title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--space-2);
+}
+
+.company__name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.company__token {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.company__meta,
+.company__run {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 var(--space-2);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.company__meta .mono {
+  font-size: var(--text-xs);
+}
+
+.company__pending {
+  color: var(--warn);
+  font-weight: 500;
+}
+
+.company__failure {
+  margin-top: var(--space-1);
+  font-size: var(--text-sm);
+  color: var(--danger);
+  overflow-wrap: anywhere;
+}
+
+.company__error {
+  margin-top: var(--space-1);
+}
+
+.company__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-1) var(--space-2);
+}
+
+.company:not([data-active]) .company__name {
+  color: var(--muted);
+}
+
+/* Selo de estado: texto sempre presente, a cor só reforça */
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-field);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+.chip[data-state="on"] {
+  color: var(--ok);
+}
+
+.chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: currentColor;
+}
+
+.chip[data-state="off"]::before {
+  background: transparent;
+  border: 1px solid currentColor;
+}
+
+/* Vagas: filtros e tabela densa */
+
+.jobs__filters {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 10rem minmax(0, 1.3fr);
+  gap: var(--space-3) var(--space-4);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+}
+
+select.input {
+  cursor: pointer;
+}
+
+.jobs {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-md);
+}
+
+.jobs th {
+  padding: var(--space-2) var(--space-3);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--muted);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.jobs td {
+  padding: var(--space-2) var(--space-3);
+  vertical-align: baseline;
+  overflow-wrap: break-word;
+}
+
+.jobs td[data-label="Modelo"] {
+  white-space: nowrap;
+}
+
+.jobs th:first-child,
+.jobs td:first-child {
+  padding-left: var(--space-4);
+}
+
+.jobs th:last-child,
+.jobs td:last-child {
+  padding-right: var(--space-4);
+}
+
+.jobs tbody tr + tr td {
+  border-top: 1px solid var(--border);
+}
+
+.jobs__title {
+  font-weight: 500;
+  min-width: 14rem;
+}
+
+.jobs__muted {
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+
+.jobs__date {
+  font-size: var(--text-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.jobs__link {
+  white-space: nowrap;
+  text-align: right;
+  font-size: var(--text-sm);
+}
+
+.jobs__link a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  font-weight: 500;
+}
+
+.jobs__more-error {
+  margin: 0;
+}
+
+/* Telas médias: a tabela tem largura para 5 colunas só a partir de ~860 px */
+
+@media (max-width: 860px) {
+  .jobs thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+  }
+
+  .jobs,
+  .jobs tbody,
+  .jobs tr,
+  .jobs td {
+    display: block;
+  }
+
+  .jobs tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 2px var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .jobs tbody tr + tr {
+    border-top: 1px solid var(--border);
+  }
+
+  .jobs tbody tr + tr td {
+    border-top: 0;
+  }
+
+  .jobs td,
+  .jobs td:first-child,
+  .jobs td:last-child {
+    padding: 0;
+    min-width: 0;
+  }
+
+  .jobs__title {
+    flex: 1 1 100%;
+  }
+
+  .jobs td:not(.jobs__title) {
+    font-size: var(--text-sm);
+    color: var(--muted);
+  }
+
+  .jobs td[data-label="Empresa"] {
+    color: var(--text);
+  }
+
+  .jobs__link {
+    margin-left: auto;
+  }
+
+  .jobs td[data-label="Local"]::before,
+  .jobs td[data-label="Modelo"]::before,
+  .jobs td[data-label="Publicada"]::before {
+    content: attr(data-label) ": ";
+    font-family: var(--font-ui);
+    font-size: var(--text-xs);
+  }
+}
+
+@media (max-width: 560px) {
+  .add-company__fields {
+    grid-template-columns: 1fr;
+  }
+
+  .add-company__country {
+    max-width: 8rem;
+  }
+
+  .add-company__foot .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .company {
+    grid-template-columns: 1fr;
+  }
+
+  .company__actions {
+    justify-content: flex-start;
+  }
+
+  .jobs__filters {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .jobs__search {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (min-width: 561px) and (max-width: 860px) {
+  .jobs__filters {
+    grid-template-columns: 1fr 9rem;
+  }
+
+  .jobs__search {
+    grid-column: 1 / -1;
+  }
+}
