@@ -21,8 +21,6 @@ from rumo_core.sources.base import (
 )
 from rumo_core.sources.greenhouse import GreenhouseSource
 
-DEFAULT_MAX_BYTES = 20_000_000
-
 _REGISTRY: dict[str, Callable[[], Source]] = {}
 _CACHE: dict[str, Source] = {}
 
@@ -52,13 +50,20 @@ async def aclose_sources() -> None:
         await source.aclose()
 
 
-register_source(
-    "greenhouse",
-    lambda: GreenhouseSource(
-        httpx.AsyncClient(timeout=httpx.Timeout(30.0), follow_redirects=False),
-        max_bytes=DEFAULT_MAX_BYTES,
-    ),
-)
+def _greenhouse_factory() -> Source:
+    # settings read when the source is first built (not at import time)
+    from rumo_core.config import get_settings
+
+    s = get_settings()
+    return GreenhouseSource(
+        httpx.AsyncClient(
+            timeout=httpx.Timeout(s.fetch_timeout_seconds), follow_redirects=False
+        ),
+        max_bytes=s.fetch_max_bytes,
+    )
+
+
+register_source("greenhouse", _greenhouse_factory)
 
 __all__ = [
     "RawJob",

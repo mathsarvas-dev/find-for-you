@@ -18,3 +18,8 @@
 - **Testes e worker:** os testes e um worker de desenvolvimento rodando compartilham o banco de desenvolvimento (pare o worker ao rodar os testes de banco, ou adicione `TEST_DATABASE_URL`).
 - **Rate limit:** a pausa de 60 s do worker mostra o aviso enganoso de "worker parado".
 - **Menores adiados da revisão do plano:** o léxico casa palavra por palavra e rejeita falsamente; números não são amarrados a unidade/contexto; `TargetMissing` vs `InvalidSuggestion` decidido pela string da mensagem (usar um código de motivo); `GET /interview/current` carrega todas as sessões; polling sem limite enquanto gera.
+
+## Marco 3
+- **Coleta:** empresa com quadro realmente esvaziado fica em falha enquanto tiver ≥5 vagas abertas; considerar aceitar após N falhas seguidas ou mostrar claramente na UI.
+- **Ingestão:** o SELECT de vagas existentes carrega todo o histórico fechado a cada coleta.
+- **Ingestão:** `raw`/`url`/`posted_at` não atualizam quando só eles mudam (o `content_hash` não os cobre).

@@ -128,7 +128,11 @@ async def _collect_one(session_factory, c: ClaimedCompany, *, source_getter, clo
         except KeyError:
             raise _UnknownSource() from None
         raws = await source.fetch_jobs(c.identifier)  # no DB transaction held
-        _record_success(session_factory, c, raws, clock(), interval_hours)
+        # normalize + ingest are CPU/DB-bound: run them off the event loop. The
+        # thread opens its OWN session (nothing is shared across threads).
+        await asyncio.to_thread(
+            _record_success, session_factory, c, raws, clock(), interval_hours
+        )
     except _UnknownSource:
         logger.warning("company %s: unknown source", c.company_id)
         _record_failure(session_factory, c.company_id, MSG_UNKNOWN_SOURCE, clock(),
@@ -145,8 +149,9 @@ async def _collect_one(session_factory, c: ClaimedCompany, *, source_getter, clo
             logger.exception("company %s unexpected collect failure", c.company_id)
         _record_failure(session_factory, c.company_id, msg, clock(), interval_hours)
     # CancelledError (BaseException) propagates: the committed lease stays, so
-    # the company is retried once it expires; the ingest transaction, if any,
-    # was rolled back by the session context manager.
+    # the company is retried once it expires. Cancelled while the ingest thread
+    # runs: that thread still finishes its single transaction (commit or
+    # rollback as a whole), so no half state is left either way.
 
 
 async def collect_companies(
@@ -158,8 +163,15 @@ async def collect_companies(
     sleep=asyncio.sleep,
     interval_hours: int,
     delay_seconds: float,
+    max_companies: int | None = None,
+    max_seconds: float | None = None,
 ) -> int:
-    """Collect every due company, one at a time; returns how many were processed.
+    """Collect due companies, one at a time; returns how many were processed.
+
+    Stops claiming once `max_companies` were processed or `max_seconds` (time
+    since the call started, measured with `clock`) has elapsed; a company
+    already claimed is always finished. Bounding a run keeps the sequential
+    worker loop responsive for the other jobs.
 
     Due: active and next_run_at NULL or <= now, most overdue (NULL) first.
     Each company is claimed with FOR UPDATE SKIP LOCKED plus a committed lease,
@@ -169,8 +181,14 @@ async def collect_companies(
     Waits delay_seconds between companies (not after the last).
     """
     processed = 0
+    started = clock()
     while True:
-        claimed = _claim_company(session_factory, user_id, clock())
+        if max_companies is not None and processed >= max_companies:
+            return processed
+        now = clock()
+        if max_seconds is not None and (now - started).total_seconds() >= max_seconds:
+            return processed
+        claimed = _claim_company(session_factory, user_id, now)
         if claimed is None:
             return processed
         if processed:

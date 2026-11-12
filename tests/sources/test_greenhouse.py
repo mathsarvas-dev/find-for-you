@@ -295,3 +295,20 @@ async def test_3xx_is_bad_response():
     with pytest.raises(SourceBadResponse) as ei:
         await src.fetch_jobs("x")
     assert "secret" not in str(ei.value) and len(reqs) == 1
+
+
+async def test_greenhouse_factory_honours_settings(monkeypatch):
+    from rumo_core.config import get_settings
+
+    monkeypatch.setenv("FETCH_TIMEOUT_SECONDS", "7.5")
+    monkeypatch.setenv("FETCH_MAX_BYTES", "12345")
+    get_settings.cache_clear()
+    await aclose_sources()
+    try:
+        src = get_source("greenhouse")
+        assert src._max_bytes == 12345
+        assert src._client.timeout == httpx.Timeout(7.5)
+        assert src._client.follow_redirects is False
+    finally:
+        await aclose_sources()
+        get_settings.cache_clear()

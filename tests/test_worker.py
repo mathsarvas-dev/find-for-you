@@ -82,3 +82,33 @@ async def test_retry_startup_raises_after_exhausting_attempts():
     with pytest.raises(RuntimeError):
         await retry_startup(broken, attempts=3, delay=1.0, sleep=fake_sleep)
     assert len(calls) == 3 and len(sleeps) == 2
+
+
+def test_collect_job_registration_uses_settings():
+    from rumo_core.config import Settings
+    from worker.collect_jobs import collect_companies
+    from worker.main import build_collect_job
+
+    settings = Settings(
+        _env_file=None, database_url="postgresql+psycopg://u:p@localhost/x",
+        collect_interval_hours=4, collect_delay_seconds=0.5,
+        collect_max_companies_per_run=7,
+    )
+    sf = object()
+    job = build_collect_job(settings, sf)
+    assert job.func is collect_companies and job.args == (sf,)
+    assert job.keywords == {
+        "interval_hours": 4, "delay_seconds": 0.5, "max_companies": 7,
+    }
+
+
+def test_collect_max_companies_setting_default_and_positive():
+    import pytest
+    from pydantic import ValidationError
+
+    from rumo_core.config import Settings
+
+    s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/x")
+    assert s.collect_max_companies_per_run == 3
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="x", collect_max_companies_per_run=0)

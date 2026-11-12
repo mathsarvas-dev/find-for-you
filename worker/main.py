@@ -49,6 +49,23 @@ def build_llm(settings):
     )
 
 
+def build_collect_job(settings, session_factory):
+    """collect_companies bound to the settings; at most
+    collect_max_companies_per_run companies per tick so the sequential job loop
+    stays responsive."""
+    from functools import partial
+
+    from worker.collect_jobs import collect_companies
+
+    return partial(
+        collect_companies,
+        session_factory,
+        interval_hours=settings.collect_interval_hours,
+        delay_seconds=settings.collect_delay_seconds,
+        max_companies=settings.collect_max_companies_per_run,
+    )
+
+
 async def retry_startup(
     fn: Callable[[], object],
     attempts: int = 10,
@@ -75,7 +92,6 @@ async def main() -> None:
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
     from rumo_core.sources import aclose_sources
-    from worker.collect_jobs import collect_companies
     from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
@@ -104,16 +120,7 @@ async def main() -> None:
         5,
     )
     # every 60 s; per-company next_run_at governs the real collection frequency
-    registry.register(
-        "collect_companies",
-        partial(
-            collect_companies,
-            SessionLocal,
-            interval_hours=settings.collect_interval_hours,
-            delay_seconds=settings.collect_delay_seconds,
-        ),
-        60,
-    )
+    registry.register("collect_companies", build_collect_job(settings, SessionLocal), 60)
     logger.info("worker started")
     try:
         while True:

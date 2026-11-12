@@ -20,10 +20,14 @@ Rules:
   before this batch with an unchanged fingerprint (the incumbent), then the
   smallest first_seen_at, then the smallest external_id (string compare). A
   `duplicate` whose original is gone (closed, absent or with another
-  fingerprint) is thus promoted to `open`;
+  fingerprint) is thus promoted to `open`. Note: the incumbent rule goes
+  first on purpose (an already-open job keeps its slot even if an older,
+  changed or reappearing job now shares its fingerprint), so open jobs do not
+  flip between open and duplicate across runs;
 - jobs `open` or `duplicate` absent from the list -> `closed` (closed_at=now);
-- an EMPTY list while the company has >= SUSPICIOUS_EMPTY_MIN_OPEN open jobs
-  raises SuspiciousEmptyResult before anything is touched.
+- an EMPTY effective list (also when every item was filtered out, e.g. an
+  oversized external_id) while the company has >= SUSPICIOUS_EMPTY_MIN_OPEN
+  open jobs raises SuspiciousEmptyResult before anything is touched.
 
 Counters: created/updated/unchanged partition the jobs present in the list;
 closed, reopened (closed -> open) and duplicates (jobs that BECAME duplicate in
@@ -89,7 +93,16 @@ def _apply(job: Job, raw: RawJob, n: NormalizedJob) -> None:
 def ingest_jobs(
     session: Session, user_id: int, company: Company, raws: list[RawJob], *, now: datetime
 ) -> IngestResult:
-    if not raws:
+    # last occurrence of a repeated external_id wins
+    by_id: dict[str, RawJob] = {}
+    for r in raws:
+        if len(r.external_id) > _MAX_EXTERNAL_ID:
+            logger.warning("company %s: skipping job with oversized external_id", company.id)
+            continue
+        by_id[r.external_id] = r
+
+    # guard on the EFFECTIVE list: "every item filtered out" counts as empty
+    if not by_id:
         open_count = session.scalar(
             select(func.count()).select_from(Job).where(
                 Job.user_id == user_id, Job.company_id == company.id, Job.status == "open"
@@ -100,14 +113,6 @@ def ingest_jobs(
                 f"A fonte devolveu uma lista vazia, mas a empresa tem {open_count} "
                 "vagas abertas; nada foi fechado."
             )
-
-    # last occurrence of a repeated external_id wins
-    by_id: dict[str, RawJob] = {}
-    for r in raws:
-        if len(r.external_id) > _MAX_EXTERNAL_ID:
-            logger.warning("company %s: skipping job with oversized external_id", company.id)
-            continue
-        by_id[r.external_id] = r
 
     existing: dict[str, Job] = {
         j.external_id: j

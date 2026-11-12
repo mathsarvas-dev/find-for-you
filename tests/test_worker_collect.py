@@ -200,6 +200,37 @@ async def test_one_company_failure_does_not_stop_others(uid):
     assert sleeps.calls == [2.5, 2.5]  # between companies, not after the last
 
 
+async def test_max_companies_limits_one_run(uid):
+    ids = [add_company(uid, f"c{i}") for i in range(5)]
+    src = FakeSource()
+    sleeps = Sleeps()
+    assert await collect(uid, src, sleep=sleeps, max_companies=2) == 2
+    assert src.calls == ["c0", "c1"] and sleeps.calls == [1.5]
+    due = [c for c in ids if get_company(c).last_run_at is None]
+    assert len(due) == 3
+    assert await collect(uid, src, max_companies=2) == 2
+    assert await collect(uid, src, max_companies=2) == 1
+
+
+async def test_time_budget_stops_claiming(uid):
+    for i in range(4):
+        add_company(uid, f"c{i}")
+    t = {"now": NOW}
+
+    async def slow():
+        t["now"] += timedelta(seconds=40)  # each fetch "takes" 40 s
+        return []
+
+    src = FakeSource({f"c{i}": slow for i in range(4)})
+    n = await collect_companies(
+        SessionLocal, source_getter=lambda name: src, user_id=uid,
+        clock=lambda: t["now"], sleep=Sleeps(), interval_hours=6, delay_seconds=0,
+        max_seconds=60,
+    )
+    # 0 s: claim c0 -> 40 s: claim c1 (budget not reached) -> 80 s: stop
+    assert n == 2 and src.calls == ["c0", "c1"]
+
+
 async def test_most_overdue_first(uid):
     late = add_company(uid, "late", next_run_at=NOW - timedelta(hours=1))
     never = add_company(uid, "never")

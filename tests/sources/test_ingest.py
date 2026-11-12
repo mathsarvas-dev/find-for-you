@@ -217,6 +217,13 @@ def test_empty_result_with_many_open_raises_and_closes_nothing(ctx):
     assert company(ctx).open_jobs == 5
 
 
+def test_all_items_filtered_out_counts_as_empty_and_raises(ctx):
+    run(ctx, [raw(i) for i in range(5)], T0)
+    with pytest.raises(SuspiciousEmptyResult):
+        run(ctx, [raw("x" * 300)], T1)
+    assert all(j.status == "open" for j in jobs(ctx).values())
+
+
 def test_empty_result_with_few_open_closes_them(ctx):
     run(ctx, [raw(i) for i in range(4)], T0)
     res = run(ctx, [], T1)
