@@ -12,10 +12,9 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from rumo_core.interview.suggestions import numbers_supported
 from rumo_core.llm.base import LLMProvider
 from rumo_core.profile.prompting import wrap_untrusted
-from rumo_core.sources.normalize import has_pay_context
+from rumo_core.sources.normalize import find_salary_spans, has_pay_context
 
 MAX_DESCRIPTION_CHARS = 8000
 _MAX_META = 300
@@ -96,32 +95,29 @@ async def fill_fields(llm: LLMProvider, job: JobView) -> FillResult:
 # validation
 # --------------------------------------------------------------------------
 
-_SPACED_THOUSANDS = re.compile(r"(?<=\d)[ '  ](?=\d{3}(?!\d))")
+_SENTENCE_END = re.compile(r"[.!?;\n]")
+_MODEL_KEYWORDS = {
+    "remote": re.compile(
+        r"\bremote(?:ly)?\b|\bremot[oa]s?\b|\bhome[- ]?office\b|\bwork from home\b"
+        r"|\bfully distributed\b|\bteletrabalho\b", re.I),
+    "hybrid": re.compile(r"\bhybrid(?:es)?\b|\bh[ií]brid[oa]s?\b", re.I),
+    "onsite": re.compile(
+        r"\bon[- ]?site\b|\bpresencial\b|\bin[- ]office\b|\bvor[- ]ort\b", re.I),
+}
+_NEGATION = re.compile(
+    r"\b(?:not|no|never|nicht|kein\w*|n[aã]o)\s+(?:\w+\s+){0,2}$", re.I)
 
 
-def _renderings(value: Decimal) -> list[str]:
-    forms = {format(value, "f"), format(value.normalize(), "f"), f"{value:.2f}"}
-    if value == value.to_integral_value():
-        forms.add(str(int(value)))
-    return sorted(forms)
-
-
-def number_in_text(value: Decimal, text: str) -> bool:
-    """True when `value` is written in `text` the way a human would: plain
-    (120000), thousands-separated (120,000 / 120.000 / 120 000) or with k (120k)."""
-    sources = [text, _SPACED_THOUSANDS.sub("", text)]
-    if any(numbers_supported(r, sources) and _has_token(r, sources) for r in _renderings(value)):
-        return True
-    if value % 1000 == 0 and value > 0:
-        k = int(value // 1000)
-        if re.search(rf"(?<![\d.,]){k}\s?[kK](?![A-Za-z0-9])", text):
+def _work_model_supported(model: str, text: str) -> bool:
+    """A keyword of `model` occurs in `text` outside a negation ("not remote")."""
+    pat = _MODEL_KEYWORDS.get(model)
+    if pat is None:
+        return False
+    for m in pat.finditer(text):
+        clause = _SENTENCE_END.split(text[max(0, m.start() - 40) : m.start()])[-1]
+        if not _NEGATION.search(clause):
             return True
     return False
-
-
-def _has_token(rendering: str, sources: list[str]) -> bool:
-    # numbers_supported is vacuously true for a text without digits
-    return re.search(r"\d", rendering) is not None
 
 
 def validate_fill(result: FillResult, description: str, current: JobView) -> FillResult:
@@ -130,30 +126,48 @@ def validate_fill(result: FillResult, description: str, current: JobView) -> Fil
     out = FillResult()
     try:
         if current.work_model == "unknown" and result.work_model != "unknown":
-            out.work_model = result.work_model
-        if not current.salary_known and _salary_ok(result, description):
-            out.salary_min = result.salary_min
-            out.salary_max = result.salary_max
-            out.salary_currency = result.salary_currency
-            out.salary_period = result.salary_period
+            text = "\n".join((current.title, current.location_text, description))
+            if _work_model_supported(result.work_model, text):
+                out.work_model = result.work_model
+        if not current.salary_known:
+            sal = _validated_salary(result, description)
+            if sal is not None:
+                (out.salary_min, out.salary_max,
+                 out.salary_currency, out.salary_period) = sal
     except Exception:  # noqa: BLE001 - garbage from the LLM must never raise
         return FillResult(work_model=out.work_model)
     return out
 
 
-def _salary_ok(r: FillResult, description: str) -> bool:
+_FLOOR = {"year": Decimal(1000), "month": Decimal(100), "hour": Decimal(5), None: Decimal(1000)}
+_CENTS = Decimal("0.01")
+
+
+def _validated_salary(r: FillResult, description: str):
+    """(min, max, currency, period) when every claimed number, the currency and
+    (if given) the period are backed by ONE salary-shaped span of the text."""
     lo, hi = r.salary_min, r.salary_max
     if lo is None:  # max alone ("up to X") is not a salary
-        return False
+        return None
     if not has_pay_context(description):
-        return False
+        return None
     cur = r.salary_currency
     if cur is None or not re.fullmatch(r"[A-Z]{3}", cur):
-        return False
-    values = [lo] if hi is None else [lo, hi]
-    for v in values:
-        if not v.is_finite() or v <= 0 or abs(v) >= Decimal("1e12"):
-            return False
+        return None
+    claimed = [lo] if hi is None else [lo, hi]
+    for v in claimed:
+        if not v.is_finite() or v <= 0 or v >= Decimal("1e12"):
+            return None
     if hi is not None and lo > hi:
-        return False
-    return all(number_in_text(v, description) for v in values)
+        return None
+    for span in find_salary_spans(description):
+        amounts = {a for a in (span.min, span.max) if a is not None}
+        if span.currency != cur or not all(v in amounts for v in claimed):
+            continue
+        # a period word must back the claimed period, otherwise drop the period
+        period = r.salary_period if r.salary_period == span.period else None
+        if any(v < _FLOOR[period] for v in claimed):
+            continue
+        return (lo.quantize(_CENTS), hi.quantize(_CENTS) if hi is not None else None,
+                cur, period)
+    return None

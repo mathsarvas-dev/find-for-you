@@ -756,6 +756,28 @@ def extract_salary(text: str) -> SalaryInfo | None:
     return first
 
 
+def find_salary_spans(text: str) -> list[SalaryInfo]:
+    """Every salary-shaped span (currency-adjacent amount or range) in the first
+    60 KB that passes the same non-pay exclusions as extract_salary (bonus,
+    equity, stipend, funding, "up to X", unit suffixes...). Unlike
+    extract_salary it returns ALL of them and skips invalid ones instead of
+    giving up. Used to check that an LLM-claimed amount is really a salary."""
+    text = _cap(text, _MAX_PAY_TEXT)
+    spans: list[SalaryInfo] = []
+    for i, m in enumerate(_SALARY_RE.finditer(text)):
+        if i >= _MAX_CANDIDATES:
+            break
+        cand = _candidate(text, m)
+        if isinstance(cand, SalaryInfo):
+            spans.append(cand)
+    return spans
+
+
+def find_salary_amounts(text: str) -> list[Decimal]:
+    """Amounts (min and max) of all salary-shaped spans; see find_salary_spans."""
+    return [a for s in find_salary_spans(text) for a in (s.min, s.max) if a is not None]
+
+
 # --------------------------------------------------------------------------
 # normalize_job
 # --------------------------------------------------------------------------

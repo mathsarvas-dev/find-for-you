@@ -16,7 +16,7 @@ from worker.collect_jobs import fill_missing_job_fields
 
 pytestmark = pytest.mark.db
 
-PAY = "The salary is USD 120,000 - 150,000 per year."
+PAY = "A fully remote role. The salary is USD 120,000 - 150,000 per year."
 SECRET = "SECRET-POSTING-TEXT-XYZ"
 
 
@@ -303,3 +303,44 @@ async def test_cancelled_propagates_without_partial_state(uid):
         await _run(uid, FakeLLM(exc=asyncio.CancelledError()))
     j = _get(jid)
     assert j.llm_filled_at is None and j.fill_attempts == 0
+
+
+async def test_260_jobs_one_needing_one_call_per_tick(uid):
+    needing = _job(uid, 0)  # oldest needs the LLM
+    with SessionLocal() as s:
+        c = s.execute(select(Company).where(Company.user_id == uid)).scalars().first()
+        base = datetime(2026, 2, 1, tzinfo=UTC)
+        s.add_all([
+            Job(user_id=uid, company_id=c.id, external_id=f"x{i}", url="https://e.test",
+                title="t", description="Plain.", raw={}, content_hash=f"x{i}",
+                fingerprint=f"xf{i}", status="open", work_model="remote",
+                first_seen_at=base + timedelta(minutes=i))
+            for i in range(259)
+        ])
+        s.commit()
+        s.execute(update(Job).where(Job.id == needing).values(
+            first_seen_at=base + timedelta(days=1)))  # newest: in the first window
+        s.commit()
+    llm = FakeLLM(exc=LLMInvalidResponse("bad"))
+    assert await _run(uid, llm) == 1
+    assert len(llm.calls) == 1
+    assert _get(needing).fill_attempts == 1
+
+
+async def test_60_jobs_two_needing_two_calls_one_attempt_each(uid):
+    needing = [_job(uid, 0), _job(uid, 1)]
+    for i in range(2, 60):
+        _job(uid, i, work_model="remote")
+    llm = FakeLLM(exc=LLMInvalidResponse("bad"))
+    assert await _run(uid, llm) == 2
+    assert len(llm.calls) == 2
+    assert [_get(j).fill_attempts for j in needing] == [1, 1]
+
+
+async def test_persisted_amounts_have_two_decimals(uid):
+    jid = _job(uid, description="Salary: $120,000 - $150,000 per year")
+    await _run(uid, FakeLLM(FillResult(
+        salary_min=Decimal(120000), salary_max=Decimal(150000),
+        salary_currency="USD", salary_period="year")))
+    j = _get(jid)
+    assert j.salary_known and j.salary_min == Decimal("120000.00")

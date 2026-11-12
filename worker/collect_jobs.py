@@ -336,6 +336,7 @@ def _select_fill_candidates(
     picked: list[tuple[int, str]] = []
     skipped = 0
     window = batch * _FILL_WINDOW_FACTOR
+    seen: set[int] = set()  # picked rows stay unmarked: never re-pick them this tick
     for _ in range(_FILL_MAX_WINDOWS):
         with session_factory() as s:
             stmt = select(Job).where(
@@ -346,6 +347,8 @@ def _select_fill_candidates(
             )
             if user_id is not None:
                 stmt = stmt.where(Job.user_id == user_id)
+            if seen:
+                stmt = stmt.where(Job.id.notin_(seen))
             rows = s.execute(
                 stmt.order_by(Job.first_seen_at.desc(), Job.id.desc())
                 .limit(window)
@@ -358,6 +361,7 @@ def _select_fill_candidates(
                     skipped += 1
                 elif len(picked) < batch:
                     picked.append((job.id, job.content_hash))
+                    seen.add(job.id)
             s.commit()
         if len(picked) >= batch or len(rows) < window:
             break
@@ -369,7 +373,7 @@ def _load_fill_view(session_factory, job_id: int, content_hash: str) -> JobView 
         job = s.get(Job, job_id)
         if (
             job is None or job.status != "open" or job.llm_filled_at is not None
-            or job.content_hash != content_hash
+            or job.fill_attempts >= MAX_FILL_ATTEMPTS or job.content_hash != content_hash
         ):
             return None
         return _view(job)
