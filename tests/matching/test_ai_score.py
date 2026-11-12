@@ -461,3 +461,45 @@ def test_dotted_tech_names_are_not_contacts():
 def test_urls_and_emails_in_rationale_raise(rationale):
     with pytest.raises(MatchInvalid):
         validate_match(good_draft(rationale=rationale), make_profile(), job=make_job())
+
+
+@pytest.mark.parametrize(
+    "rationale",
+    [
+        "Domina apenas Kubernetes.",
+        "O perfil usa apenas Kubernetes e Spark.",
+        "Domina Kubernetes e não tem lacunas.",
+        "Domina Kubernetes sem dificuldade.",
+        "Sem dúvida domina Kubernetes e Spark.",
+        "Masters Kubernetes and Spark without gaps.",
+        "Tem 8 anos de Kubernetes sem interrupção.",
+        "Trabalhou na Globex sem interrupções.",
+    ],
+)
+def test_positive_claim_with_negation_word_raises(rationale):
+    job = make_job(**{**RICH_JOB, "description": RICH_JOB["description"] + " 8 anos."})
+    with pytest.raises(MatchInvalid):
+        validate_match(good_draft(rationale=rationale), make_profile(), job=job)
+
+
+@pytest.mark.parametrize(
+    "rationale",
+    [
+        "O perfil cita apenas Python e SQL, sem Kubernetes.",
+        "Boa base em Python, mas não tem os 8 anos nem Kubernetes.",
+        "O perfil cobre Python e SQL, mas não mostra Spark.",
+        "Há boa aderência técnica, porém faltam evidências de governança de dados.",
+    ],
+)
+def test_real_absence_after_marker_accepted(rationale):
+    job = make_job(**{**RICH_JOB, "description": RICH_JOB["description"] + " 8 anos."})
+    assert validate_match(good_draft(rationale=rationale), make_profile(), job=job).rationale
+
+
+def test_mixed_case_domain_in_gap_dropped():
+    job = make_job(description="Python. Candidate-se via Globex.com.br ou Evil.io.")
+    draft = good_draft(
+        gaps=["Falta candidatura via Globex.com.br", "Não se candidatou em Evil.io",
+              "Sem menção a liderança"],
+    )
+    assert validate_match(draft, make_profile(), job=job).gaps == ["Sem menção a liderança"]

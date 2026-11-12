@@ -348,23 +348,26 @@ _VOLATILE = re.compile(
     re.IGNORECASE,
 )
 _CONTACT = re.compile(r"(?:https?://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+", re.IGNORECASE)
-# bare domains: lowercase labels only, so ASP.NET / VB.NET / Socket.IO are not domains
 _BARE_DOMAIN = re.compile(
-    r"(?<![\w.])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|br|dev|app|co|me|info|xyz|"
-    r"example|ly|gl|ai|biz|site|online)(?![\w-])"
+    r"(?<![\w.])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(com|net|org|io|br|dev|app|co|me|info|xyz|"
+    r"example|ly|gl|ai|biz|site|online)(?![\w-])",
+    re.IGNORECASE,
 )
 
 
 def _has_contact(text: str, profile_folded: str) -> bool:
-    """URL, email or bare domain. A dotted name that the profile itself
-    contains (e.g. socket.io as a skill) is not a contact: the profile text
-    used here never contains links or emails."""
+    """URL, email or bare domain. Not a contact: a dotted name with an
+    all-uppercase suffix (ASP.NET, Socket.IO) or one the profile itself
+    contains (socket.io as a skill; the profile text here never contains
+    links or emails)."""
     if _CONTACT.search(text):
         return True
-    return any(
-        not re.search(r"(?<!\w)" + re.escape(_fold(m.group(0))) + r"(?!\w)", profile_folded)
-        for m in _BARE_DOMAIN.finditer(text)
-    )
+    for m in _BARE_DOMAIN.finditer(text):
+        if m.group(1).isupper():
+            continue
+        if not re.search(r"(?<!\w)" + re.escape(_fold(m.group(0))) + r"(?!\w)", profile_folded):
+            return True
+    return False
 
 
 def _words(text: str) -> set[str]:
@@ -461,16 +464,33 @@ def _sentence_ok(sentence: str, ctx: _Ctx, *, gap: bool) -> bool:
     return all(_term_in(t, haystack) for t in _salient_terms(sentence))
 
 
-# A rationale clause with one of these states an absence ("mas não cita
-# Kubernetes"), so, like a gap, it may name what the posting asks for.
+# In a rationale clause, the text FROM one of these markers on states an
+# absence ("mas não cita Kubernetes"), so, like a gap, it may name what the
+# posting asks for. The text before the marker is checked against the profile.
 _NEGATION = re.compile(
-    r"(?<!\w)(nao|sem|falta|faltam|faltar|ausencia|ausente|nem|apenas|carece|"
+    r"(?<!\w)(nao|sem|falta|faltam|faltar|ausencia|ausente|nem|carece|"
     r"not|without|lacks?|missing)(?!\w)"
+)
+# positive idioms that start with a marker word: not an absence
+_POSITIVE_IDIOM = re.compile(
+    r"(?<!\w)(?:sem\s+(?:duvidas?|dificuldades?|problemas?|esforcos?|interrupc\w*)"
+    r"|no\s+doubt|without\s+(?:doubt|difficulty|difficulties))(?!\w)"
 )
 _CLAUSE_SEP = re.compile(r"[,;:()]|\s(?=(?:mas|porem|but|embora|contudo|entretanto)\s)")
 
 
-def _clause_spans(sentence: str) -> list[tuple[int, int, bool]]:
+def _negation_at(folded: str, s: int, e: int) -> int | None:
+    """Offset of the first absence marker in folded[s:e], skipping positive
+    idioms ("sem dúvida", "without difficulty")."""
+    idioms = {m.start() for m in _POSITIVE_IDIOM.finditer(folded, s, e)}
+    for m in _NEGATION.finditer(folded, s, e):
+        if m.start() not in idioms:
+            return m.start()
+    return None
+
+
+def _clause_spans(sentence: str) -> list[tuple[int, int, int | None]]:
+    """(start, end, offset of the first absence marker or None) per clause."""
     folded = _fold(sentence)  # same length as `sentence` for PT/EN text
     if len(folded) != len(sentence):
         folded = sentence.lower()
@@ -479,28 +499,34 @@ def _clause_spans(sentence: str) -> list[tuple[int, int, bool]]:
         spans.append((start, m.start()))
         start = m.end()
     spans.append((start, len(sentence)))
-    return [(s, e, bool(_NEGATION.search(folded[s:e]))) for s, e in spans if s < e]
+    return [(s, e, _negation_at(folded, s, e)) for s, e in spans if s < e]
 
 
 def _rationale_sentence_ok(sentence: str, ctx: _Ctx) -> bool:
     sentence = _strip_exact(sentence, ctx.job)
     with_job = [*ctx.profile_sources, *ctx.job_sources]
     spans = _clause_spans(sentence)
-    for s, e, negated in spans:
-        clause = sentence[s:e]
-        sources = with_job if negated else ctx.profile_sources
-        if not numbers_supported(clause, sources):
-            return False
-        if not lexicon_supported(clause, sources):
-            return False
-        if not negated and not _no_job_skill_words(clause, ctx):
+    for s, e, neg_at in spans:
+        cut = e if neg_at is None else neg_at
+        before, after = sentence[s:cut], sentence[cut:e]
+        # before the marker: profile only; from the marker on: profile + job
+        for part, sources in ((before, ctx.profile_sources), (after, with_job)):
+            if not part.strip():
+                continue
+            if not numbers_supported(part, sources):
+                return False
+            if not lexicon_supported(part, sources):
+                return False
+        if before.strip() and not _no_job_skill_words(before, ctx):
             return False
     # capitalised/technical terms: found over the whole sentence (so a term
-    # right after a comma is not a "first word"), checked per its clause
+    # right after a comma is not a "first word"); job sources only after a marker
     profile_hay = ctx.profile_folded
     job_hay = _fold("\n".join(with_job))
     for term, pos in _salient_terms_at(sentence):
-        negated = any(s <= pos < e and n for s, e, n in spans)
+        negated = any(
+            neg_at is not None and s <= neg_at <= pos < e for s, e, neg_at in spans
+        )
         if not _term_in(term, job_hay if negated else profile_hay):
             return False
     return True
