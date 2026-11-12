@@ -115,6 +115,7 @@ describe("InterviewPage", () => {
   });
 
   it("sem perfil: estado vazio com link para o onboarding e sem iniciar entrevista", async () => {
+    m.get.mockResolvedValue(null);
     m.getProfile.mockResolvedValue(null);
     render(<InterviewPage />);
     const link = await screen.findByRole("link", { name: "Ir para o perfil" });
@@ -124,20 +125,20 @@ describe("InterviewPage", () => {
   });
 
   it("POST /interview com 409 também cai no estado vazio", async () => {
+    m.get.mockResolvedValue(null);
     m.start.mockRejectedValue(new ApiError(409, "Confirme seu perfil antes de iniciar a entrevista."));
     render(<InterviewPage />);
     expect(await screen.findByRole("link", { name: "Ir para o perfil" })).toBeInTheDocument();
   });
 
   it("API fora do ar: erro com Tentar de novo, sem polling", async () => {
-    m.getProfile
+    m.get
       .mockRejectedValueOnce(new ApiError(null, "Não consegui falar com a API em http://localhost:8000."))
-      .mockResolvedValue(stored);
-    m.get.mockResolvedValue(interview("awaiting_answer"));
+      .mockResolvedValue(interview("awaiting_answer"));
     render(<InterviewPage />);
     expect(await screen.findByRole("alert")).toHaveTextContent("Não consegui falar com a API");
     await tick(10_000);
-    expect(m.getProfile).toHaveBeenCalledTimes(1);
+    expect(m.get).toHaveBeenCalledTimes(1);
     fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByText(Q1)).toBeInTheDocument();
   });
@@ -149,7 +150,8 @@ describe("InterviewPage", () => {
       .mockResolvedValue(interview("awaiting_answer"));
     render(<InterviewPage />);
     expect(await screen.findByText(/Preparando a primeira pergunta/)).toBeInTheDocument();
-    expect(m.start).toHaveBeenCalledTimes(1);
+    // Entrevista ativa: retoma sem POST /interview.
+    expect(m.start).not.toHaveBeenCalled();
     expect(m.get).toHaveBeenCalledTimes(1);
     await tick(2000);
     expect(m.get).toHaveBeenCalledTimes(2);
@@ -268,7 +270,7 @@ describe("InterviewPage", () => {
     const region = question.closest("[tabindex='-1']");
     expect(region).not.toBeNull();
     expect(region).toHaveFocus();
-    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).not.toHaveAttribute("aria-live");
   });
 
   it("Pular chama skip", async () => {
@@ -317,5 +319,89 @@ describe("InterviewPage", () => {
     fireEvent.click(within(card).getByRole("button", { name: "Aceitar" }));
     expect(await within(card).findByRole("alert")).toHaveTextContent("O item mudou; descarte esta sugestão");
     expect(within(card).getByRole("button", { name: "Descartar" })).toBeEnabled();
+  });
+  it("primeira vez (nenhuma entrevista): confere o perfil e faz POST /interview uma vez", async () => {
+    m.get.mockResolvedValueOnce(null).mockResolvedValue(interview("generating"));
+    render(<InterviewPage />);
+    expect(await screen.findByText(/Preparando a primeira pergunta/)).toBeInTheDocument();
+    expect(m.getProfile).toHaveBeenCalledTimes(1);
+    expect(m.start).toHaveBeenCalledTimes(1);
+    await tick(4000);
+    expect(m.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("entrevista encerrada: mostra o encerramento sem criar outra; Nova entrevista inicia uma", async () => {
+    m.get
+      .mockResolvedValueOnce(answered("done", { suggestions: [pendingSuggestion] }))
+      .mockResolvedValue(interview("generating"));
+    m.start.mockResolvedValue({ id: 5, state: "generating" });
+    render(<InterviewPage />);
+    expect(await screen.findByText("Entrevista encerrada")).toBeInTheDocument();
+    expect(screen.getByText(/Ainda há 1 sugestão pendente/)).toBeInTheDocument();
+    expect(m.start).not.toHaveBeenCalled();
+    expect(m.getProfile).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Nova entrevista" }));
+    await vi.waitFor(() => expect(m.start).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText(/Preparando a primeira pergunta/)).toBeInTheDocument();
+  });
+
+  it("sugestão pendente de entrevista encerrada continua resolvível", async () => {
+    m.get
+      .mockResolvedValueOnce(answered("done", { suggestions: [pendingSuggestion] }))
+      .mockResolvedValue(
+        answered("done", { suggestions: [{ ...pendingSuggestion, status: "rejected" }] }),
+      );
+    m.resolve.mockResolvedValue({ status: "rejected", applied_version: null });
+    render(<InterviewPage />);
+    const card = await screen.findByRole("article");
+    fireEvent.click(within(card).getByRole("button", { name: "Descartar" }));
+    await vi.waitFor(() => expect(m.resolve).toHaveBeenCalledWith(9, "reject", undefined));
+    expect(await screen.findByText("Descartada")).toBeInTheDocument();
+    expect(m.start).not.toHaveBeenCalled();
+  });
+
+  it("409 do resolve com a sugestão já resolvida: recarrega e mostra o status real", async () => {
+    m.get
+      .mockResolvedValueOnce(answered("awaiting_answer", { suggestions: [pendingSuggestion] }))
+      .mockResolvedValue(
+        answered("awaiting_answer", {
+          suggestions: [{ ...pendingSuggestion, status: "accepted", applied_version: 2 }],
+        }),
+      );
+    m.resolve.mockRejectedValueOnce(new ApiError(409, "O item mudou; descarte esta sugestão"));
+    render(<InterviewPage />);
+    const card = await screen.findByRole("article");
+    fireEvent.click(within(card).getByRole("button", { name: "Aceitar" }));
+    expect(await screen.findByText("Aceita")).toBeInTheDocument();
+    expect(screen.queryByText("O item mudou; descarte esta sugestão")).not.toBeInTheDocument();
+    expect(m.get).toHaveBeenCalledTimes(2);
+  });
+
+  it("Encerrar fica bloqueado enquanto a resposta é enviada", async () => {
+    m.get.mockResolvedValue(interview("awaiting_answer"));
+    m.answer.mockReturnValue(new Promise(() => {}));
+    render(<InterviewPage />);
+    fireEvent.change(await screen.findByLabelText("Sua resposta"), { target: { value: "Umas 40." } });
+    expect(screen.getByRole("button", { name: "Encerrar entrevista" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar resposta" }));
+    await vi.waitFor(() =>
+      expect(screen.getByRole("button", { name: "Encerrar entrevista" })).toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Encerrar entrevista" }));
+    expect(screen.queryByRole("button", { name: "Sim, encerrar" })).not.toBeInTheDocument();
+    expect(m.finish).not.toHaveBeenCalled();
+  });
+
+  it("Tentar de novo (estado error) fica bloqueado enquanto uma sugestão é resolvida", async () => {
+    m.get.mockResolvedValue(answered("error", { error: "Falhou.", suggestions: [pendingSuggestion] }));
+    m.resolve.mockReturnValue(new Promise(() => {}));
+    render(<InterviewPage />);
+    const card = await screen.findByRole("article");
+    const retry = screen.getByRole("button", { name: "Tentar de novo" });
+    expect(retry).toBeEnabled();
+    fireEvent.click(within(card).getByRole("button", { name: "Aceitar" }));
+    await vi.waitFor(() => expect(retry).toBeDisabled());
+    fireEvent.click(retry);
+    expect(m.retry).not.toHaveBeenCalled();
   });
 });

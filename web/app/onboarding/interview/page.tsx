@@ -51,9 +51,15 @@ function busyText(d: Interview): string {
   return "Analisando sua resposta e preparando a próxima pergunta.";
 }
 
-/** Perfil → abre (ou retoma) a entrevista → estado atual. Nunca rejeita. */
+/**
+ * Abre a página: mostra a entrevista atual (ativa ou encerrada) sem criar outra.
+ * Só na primeira vez (nenhuma entrevista) confere o perfil e faz POST /interview.
+ * Nunca rejeita.
+ */
 async function openInterview(): Promise<Phase> {
   try {
+    const current = await getInterview();
+    if (current) return { name: "ready", data: current };
     if (!(await getProfile())) return { name: "no-profile" };
     try {
       await startInterview();
@@ -77,7 +83,9 @@ export default function InterviewPage() {
   const [phase, setPhase] = useState<Phase>({ name: "loading" });
   const [pollError, setPollError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [acting, setActing] = useState(false);
+  /** Chamadas em andamento (resposta, pulo, sugestão, encerrar...): bloqueia as outras ações. */
+  const [inFlight, setInFlight] = useState(0);
+  const acting = inFlight > 0;
   const [confirmFinish, setConfirmFinish] = useState(false);
   const [slow, setSlow] = useState(false);
   const mounted = useRef(true);
@@ -180,43 +188,75 @@ export default function InterviewPage() {
       )
     : [];
 
-  /** Ação que muda o estado da sessão; depois recarrega. */
-  async function transition(fn: (id: number) => Promise<{ state: InterviewState }>) {
-    if (!data || acting) return;
-    setActing(true);
-    setActionError(null);
+  /** Marca uma chamada em andamento enquanto `work` roda. */
+  async function track<T>(work: () => Promise<T>): Promise<T> {
+    setInFlight((n) => n + 1);
     try {
-      const { state } = await fn(data.id);
-      if (!mounted.current) return;
-      setConfirmFinish(false);
-      setData({ ...data, state });
-      await refresh();
-    } catch (err) {
-      if (mounted.current) setActionError(message(err));
+      return await work();
     } finally {
-      if (mounted.current) setActing(false);
+      if (mounted.current) setInFlight((n) => n - 1);
     }
   }
 
-  async function answer(text: string) {
-    if (!data) return;
-    const { state } = await answerInterview(data.id, text); // erro: o AnswerBox mostra
-    if (!mounted.current) return;
-    setData({ ...data, state });
-    await refresh();
+  /** Ação que muda o estado da sessão; depois recarrega. */
+  async function transition(fn: (id: number) => Promise<{ state: InterviewState }>) {
+    if (!data || acting) return;
+    setActionError(null);
+    try {
+      await track(async () => {
+        const { state } = await fn(data.id);
+        if (!mounted.current) return;
+        setConfirmFinish(false);
+        setData({ ...data, state });
+        await refresh();
+      });
+    } catch (err) {
+      if (mounted.current) setActionError(message(err));
+    }
   }
 
-  async function skip() {
+  /** Resposta ou pulo; o erro sobe para o AnswerBox, que mantém o rascunho. */
+  async function submit(send: (id: number) => Promise<{ state: InterviewState }>) {
     if (!data) return;
-    const { state } = await skipQuestion(data.id);
-    if (!mounted.current) return;
-    setData({ ...data, state });
-    await refresh();
+    await track(async () => {
+      const { state } = await send(data.id);
+      if (!mounted.current) return;
+      setData({ ...data, state });
+      await refresh();
+    });
   }
+
+  const answer = (text: string) => submit((id) => answerInterview(id, text));
+  const skip = () => submit(skipQuestion);
 
   async function resolve(id: number, action: ResolveAction, payload?: SuggestionPayload) {
-    await resolveSuggestion(id, action, payload); // erro: o cartão mostra (409/422)
-    if (mounted.current) await refresh();
+    await track(async () => {
+      try {
+        await resolveSuggestion(id, action, payload);
+      } catch (err) {
+        // 409: recarrega; se a sugestão já não estiver pendente, o cartão mostra o status
+        // real. O erro sobe para o cartão mostrar a mensagem (409/422).
+        if (err instanceof ApiError && err.status === 409 && mounted.current) await refresh();
+        throw err;
+      }
+      if (mounted.current) await refresh();
+    });
+  }
+
+  /** Depois de encerrada: começa outra entrevista só quando a pessoa pede. */
+  async function startNew() {
+    if (acting) return;
+    setActionError(null);
+    try {
+      await track(async () => {
+        await startInterview();
+        if (mounted.current) await refresh();
+      });
+    } catch (err) {
+      if (!mounted.current) return;
+      if (err instanceof ApiError && err.status === 409) setPhase({ name: "no-profile" });
+      else setActionError(message(err));
+    }
   }
 
   function retryPolling() {
@@ -309,7 +349,12 @@ export default function InterviewPage() {
           )}
 
           {data.state === "done" ? (
-            <DonePanel data={data} />
+            <DonePanel
+              data={data}
+              acting={acting}
+              error={actionError}
+              onStartNew={() => void startNew()}
+            />
           ) : (
             <section
               className="panel interview__current"
@@ -335,7 +380,6 @@ export default function InterviewPage() {
                     ref={questionRef}
                     className="interview__question"
                     tabIndex={-1}
-                    aria-live="polite"
                   >
                     <p>{question.content}</p>
                   </div>
@@ -435,7 +479,17 @@ export default function InterviewPage() {
   );
 }
 
-function DonePanel({ data }: { data: Interview }) {
+function DonePanel({
+  data,
+  acting,
+  error,
+  onStartNew,
+}: {
+  data: Interview;
+  acting: boolean;
+  error: string | null;
+  onStartNew: () => void;
+}) {
   const closing =
     [...data.messages].reverse().find((m) => m.role === "assistant" && m.kind === "info")
       ?.content || DEFAULT_CLOSING;
@@ -457,12 +511,30 @@ function DonePanel({ data }: { data: Interview }) {
               : `Ainda há ${pending} sugestões pendentes acima. Aceite, ajuste ou descarte antes de sair.`}
           </p>
         )}
+        <p className="muted">
+          Uma nova entrevista pergunta só sobre o que ainda falta no perfil.
+        </p>
       </div>
+      {error && (
+        <p className="field__error interview__action-error" role="alert">
+          {error}
+        </p>
+      )}
       <div className="panel__foot">
-        <span>Respostas e sugestões aceitas ficam guardadas no perfil.</span>
-        <Link className="button" href="/onboarding">
-          Ver perfil
-        </Link>
+        <Link href="/onboarding">← Voltar ao perfil</Link>
+        <div className="actions">
+          <button
+            type="button"
+            className="button button--secondary"
+            disabled={acting}
+            onClick={onStartNew}
+          >
+            Nova entrevista
+          </button>
+          <Link className="button" href="/onboarding">
+            Ver perfil
+          </Link>
+        </div>
       </div>
     </section>
   );

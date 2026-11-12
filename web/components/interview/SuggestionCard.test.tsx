@@ -121,4 +121,22 @@ describe("SuggestionCard", () => {
     expect(screen.getByText(label)).toBeInTheDocument();
     expect(screen.queryByRole("button")).not.toBeInTheDocument();
   });
+  it("409 durante o ajuste: sai da edição e ainda oferece Descartar", async () => {
+    const onResolve = vi
+      .fn()
+      .mockRejectedValueOnce(new ApiError(409, "O item mudou; descarte esta sugestão"))
+      .mockResolvedValueOnce(undefined);
+    render(<SuggestionCard suggestion={sug()} onResolve={onResolve} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ajustar" }));
+    fireEvent.change(screen.getByLabelText("Texto da conquista"), { target: { value: "Reduzi em 30%" } });
+    fireEvent.click(screen.getByRole("button", { name: "Salvar ajuste" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("O item mudou; descarte esta sugestão");
+    expect(screen.queryByRole("button", { name: "Salvar ajuste" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Ajustar" })).not.toBeInTheDocument();
+    const discard = screen.getByRole("button", { name: "Descartar" });
+    expect(discard).toBeEnabled();
+    fireEvent.click(discard);
+    expect(onResolve).toHaveBeenLastCalledWith("reject");
+    await vi.waitFor(() => expect(onResolve).toHaveBeenCalledTimes(2));
+  });
 });

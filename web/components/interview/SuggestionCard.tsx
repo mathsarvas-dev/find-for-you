@@ -61,8 +61,11 @@ export function SuggestionCard({ suggestion, onResolve }: SuggestionCardProps) {
       inFlight.current = false;
       if (!mounted.current) return;
       setBusy(false);
+      const conflict = err instanceof ApiError && err.status === 409;
+      // 409 no ajuste: sai da edição; o item mudou e só resta descartar.
+      if (conflict) setEditing(false);
       setProblem({
-        conflict: err instanceof ApiError && err.status === 409,
+        conflict,
         message:
           err instanceof ApiError ? err.message : "Não consegui salvar. Tente de novo.",
       });
