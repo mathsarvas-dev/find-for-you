@@ -5,7 +5,6 @@ serialised as JSON numbers (float), converted explicitly from Decimal.
 """
 
 import asyncio
-import re
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -21,6 +20,7 @@ from starlette.concurrency import run_in_threadpool
 from api.deps import current_user_id
 from rumo_core.db import get_session
 from rumo_core.models import Company, Job
+from rumo_core.sources.country import norm_country
 from rumo_core.sources import (
     Source,
     SourceBadResponse,
@@ -32,23 +32,11 @@ from rumo_core.sources import (
 router = APIRouter(tags=["sources"])
 
 FETCH_TIMEOUT_SECONDS = 15.0
-_COUNTRY_RE = re.compile(r"^[A-Za-z]{2}$")
 
 
 def source_getter() -> Callable[[str], Source]:
     """Dependency returning the source factory (overridden in tests)."""
     return get_source
-
-
-def _norm_country(value: str | None) -> str | None:
-    if value is None:
-        return None
-    value = value.strip()
-    if not value:
-        return None
-    if not _COUNTRY_RE.match(value):
-        raise ValueError("País deve ter 2 letras (ISO 3166-1 alpha-2).")
-    return value.upper()
 
 
 class CompanyIn(BaseModel):
@@ -60,7 +48,7 @@ class CompanyIn(BaseModel):
     @field_validator("country")
     @classmethod
     def _country(cls, v):
-        return _norm_country(v)
+        return norm_country(v)
 
     @field_validator("name")
     @classmethod
@@ -78,7 +66,7 @@ class CompanyPatch(BaseModel):
     @field_validator("country")
     @classmethod
     def _country(cls, v):
-        return _norm_country(v)
+        return norm_country(v)
 
     @field_validator("name")
     @classmethod

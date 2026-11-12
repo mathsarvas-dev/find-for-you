@@ -1,0 +1,174 @@
+import uuid
+
+import pytest
+from pydantic import ValidationError
+from sqlalchemy import delete, select
+
+from rumo_core.db import SessionLocal
+from rumo_core.matching.filters import SearchFilters, apply_filters
+from rumo_core.models import Company, Job, User
+
+
+def test_rejects_unknown_work_model():
+    with pytest.raises(ValidationError):
+        SearchFilters(work_models=["moon"])
+
+
+def test_rejects_extra_and_bad_values():
+    with pytest.raises(ValidationError):
+        SearchFilters(foo=1)
+    with pytest.raises(ValidationError):
+        SearchFilters(seniorities=["god"])
+    with pytest.raises(ValidationError):
+        SearchFilters(languages=["fr"])
+    with pytest.raises(ValidationError):
+        SearchFilters(countries=["USA"])
+    with pytest.raises(ValidationError):
+        SearchFilters(departments=["x"] * 21)
+    with pytest.raises(ValidationError):
+        SearchFilters(salary_min=-1, salary_currency="USD")
+
+
+def test_salary_min_requires_currency():
+    with pytest.raises(ValidationError):
+        SearchFilters(salary_min=1000)
+    assert SearchFilters(salary_min=1000, salary_currency="USD")
+
+
+def test_countries_normalized():
+    assert SearchFilters(countries=[" pt ", "de"]).countries == ["PT", "DE"]
+
+
+@pytest.fixture
+def env():
+    with SessionLocal() as s:
+        user = User(email=f"filters-{uuid.uuid4().hex}@example.test")
+        s.add(user)
+        s.commit()
+        c = Company(user_id=user.id, source="greenhouse", identifier="acme", name="Acme")
+        s.add(c)
+        s.commit()
+        counter = iter(range(1000))
+
+        def add(**kw):
+            n = next(counter)
+            j = Job(
+                user_id=user.id, company_id=c.id, external_id=str(n),
+                url="https://example.test/j", title=f"t{n}", description="d",
+                raw={}, content_hash="h", fingerprint=f"f{n}", **kw,
+            )
+            s.add(j)
+            s.commit()
+            return j.id
+
+        def run(filters):
+            stmt = select(Job.id).where(Job.user_id == user.id)
+            return set(s.scalars(apply_filters(stmt, filters)))
+
+        yield add, run
+        s.rollback()
+        s.execute(delete(Job).where(Job.user_id == user.id))
+        s.execute(delete(Company).where(Company.user_id == user.id))
+        s.execute(delete(User).where(User.id == user.id))
+        s.commit()
+
+
+db = pytest.mark.db
+
+
+@db
+def test_country_filter_matches_normalized_country(env):
+    add, run = env
+    pt = add(country="PT")
+    de = add(country="DE")
+    null = add()
+    assert run(SearchFilters(countries=["pt"], include_unknown=False)) == {pt}
+    assert run(SearchFilters(countries=["pt"])) == {pt, null}
+    assert de not in run(SearchFilters(countries=["pt"]))
+
+
+@db
+def test_unknown_work_model_kept_when_include_unknown(env):
+    add, run = env
+    remote = add(work_model="remote")
+    onsite = add(work_model="onsite")
+    unk = add()
+    assert run(SearchFilters(work_models=["remote"])) == {remote, unk}
+    assert onsite not in run(SearchFilters(work_models=["remote"]))
+
+
+@db
+def test_unknown_work_model_dropped_when_include_unknown_false(env):
+    add, run = env
+    remote = add(work_model="remote")
+    add()
+    f = SearchFilters(work_models=["remote"], include_unknown=False)
+    assert run(f) == {remote}
+
+
+@db
+def test_seniority_and_language(env):
+    add, run = env
+    a = add(seniority="senior", language="en")
+    add(seniority="junior", language="pt")
+    u = add()
+    f = SearchFilters(seniorities=["senior"], languages=["en"])
+    assert run(f) == {a, u}
+    f = SearchFilters(seniorities=["senior"], languages=["en"], include_unknown=False)
+    assert run(f) == {a}
+
+
+@db
+def test_salary_filter_year_month_hour_normalization(env):
+    add, run = env
+    month = add(salary_known=True, salary_min=5000, salary_currency="USD", salary_period="month")
+    hour = add(salary_known=True, salary_min=20, salary_currency="USD", salary_period="hour")
+    year = add(salary_known=True, salary_min=40000, salary_currency="USD", salary_period="year")
+    ymax = add(salary_known=True, salary_min=40000, salary_max=60000, salary_currency="USD", salary_period="year")
+    f = SearchFilters(salary_min=50000, salary_currency="USD", include_unknown=False, accept_no_salary=False)
+    assert run(f) == {month, ymax}
+    assert hour not in run(f) and year not in run(f)
+
+
+@db
+def test_salary_other_currency_counts_as_unknown(env):
+    add, run = env
+    eur = add(salary_known=True, salary_min=1, salary_currency="EUR", salary_period="year")
+    usd = add(salary_known=True, salary_min=90000, salary_currency="USD", salary_period="year")
+    f = SearchFilters(salary_min=50000, salary_currency="USD", include_unknown=False)
+    assert run(f) == {usd}
+    f = SearchFilters(salary_min=50000, salary_currency="USD", include_unknown=True)
+    assert eur in run(f)
+
+
+@db
+def test_no_salary_dropped_when_accept_no_salary_false(env):
+    add, run = env
+    nos = add()
+    usd = add(salary_known=True, salary_min=90000, salary_currency="USD", salary_period="year")
+    f = SearchFilters(salary_min=50000, salary_currency="USD", accept_no_salary=False)
+    assert run(f) == {usd}
+    f = SearchFilters(salary_min=50000, salary_currency="USD", accept_no_salary=True)
+    assert run(f) == {usd, nos}
+
+
+@db
+def test_department_filter_is_case_insensitive_and_escapes_like(env):
+    add, run = env
+    eng = add(department="Engineering")
+    pct = add(department="%")
+    null = add()
+    assert run(SearchFilters(departments=["engineering"], include_unknown=False)) == {eng}
+    assert run(SearchFilters(departments=["%"], include_unknown=False)) == {pct}
+    assert run(SearchFilters(departments=["engineering"])) == {eng, null}
+
+
+@db
+def test_empty_filters_change_nothing(env):
+    add, run = env
+    ids = {
+        add(),
+        add(country="PT", work_model="remote", department="X"),
+        add(salary_known=True, salary_min=1, salary_currency="EUR", salary_period="hour"),
+    }
+    assert run(SearchFilters()) == ids
