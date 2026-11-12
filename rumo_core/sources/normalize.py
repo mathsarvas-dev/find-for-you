@@ -622,6 +622,7 @@ _PERIOD_BEFORE = [
     ("month", re.compile(r"\bmonthly\W{0,3}$", re.I)),
 ]
 _ABORT = object()
+_MAX_AMOUNT = Decimal("1e12")  # Numeric(14,2) holds < 10**12
 
 
 def _parse_amount(s: str, k: bool) -> Decimal | None:
@@ -717,6 +718,10 @@ def _candidate(text: str, m: re.Match):
         if not _PAY_RE.search(pre + " " + post):
             return None
     if lo <= 0 or (hi is not None and (hi <= 0 or lo > hi)):
+        return _ABORT
+    # Job.salary_min/max are Numeric(14,2): an amount that cannot be stored is
+    # nonsense anyway, so the salary is unknown (saving it would fail the job)
+    if lo >= _MAX_AMOUNT or (hi is not None and hi >= _MAX_AMOUNT):
         return _ABORT
     period = None
     for name, pat in _PERIODS:

@@ -15,6 +15,7 @@ from rumo_core.sources.normalize import (
     detect_seniority,
     detect_work_model,
     extract_salary,
+    find_salary_spans,
     has_pay_context,
     html_to_text,
     normalize_job,
@@ -677,3 +678,13 @@ def test_parse_location_prefix_with_preposition(text, expected):
 
 def test_bonus_word_on_a_later_line_does_not_disqualify_salary():
     assert sal("Annual Salary:\n\n$100,000 - $120,000 USD\n\nLogistics\n\nMinimum education: Bachelor") == (D(100000), D(120000), "USD", None)
+
+
+@pytest.mark.parametrize("text", [
+    "Salary: $999,999,999,999k per year",
+    "Salary: $1,000,000,000,000 per year",
+])
+def test_extract_salary_amount_too_large_for_the_column_is_unknown(text):
+    # Job.salary_min/max are Numeric(14,2): anything >= 1e12 cannot be stored
+    assert extract_salary(text) is None
+    assert find_salary_spans(text) == []

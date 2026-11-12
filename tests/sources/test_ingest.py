@@ -1,3 +1,4 @@
+import dataclasses
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -265,6 +266,90 @@ def test_other_company_jobs_untouched(ctx):
     run(ctx, [], T0)
     with SessionLocal() as s:
         assert s.scalars(select(Job).where(Job.company_id == oid)).one().status == "open"
+
+
+def test_nul_in_raw_json_is_stripped_and_company_ingests(ctx):
+    bad = RawJob(
+        external_id="2", title="Eng\x00ineer", url="https://example.test/jobs/2",
+        location_text="Remote", description_html="<p>ok</p>", department=None,
+        posted_at=T0, raw={"id": 2, "content": "a\x00b", "nested": [{"k\x00": "v\x00"}]},
+    )
+    res = run(ctx, [raw(1), bad, raw(3)], T0)
+    assert res.created == 3 and res.skipped == 0
+    js = jobs(ctx)
+    assert js["2"].raw == {"id": 2, "content": "ab", "nested": [{"k": "v"}]}
+    assert js["2"].title == "Engineer"
+    assert company(ctx).open_jobs == 3
+
+
+def test_nul_in_description_is_stripped_and_company_ingests(ctx):
+    res = run(ctx, [raw(1), raw(2, desc="<p>Build\x00 things.</p>", loc="Re\x00mote"), raw(3)],
+              T0)
+    assert res.created == 3
+    js = jobs(ctx)
+    assert "\x00" not in js["2"].description and "Build" in js["2"].description
+    assert js["2"].location_text == "Remote"
+
+
+def test_salary_too_large_for_column_is_unknown_and_company_ingests(ctx):
+    res = run(ctx, [raw(1), raw(2, desc="<p>Salary: $999,999,999,999k per year</p>"), raw(3)],
+              T0)
+    assert res.created == 3
+    j = jobs(ctx)["2"]
+    assert j.salary_known is False and j.salary_min is None and j.salary_max is None
+
+
+def test_one_unsavable_job_is_skipped_and_the_rest_ingest(ctx, monkeypatch, caplog):
+    """A job the DB rejects (DataError) is skipped in its own savepoint; the
+    company and every other job still ingest, and a later run retries it."""
+    from decimal import Decimal
+
+    from rumo_core.sources import ingest as ingest_mod
+
+    real = ingest_mod.normalize_job
+
+    def broken(r):
+        n = real(r)
+        if r.external_id == "2":  # bypasses the extractor's guard on purpose
+            return dataclasses.replace(n, salary_min=Decimal("1e15"), salary_known=True)
+        return n
+
+    run(ctx, [raw(1), raw(2), raw(5)], T0)  # job 2 exists and is open
+    monkeypatch.setattr(ingest_mod, "normalize_job", broken)
+    with caplog.at_level("WARNING", logger="rumo_core.sources.ingest"):
+        res = run(ctx, [raw(1, desc="<p>changed</p>"), raw(2, desc="<p>new 2</p>"), raw(3),
+                        raw(4)], T1)
+    assert res.skipped == 1
+    assert res.created == 2 and res.updated == 1 and res.closed == 1  # 5 closed
+    js = jobs(ctx)
+    # the skipped job keeps its previous row (not closed: it is still on the board)
+    assert js["2"].status == "open" and js["2"].last_seen_at == T0
+    assert js["2"].description == "Build backend services in Python."
+    assert js["1"].description == "changed" and js["3"].status == "open"
+    assert js["5"].status == "closed"
+    assert company(ctx).open_jobs == 4
+    assert any("skipping job" in r.getMessage() for r in caplog.records)
+    # a NEW unsavable job is simply not created
+    res = run(ctx, [raw(1, desc="<p>changed</p>"), raw(2, desc="<p>new 2</p>"), raw(3),
+                    raw(4)], T2)
+    assert res.skipped == 1 and res.unchanged == 3
+
+
+def test_new_unsavable_job_is_not_created(ctx, monkeypatch):
+    from decimal import Decimal
+
+    from rumo_core.sources import ingest as ingest_mod
+
+    real = ingest_mod.normalize_job
+    monkeypatch.setattr(
+        ingest_mod, "normalize_job",
+        lambda r: dataclasses.replace(real(r), salary_max=Decimal("1e15"))
+        if r.external_id == "2" else real(r),
+    )
+    res = run(ctx, [raw(1), raw(2), raw(3)], T0)
+    assert res.created == 2 and res.skipped == 1
+    assert set(jobs(ctx)) == {"1", "3"}
+    assert company(ctx).open_jobs == 2
 
 
 def test_bulk_ingest_is_fast_and_query_bounded(ctx):

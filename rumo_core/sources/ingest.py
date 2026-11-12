@@ -29,17 +29,28 @@ Rules:
   oversized external_id) while the company has >= SUSPICIOUS_EMPTY_MIN_OPEN
   open jobs raises SuspiciousEmptyResult before anything is touched.
 
-Counters: created/updated/unchanged partition the jobs present in the list;
-closed, reopened (closed -> open) and duplicates (jobs that BECAME duplicate in
-this batch) count status transitions, so a repeated identical ingest reports
-only `unchanged`.
+One bad posting never blocks the company: NUL characters (rejected by Postgres
+in Text and JSONB) are stripped from every text field and from `raw` first,
+and the salary extractor treats amounts the column cannot hold as unknown.
+Should the DB still reject a job (DataError), the bulk pass (run in a
+savepoint) is rolled back and redone with one savepoint per job: each rejected
+job is skipped (logged by external_id, counted in `skipped`); a skipped job
+that already existed keeps its previous row and is not closed (it is still on
+the board). IntegrityError (a concurrent run) still propagates.
+
+Counters: created/updated/unchanged partition the jobs present in the list
+(minus the skipped ones); closed, reopened (closed -> open) and duplicates
+(jobs that BECAME duplicate in this batch) count status transitions, so a
+repeated identical ingest reports only `unchanged`.
 """
 
+import dataclasses
 import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session, defer
 
 from rumo_core.models import Company, Job
@@ -66,6 +77,31 @@ class IngestResult:
     closed: int = 0
     reopened: int = 0
     duplicates: int = 0
+    skipped: int = 0  # jobs the DB rejected (left as they were / not created)
+
+
+def _strip_nul(value):
+    """`value` with every NUL removed from its strings (dict keys included)."""
+    if isinstance(value, str):
+        return value.replace("\x00", "") if "\x00" in value else value
+    if isinstance(value, dict):
+        return {_strip_nul(k): _strip_nul(v) for k, v in value.items()}
+    if isinstance(value, list | tuple):
+        return [_strip_nul(v) for v in value]
+    return value
+
+
+def _sanitize(r: RawJob) -> RawJob:
+    return dataclasses.replace(
+        r,
+        external_id=_strip_nul(r.external_id),
+        title=_strip_nul(r.title),
+        url=_strip_nul(r.url),
+        location_text=_strip_nul(r.location_text),
+        description_html=_strip_nul(r.description_html),
+        department=_strip_nul(r.department),
+        raw=_strip_nul(r.raw),
+    )
 
 
 def _apply(job: Job, raw: RawJob, n: NormalizedJob) -> None:
@@ -96,6 +132,7 @@ def ingest_jobs(
     # last occurrence of a repeated external_id wins
     by_id: dict[str, RawJob] = {}
     for r in raws:
+        r = _sanitize(r)
         if len(r.external_id) > _MAX_EXTERNAL_ID:
             logger.warning("company %s: skipping job with oversized external_id", company.id)
             continue
@@ -114,6 +151,20 @@ def ingest_jobs(
                 "vagas abertas; nada foi fechado."
             )
 
+    try:
+        with session.begin_nested():
+            return _ingest(session, user_id, company, by_id, now, isolate=False)
+    except DataError:
+        # the savepoint rollback expunged the new jobs and expired the changed
+        # ones: redo the pass job by job to find and skip the rejected ones
+        logger.warning("company %s: bulk ingest rejected; retrying job by job", company.id)
+    return _ingest(session, user_id, company, by_id, now, isolate=True)
+
+
+def _ingest(
+    session: Session, user_id: int, company: Company, by_id: dict[str, RawJob],
+    now: datetime, *, isolate: bool,
+) -> IngestResult:
     existing: dict[str, Job] = {
         j.external_id: j
         for j in session.scalars(
@@ -127,35 +178,28 @@ def ingest_jobs(
     present: list[Job] = []
     incumbent: set[str] = set()
 
+
     for eid, r in by_id.items():
         n = normalize_job(r)
-        job = existing.get(eid)
-        if job is None:
-            job = Job(
-                user_id=user_id, company_id=company.id, external_id=eid,
-                status="open", first_seen_at=now, last_seen_at=now, fill_attempts=0,
-            )
-            _apply(job, r, n)
-            session.add(job)
-            existing[eid] = job
-            res.created += 1
-        elif job.content_hash == n.content_hash:
-            job.last_seen_at = now
-            res.unchanged += 1
-            if job.status == "open":
-                incumbent.add(eid)
-        else:
-            same_fp = job.fingerprint == n.fingerprint
-            _apply(job, r, n)
-            job.embedding = None
-            job.model_version = None
-            job.llm_filled_at = None
-            job.fill_attempts = 0
-            job.last_seen_at = now
-            res.updated += 1
-            if job.status == "open" and same_fp:
-                incumbent.add(eid)
-        present.append(job)
+        if not isolate:
+            _upsert(session, user_id, company, existing, eid, r, n, now, res, present, incumbent)
+            continue
+        counts, saved, inc = dataclasses.replace(res), [], set()
+        try:
+            with session.begin_nested():
+                _upsert(session, user_id, company, existing, eid, r, n, now, counts, saved, inc)
+                session.flush()
+        except DataError:
+            # rolled back: a new job was expunged, a changed one reverted to its row
+            logger.warning("company %s: skipping job %r the database rejected",
+                           company.id, eid[:64])
+            if eid not in prev_status:
+                existing.pop(eid, None)
+            res.skipped += 1
+            continue
+        res = counts
+        present += saved
+        incumbent |= inc
 
     # one survivor per fingerprint among the present jobs
     groups: dict[str, list[Job]] = {}
@@ -185,3 +229,37 @@ def ingest_jobs(
     company.open_jobs = sum(1 for j in existing.values() if j.status == "open")
     session.flush()
     return res
+
+
+def _upsert(
+    session: Session, user_id: int, company: Company, existing: dict[str, Job], eid: str,
+    r: RawJob, n: NormalizedJob, now: datetime, res: IngestResult, present: list[Job],
+    incumbent: set[str],
+) -> None:
+    job = existing.get(eid)
+    if job is None:
+        job = Job(
+            user_id=user_id, company_id=company.id, external_id=eid,
+            status="open", first_seen_at=now, last_seen_at=now, fill_attempts=0,
+        )
+        _apply(job, r, n)
+        session.add(job)
+        existing[eid] = job
+        res.created += 1
+    elif job.content_hash == n.content_hash:
+        job.last_seen_at = now
+        res.unchanged += 1
+        if job.status == "open":
+            incumbent.add(eid)
+    else:
+        same_fp = job.fingerprint == n.fingerprint
+        _apply(job, r, n)
+        job.embedding = None
+        job.model_version = None
+        job.llm_filled_at = None
+        job.fill_attempts = 0
+        job.last_seen_at = now
+        res.updated += 1
+        if job.status == "open" and same_fp:
+            incumbent.add(eid)
+    present.append(job)
