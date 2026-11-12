@@ -4,7 +4,7 @@ import json
 import math
 import re
 from datetime import datetime, timezone
-from urllib.parse import parse_qs, urlparse
+from urllib.parse import parse_qs, quote, urlparse
 
 import httpx
 
@@ -52,7 +52,10 @@ def _to_raw_job(item) -> RawJob | None:
         return None
     job_id = item.get("id")
     title = item.get("title")
-    if job_id is None or isinstance(job_id, bool) or not isinstance(title, str) or not title.strip():
+    if isinstance(job_id, bool) or not isinstance(job_id, (int, str)):
+        return None
+    external_id = str(job_id).strip()
+    if not external_id or not isinstance(title, str) or not title.strip():
         return None
     location = item.get("location")
     location_text = location.get("name") if isinstance(location, dict) else None
@@ -63,11 +66,13 @@ def _to_raw_job(item) -> RawJob | None:
         department = name if isinstance(name, str) and name else None
     content = item.get("content")
     url = item.get("absolute_url")
+    if not isinstance(url, str) or not url.strip():
+        return None
     posted = _parse_dt(item.get("first_published")) or _parse_dt(item.get("updated_at"))
     return RawJob(
-        external_id=str(job_id),
+        external_id=external_id,
         title=title,
-        url=url if isinstance(url, str) else "",
+        url=url,
         location_text=location_text if isinstance(location_text, str) else "",
         description_html=html.unescape(content) if isinstance(content, str) else "",
         department=department,
@@ -83,6 +88,9 @@ class GreenhouseSource:
         self._client = client
         self._max_bytes = max_bytes
         self._sleep = sleep
+
+    async def aclose(self) -> None:
+        await self._client.aclose()
 
     def normalize_identifier(self, text: str) -> str:
         value = (text or "").strip()
@@ -123,7 +131,7 @@ class GreenhouseSource:
 
     async def fetch_jobs(self, identifier: str) -> list[RawJob]:
         token = self.normalize_identifier(identifier)
-        url = API_URL.format(token=token)
+        url = API_URL.format(token=quote(token, safe=""))
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         for attempt in range(MAX_RETRIES + 1):
             try:

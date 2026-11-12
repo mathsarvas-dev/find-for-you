@@ -5,7 +5,9 @@ from pathlib import Path
 import httpx
 import pytest
 
-from rumo_core.sources import get_source, register_source
+import gzip
+
+from rumo_core.sources import aclose_sources, get_source, register_source
 from rumo_core.sources.base import (
     SourceBadResponse,
     SourceNotFound,
@@ -62,10 +64,10 @@ async def test_parses_real_fixture(name):
 
 async def test_posted_at_prefers_first_published_and_handles_naive_and_bad():
     items = [
-        {"id": 1, "title": "a", "first_published": "2026-01-01T10:00:00-05:00", "updated_at": "2026-02-01T00:00:00Z"},
-        {"id": 2, "title": "b", "updated_at": "2026-02-01T00:00:00"},
-        {"id": 3, "title": "c", "updated_at": "garbage"},
-        {"id": 4, "title": "d"},
+        {"id": 1, "title": "a", "absolute_url": "u", "first_published": "2026-01-01T10:00:00-05:00", "updated_at": "2026-02-01T00:00:00Z"},
+        {"id": 2, "title": "b", "absolute_url": "u", "updated_at": "2026-02-01T00:00:00"},
+        {"id": 3, "title": "c", "absolute_url": "u", "updated_at": "garbage"},
+        {"id": 4, "title": "d", "absolute_url": "u"},
     ]
     src, _, _ = make([ok({"jobs": items})])
     jobs = await src.fetch_jobs("x")
@@ -78,10 +80,10 @@ async def test_posted_at_prefers_first_published_and_handles_naive_and_bad():
 
 async def test_skips_items_without_id_or_title():
     items = [
-        {"id": 1, "title": "ok"},
-        {"title": "no id"},
+        {"id": 1, "title": "ok", "absolute_url": "u"},
+        {"title": "no id", "absolute_url": "u"},
         {"id": 3},
-        {"id": 4, "title": ""},
+        {"id": 4, "title": "", "absolute_url": "u"},
         "junk",
     ]
     src, _, _ = make([ok({"jobs": items})])
@@ -207,10 +209,89 @@ def test_normalize_identifier_variants():
     assert n("x" * 100) == "x" * 100
 
 
-def test_get_source_registry():
-    assert get_source("greenhouse").name == "greenhouse"
-    with pytest.raises(KeyError, match="nope"):
-        get_source("nope")
-    sentinel = object()
-    register_source("dummy", lambda: sentinel)
-    assert get_source("dummy") is sentinel
+async def test_get_source_registry():
+    try:
+        assert get_source("greenhouse").name == "greenhouse"
+        with pytest.raises(KeyError, match="nope"):
+            get_source("nope")
+        sentinel = _Dummy()
+        register_source("dummy", lambda: sentinel)
+        assert get_source("dummy") is sentinel
+    finally:
+        await aclose_sources()
+        from rumo_core import sources
+
+        sources._REGISTRY.pop("dummy", None)
+
+
+class _Dummy:
+    name = "dummy"
+
+    async def aclose(self):
+        pass
+
+
+async def test_get_source_cached_and_aclose_resets():
+    a = get_source("greenhouse")
+    assert get_source("greenhouse") is a
+    client = a._client
+    assert not client.is_closed
+    await aclose_sources()
+    assert client.is_closed
+    b = get_source("greenhouse")
+    assert b is not a and not b._client.is_closed
+    await aclose_sources()
+    assert b._client.is_closed
+
+
+async def test_streaming_cap_aborts_early_without_content_length():
+    consumed = 0
+
+    async def body():
+        nonlocal consumed
+        for _ in range(100):
+            consumed += 1
+            yield b"x" * 100
+
+    src, _, _ = make([httpx.Response(200, content=body())], max_bytes=350)
+    with pytest.raises(SourceBadResponse):
+        await src.fetch_jobs("x")
+    assert consumed < 10
+
+
+async def test_gzip_decoded_size_over_cap_is_bad_response():
+    raw = json.dumps({"jobs": [], "pad": "a" * 50_000}).encode()
+    comp = gzip.compress(raw)
+    assert len(comp) < 1000
+    resp = httpx.Response(200, content=comp, headers={"Content-Encoding": "gzip"})
+    src, _, _ = make([resp], max_bytes=2000)
+    with pytest.raises(SourceBadResponse):
+        await src.fetch_jobs("x")
+
+
+async def test_skips_items_without_usable_url_or_id():
+    items = [
+        {"id": 1, "title": "ok", "absolute_url": "https://x/1"},
+        {"id": 2, "title": "nourl", "absolute_url": ""},
+        {"id": 3, "title": "nourl2"},
+        {"id": "  ", "title": "blank id", "absolute_url": "https://x/4"},
+        {"id": [1], "title": "list id", "absolute_url": "https://x/5"},
+        {"id": "abc", "title": "str id", "absolute_url": "https://x/6"},
+    ]
+    src, _, _ = make([ok({"jobs": items})])
+    jobs = await src.fetch_jobs("x")
+    assert [j.external_id for j in jobs] == ["1", "abc"]
+
+
+async def test_single_unescape_only():
+    item = {"id": 1, "title": "t", "absolute_url": "https://x/1", "content": "&amp;lt;b&amp;gt; &lt;p&gt;"}
+    src, _, _ = make([ok({"jobs": [item]})])
+    jobs = await src.fetch_jobs("x")
+    assert jobs[0].description_html == "&lt;b&gt; <p>"
+
+
+async def test_3xx_is_bad_response():
+    src, reqs, _ = make([httpx.Response(302, headers={"Location": "https://evil/"}, text="secret")])
+    with pytest.raises(SourceBadResponse) as ei:
+        await src.fetch_jobs("x")
+    assert "secret" not in str(ei.value) and len(reqs) == 1
