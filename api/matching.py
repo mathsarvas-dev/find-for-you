@@ -33,6 +33,7 @@ router = APIRouter(tags=["matching"])
 
 DEFAULT_PROFILE_NAME = "default"
 REFRESH_INTERVAL_SECONDS = 10.0
+INT4_MAX = 2**31 - 1
 
 MSG_NO_PROFILE = "Confirme seu perfil antes de avaliar vagas."
 MSG_NOT_VECTORIZED = (
@@ -65,19 +66,36 @@ class RefreshLimiter:
         self._last: dict[int, float] = {}
         self._lock = threading.Lock()
 
-    def hit(self, user_id: int) -> bool:
-        """Record a call; False if the previous one was < interval ago."""
+    def acquire(self, user_id: int) -> tuple[float, float | None] | None:
+        """Reserve a call; None if the previous counted one was < interval ago.
+
+        Returns a token for `release` (used when the call ends up failing)."""
         with self._lock:
             now = self.clock()
             last = self._last.get(user_id)
             if last is not None and now - last < self.interval:
-                return False
+                return None
             if len(self._last) > 10_000:  # bound memory: drop expired entries
                 self._last = {
                     u: t for u, t in self._last.items() if now - t < self.interval
                 }
             self._last[user_id] = now
-            return True
+            return (now, last)
+
+    def release(self, user_id: int, token: tuple[float, float | None]) -> None:
+        """Undo a reservation so a failed call does not count."""
+        now, previous = token
+        with self._lock:
+            if self._last.get(user_id) != now:  # superseded meanwhile
+                return
+            if previous is None:
+                del self._last[user_id]
+            else:
+                self._last[user_id] = previous
+
+    def hit(self, user_id: int) -> bool:
+        """Record a call; False if the previous one was < interval ago."""
+        return self.acquire(user_id) is not None
 
     def reset(self) -> None:
         with self._lock:
@@ -101,8 +119,17 @@ class SearchProfileOut(BaseModel):
 UnknownField = Literal["salary", "work_model", "country", "seniority", "language"]
 
 
+class MatchJob(JobItem):
+    """JobItem plus salary amounts (still no description/raw)."""
+
+    salary_min: float | None
+    salary_max: float | None
+    salary_currency: str | None
+    salary_period: str | None
+
+
 class MatchItem(BaseModel):
-    job: JobItem
+    job: MatchJob
     vec_score: float
     ai_score: int | None
     state: str | None
@@ -246,13 +273,15 @@ def list_matches(
         j = r.job
         if j.user_id != user_id or j.company_id not in names:  # defensive
             continue
-        job = JobItem(
+        job = MatchJob(
             id=j.id, company_id=j.company_id, company_name=names[j.company_id],
             title=j.title, url=j.url, location_text=j.location_text,
             country=j.country, city=j.city, work_model=j.work_model,
             seniority=j.seniority, language=j.language, department=j.department,
             salary_known=j.salary_known, status=j.status,
             first_seen_at=j.first_seen_at, posted_at=j.posted_at,
+            salary_min=_f(j.salary_min), salary_max=_f(j.salary_max),
+            salary_currency=j.salary_currency, salary_period=j.salary_period,
         )
         m = r.match
         items.append(MatchItem(
@@ -275,6 +304,8 @@ def match_detail(
     user_id: int = Depends(current_user_id),
     mv: str = Depends(model_version),
 ):
+    if not 1 <= job_id <= INT4_MAX:  # outside the int4 id column: no such job
+        raise HTTPException(404, "Vaga não encontrada.")
     r = session.execute(
         select(
             *_ITEM_COLS, Job.description, Job.salary_min, Job.salary_max,
@@ -317,19 +348,25 @@ def refresh_matches(
     mv: str = Depends(model_version),
     limiter: RefreshLimiter = Depends(get_refresh_limiter),
 ):
-    if not limiter.hit(user_id):
+    token = limiter.acquire(user_id)
+    if token is None:
         raise HTTPException(
             429, MSG_RATE_LIMITED,
             headers={"Retry-After": str(int(limiter.interval))},
         )
-    version, used = usable_profile(session, user_id, mv)
-    if version is None:
-        raise HTTPException(409, MSG_NO_PROFILE)
-    if used == 0:
-        raise HTTPException(409, MSG_NOT_VECTORIZED)
-    filters = _filters_or_409(session, user_id)
-    res = mark_pending(session, user_id, filters, model_version=mv,
-                       n=get_settings().match_top_n)
+    try:
+        version, used = usable_profile(session, user_id, mv)
+        if version is None:
+            raise HTTPException(409, MSG_NO_PROFILE)
+        if used == 0:
+            raise HTTPException(409, MSG_NOT_VECTORIZED)
+        filters = _filters_or_409(session, user_id)
+        res = mark_pending(session, user_id, filters, model_version=mv,
+                           n=get_settings().match_top_n)
+    except BaseException:
+        # only calls that went through count toward the interval
+        limiter.release(user_id, token)
+        raise
     return RefreshOut(
         requested=res.requested, created=res.created, reset=res.reset,
         already_ok=res.already_ok, profile_version=res.profile_version,

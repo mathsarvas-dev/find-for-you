@@ -35,6 +35,20 @@ def test_salary_min_requires_currency():
     assert SearchFilters(salary_min=1000, salary_currency="USD")
 
 
+@pytest.mark.parametrize("bad", [float("inf"), float("nan"), 1e309, 1e12 + 1])
+def test_salary_min_must_be_finite_and_bounded(bad):
+    with pytest.raises(ValidationError):
+        SearchFilters(salary_min=bad, salary_currency="USD")
+    assert SearchFilters(salary_min=1e12, salary_currency="USD").salary_min == 1e12
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "\t"])
+def test_departments_reject_blank(bad):
+    with pytest.raises(ValidationError):
+        SearchFilters(departments=["Eng", bad])
+    assert SearchFilters(departments=["Eng"]).departments == ["Eng"]
+
+
 def test_countries_normalized():
     assert SearchFilters(countries=[" pt ", "de"]).countries == ["PT", "DE"]
 

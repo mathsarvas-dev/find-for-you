@@ -17,6 +17,7 @@ from rumo_core.sources.country import norm_country
 WORK_MODELS = {"onsite", "hybrid", "remote"}
 SENIORITIES = {"intern", "junior", "mid", "senior", "lead", "manager", "director"}
 LANGUAGES = {"pt", "en", "de"}
+SALARY_MAX = 1e12
 
 _Str = Annotated[str, Field(max_length=255)]
 _List = Annotated[list[_Str], Field(max_length=20)]
@@ -37,7 +38,10 @@ class SearchFilters(BaseModel):
     seniorities: _List = []
     languages: _List = []
     departments: _List = []
-    salary_min: float | None = Field(default=None, ge=0)
+    # finite (JSONB rejects Infinity/NaN) and within Numeric(14, 2)
+    salary_min: float | None = Field(
+        default=None, ge=0, le=SALARY_MAX, allow_inf_nan=False
+    )
     salary_currency: str | None = Field(default=None, max_length=8)
     include_unknown: bool = True
     accept_no_salary: bool = True
@@ -67,6 +71,13 @@ class SearchFilters(BaseModel):
     @classmethod
     def _lang(cls, v):
         return _subset(v, LANGUAGES, "languages")
+
+    @field_validator("departments")
+    @classmethod
+    def _dep(cls, v):
+        if any(not d.strip() for d in v):
+            raise ValueError("Departamento vazio.")
+        return v
 
     @field_validator("salary_currency")
     @classmethod

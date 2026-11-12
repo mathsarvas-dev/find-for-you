@@ -363,6 +363,62 @@ def test_refresh_limiter_unit():
     assert lim.hit(1) is True
 
 
+def test_refresh_limiter_release_restores_previous():
+    clock = FakeClock()
+    lim = api_matching.RefreshLimiter(interval=10.0, clock=clock)
+    first = lim.acquire(1)
+    assert first is not None
+    clock.t += 20
+    second = lim.acquire(1)
+    assert second is not None
+    lim.release(1, second)          # failed call: back to the first stamp
+    assert lim.acquire(1) is not None  # first was 20 s ago -> allowed
+    fresh = lim.acquire(2)
+    lim.release(2, fresh)           # no previous call: entry removed
+    assert lim.acquire(2) is not None
+
+
+@pytest.mark.db
+def test_refresh_409_does_not_count_for_rate_limit(env, as_user, clock):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    c = as_user(uid)
+    assert c.post("/matches/refresh").status_code == 409  # no profile
+    add_profile(uid, version=1, emb=None)
+    r = c.post("/matches/refresh")
+    assert r.status_code == 409 and r.json()["detail"] == api_matching.MSG_NOT_VECTORIZED
+    add_profile(uid, version=2, emb=e(0))
+    add_job(uid, cid, e(0))
+    assert c.post("/matches/refresh").status_code == 200  # immediate retry allowed
+    assert c.post("/matches/refresh").status_code == 429  # success counted
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("raw", ['{"salary_min": Infinity, "salary_currency": "USD"}',
+                                 '{"salary_min": NaN, "salary_currency": "USD"}',
+                                 '{"salary_min": 1e309, "salary_currency": "USD"}',
+                                 '{"salary_min": 1000000000001, "salary_currency": "USD"}',
+                                 '{"departments": ["  "]}'])
+def test_put_rejects_non_finite_huge_salary_and_blank_department(env, as_user, raw):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    r = as_user(uid).put("/search-profile", content=raw,
+                         headers={"content-type": "application/json"})
+    assert r.status_code == 422, r.text
+    with SessionLocal() as s:
+        assert s.scalars(select(SearchProfile).where(SearchProfile.user_id == uid)).all() == []
+
+
+@pytest.mark.db
+def test_match_detail_huge_id_404(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    assert c.get("/matches/99999999999999999999").status_code == 404
+    assert c.get(f"/matches/{2**31}").status_code == 404
+    assert c.get("/matches/0").status_code == 404
+
+
 @pytest.mark.db
 def test_refresh_without_profile_409(env, as_user):
     new_user, add_job, _ = env
@@ -399,6 +455,10 @@ def test_unknown_fields_marked(env, as_user):
     partial = add_job(uid, cid, e(2), work_model="hybrid", country="DE")
     items = {i["job"]["id"]: i for i in as_user(uid).get("/matches").json()["items"]}
     assert items[known]["unknown_fields"] == []
+    assert items[known]["job"]["salary_min"] == 1.0 and items[known]["job"]["salary_max"] is None
+    assert items[known]["job"]["salary_currency"] == "BRL"
+    assert items[known]["job"]["salary_period"] == "year"
+    assert items[unknown]["job"]["salary_min"] is None and items[unknown]["job"]["salary_currency"] is None
     assert items[unknown]["unknown_fields"] == [
         "salary", "work_model", "country", "seniority", "language"]
     assert items[partial]["unknown_fields"] == ["salary", "seniority", "language"]
