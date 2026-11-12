@@ -23,6 +23,15 @@ export default function StatusPage() {
           Montar meu perfil
         </Link>
       </section>
+      <section className="next-step next-step--follow" aria-labelledby="fontes">
+        <p>
+          <strong id="fontes">Fontes</strong>: cadastre as empresas que o Rumo vigia e veja as
+          vagas coletadas.
+        </p>
+        <Link className="button button--secondary" href="/sources">
+          Abrir fontes
+        </Link>
+      </section>
     </main>
   );
 }

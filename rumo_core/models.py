@@ -1,8 +1,11 @@
 from datetime import datetime
 
 from pgvector.sqlalchemy import Vector
+from decimal import Decimal
+
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, String, Text, UniqueConstraint, func,
+    Boolean, DateTime, ForeignKey, Index, Numeric, String, Text,
+    UniqueConstraint, func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -163,3 +166,105 @@ class AnswerBankItem(UserScopedMixin, TimestampMixin, Base):
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[int | None] = mapped_column()
+
+
+class Company(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "companies"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source", "identifier",
+            name="uq_companies_user_source_identifier",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    # greenhouse
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    # board token, lowercase
+    identifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    country: Mapped[str | None] = mapped_column(String(64))
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(
+        nullable=False, server_default="0"
+    )
+    open_jobs: Mapped[int] = mapped_column(nullable=False, server_default="0")
+
+
+class Job(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "jobs"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "company_id", "external_id",
+            name="uq_jobs_user_company_external",
+        ),
+        Index("ix_jobs_user_status", "user_id", "status"),
+        Index(
+            "ix_jobs_user_company_fingerprint",
+            "user_id", "company_id", "fingerprint",
+        ),
+        Index("ix_jobs_user_model_version", "user_id", "model_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    company_id: Mapped[int] = mapped_column(
+        ForeignKey("companies.id", ondelete="CASCADE"), nullable=False
+    )
+    external_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    country: Mapped[str | None] = mapped_column(String(64))
+    city: Mapped[str | None] = mapped_column(String(255))
+    location_text: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=""
+    )
+    # onsite | hybrid | remote | unknown
+    work_model: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="unknown"
+    )
+    # intern | junior | mid | senior | lead | manager | director | unknown
+    seniority: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="unknown"
+    )
+    # pt | en | de | unknown
+    language: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="unknown"
+    )
+    department: Mapped[str | None] = mapped_column(String(255))
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    raw: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    # open | closed | duplicate
+    status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="open"
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    salary_min: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    salary_max: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    salary_currency: Mapped[str | None] = mapped_column(String(8))
+    # year | month | hour
+    salary_period: Mapped[str | None] = mapped_column(String(16))
+    salary_known: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    # filled in marco 4
+    salary_ref_min: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    salary_ref_max: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    llm_filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    fill_attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    model_version: Mapped[str | None] = mapped_column(String(128))

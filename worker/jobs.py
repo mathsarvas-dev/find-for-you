@@ -14,6 +14,8 @@ from rumo_core.profile.extraction import extract_profile
 logger = logging.getLogger("worker.jobs")
 
 _embed_lock = asyncio.Lock()
+# public alias: the same lock serialises every CPU-bound embedding call
+EMBED_LOCK = _embed_lock
 
 MSG_INVALID = "Não foi possível interpretar o currículo. Tente outro arquivo."
 MSG_LLM_FAIL = "Falha ao processar o currículo. Tente novamente mais tarde."
