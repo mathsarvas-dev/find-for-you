@@ -105,7 +105,11 @@ export class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<{ status: number; body: T }> {
+/** fetch na API pública; erros viram ApiError com o `detail` em PT-BR do servidor. */
+export async function request<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ status: number; body: T }> {
   const base = publicApiUrl();
   let res: Response;
   try {
