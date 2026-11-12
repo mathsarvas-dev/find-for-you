@@ -92,6 +92,7 @@ async def main() -> None:
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
     from rumo_core.sources import aclose_sources
+    from worker.collect_jobs import embed_pending_jobs
     from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
@@ -117,6 +118,16 @@ async def main() -> None:
     registry.register(
         "embed_chunks",
         partial(embed_pending_chunks, SessionLocal, embedder, settings.embed_batch_size),
+        5,
+    )
+    # after embed_chunks (profile first); one batch per tick so a long backlog
+    # (~0.4 texts/s on CPU) never starves the other jobs
+    registry.register(
+        "embed_jobs",
+        partial(
+            embed_pending_jobs, SessionLocal, embedder, settings.embed_batch_size,
+            max_batches=1,
+        ),
         5,
     )
     # every 60 s; per-company next_run_at governs the real collection frequency

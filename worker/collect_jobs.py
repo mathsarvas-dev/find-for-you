@@ -2,19 +2,23 @@
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select
 
-from rumo_core.models import Company
+from rumo_core.embeddings.base import Embedder
+from rumo_core.models import Company, Job
 from rumo_core.sources import get_source
 from rumo_core.sources.base import (
     SourceBadResponse,
     SourceNotFound,
     SourceUnavailable,
 )
+from rumo_core.sources.embed_text import job_embedding_text
 from rumo_core.sources.ingest import SuspiciousEmptyResult, ingest_jobs
+from worker import jobs as _chunk_jobs
 
 logger = logging.getLogger("worker.collect_jobs")
 
@@ -198,3 +202,88 @@ async def collect_companies(
             interval_hours=interval_hours,
         )
         processed += 1
+
+
+# --- job embedding -------------------------------------------------------
+
+# Separate backoff state from the chunk embedding job (same constants).
+_jobs_embed_next_try = 0.0
+_jobs_embed_failures = 0
+
+
+def _reset_embed_state() -> None:
+    """Reset the job-embedding backoff state (used by tests)."""
+    global _jobs_embed_next_try, _jobs_embed_failures
+    _jobs_embed_next_try = 0.0
+    _jobs_embed_failures = 0
+
+
+def pending_jobs_stmt(model_version: str, user_id: int | None = None):
+    """Open jobs with no embedding or one from another model version."""
+    stmt = (
+        select(Job, Company.name)
+        .join(Company, Company.id == Job.company_id)
+        .where(
+            Job.status == "open",
+            or_(Job.embedding.is_(None), Job.model_version.is_distinct_from(model_version)),
+        )
+    )
+    if user_id is not None:
+        stmt = stmt.where(Job.user_id == user_id)
+    return stmt.order_by(Job.first_seen_at.desc(), Job.id)
+
+
+async def embed_pending_jobs(
+    session_factory,
+    embedder: Embedder,
+    batch_size: int,
+    *,
+    user_id: int | None = None,
+    clock=time.monotonic,
+    max_batches: int = 1,
+) -> int:
+    """Embed open jobs needing work; at most `max_batches` batches per call
+    (one commit per batch), newest first. Returns how many were vectorised.
+
+    The shared EMBED_LOCK serialises this with chunk embedding (one CPU-bound
+    model). On embedder failure only the exception class and batch size are
+    logged (never job text) and the job backs off exponentially (5s doubling,
+    cap 300s, reset on success) instead of raising.
+    """
+    global _jobs_embed_next_try, _jobs_embed_failures
+    if clock() < _jobs_embed_next_try:
+        return 0
+    total = 0
+    for _ in range(max_batches):
+        with session_factory() as s:
+            rows = s.execute(
+                pending_jobs_stmt(embedder.model_version, user_id)
+                .limit(batch_size)
+                .with_for_update(of=Job, skip_locked=True)
+            ).all()
+            if not rows:
+                return total
+            texts = [job_embedding_text(job, name) for job, name in rows]
+            try:
+                async with _chunk_jobs.EMBED_LOCK:
+                    vectors = await asyncio.to_thread(embedder.embed, texts)
+            except Exception as exc:
+                s.rollback()
+                delay = min(
+                    _chunk_jobs.EMBED_BACKOFF_BASE * 2**_jobs_embed_failures,
+                    _chunk_jobs.EMBED_BACKOFF_CAP,
+                )
+                _jobs_embed_failures += 1
+                _jobs_embed_next_try = clock() + delay
+                logger.error(
+                    "job embedding failed (%s, batch of %d); backing off %ds",
+                    type(exc).__name__, len(rows), delay,
+                )
+                return total
+            for (job, _name), v in zip(rows, vectors, strict=True):
+                job.embedding = v
+                job.model_version = embedder.model_version
+            s.commit()
+            _jobs_embed_failures = 0
+            total += len(rows)
+    return total
