@@ -39,6 +39,8 @@ export type Language = { id: string; name: string; level: string };
 export type Certification = { id: string; name: string; issuer: string; date: string };
 export type Project = { id: string; name: string; description: string; url: string };
 
+export type Note = { id: string; topic: string; text: string };
+
 export type CanonicalProfile = {
   basics: Basics;
   summary: string;
@@ -48,6 +50,7 @@ export type CanonicalProfile = {
   languages: Language[];
   certifications: Certification[];
   projects: Project[];
+  notes?: Note[];
 };
 
 export type ImportStatus = "pending" | "extracting" | "ready" | "error";
@@ -81,6 +84,7 @@ export function emptyProfile(): CanonicalProfile {
     languages: [],
     certifications: [],
     projects: [],
+    notes: [],
   };
 }
 

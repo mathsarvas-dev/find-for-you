@@ -62,6 +62,14 @@ describe("ReviewStep", () => {
     expect(profile.certifications).toEqual(sample().certifications);
   });
 
+  it("notes passam intactas pela revisão", () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined);
+    const withNotes = { ...sample(), notes: [{ id: "n1", topic: "missing_skills", text: "Uso Docker" }] };
+    render(<ReviewStep profile={withNotes} narrative="" onConfirm={onConfirm} />);
+    confirm();
+    expect(onConfirm.mock.calls[0][0].notes).toEqual(withNotes.notes);
+  });
+
   it("Confirmar desabilita após o primeiro clique (duplo clique envia uma vez)", () => {
     const onConfirm = vi.fn(() => new Promise<void>(() => {}));
     render(<ReviewStep profile={sample()} narrative="" onConfirm={onConfirm} />);

@@ -36,4 +36,5 @@ async def extract_profile(
         {"role": "user", "content": f"<curriculo>\n{text}\n</curriculo>"},
     ]
     profile = await llm.complete_json(messages, CanonicalProfile)
+    profile = profile.model_copy(update={"notes": []})  # notes only come from the interview
     return assign_ids(blank_ids(profile)), truncated

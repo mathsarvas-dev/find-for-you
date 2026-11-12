@@ -73,6 +73,7 @@ function toProfile(draft: Draft, original: CanonicalProfile): CanonicalProfile {
     // Ainda sem edição na revisão: seguem como vieram.
     certifications: original.certifications,
     projects: original.projects,
+    notes: original.notes ?? [],
   };
 }
 
