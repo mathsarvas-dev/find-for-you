@@ -6,9 +6,10 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import or_, select
+from sqlalchemy import or_, select, update
 
 from rumo_core.embeddings.base import Embedder
+from rumo_core.llm.base import LLMError, LLMProvider, LLMRateLimited
 from rumo_core.models import Company, Job
 from rumo_core.sources import get_source
 from rumo_core.sources.base import (
@@ -17,7 +18,9 @@ from rumo_core.sources.base import (
     SourceUnavailable,
 )
 from rumo_core.sources.embed_text import job_embedding_text
+from rumo_core.sources.fill import JobView, fill_fields, validate_fill
 from rumo_core.sources.ingest import SuspiciousEmptyResult, ingest_jobs
+from rumo_core.sources.normalize import has_pay_context
 from worker import jobs as _chunk_jobs
 
 logger = logging.getLogger("worker.collect_jobs")
@@ -287,3 +290,172 @@ async def embed_pending_jobs(
             _jobs_embed_failures = 0
             total += len(rows)
     return total
+
+
+# --- LLM fill of missing fields -----------------------------------------------
+
+MAX_FILL_ATTEMPTS = 3
+FILL_RATE_LIMIT_PAUSE_SECONDS = 60.0
+_FILL_WINDOW_FACTOR = 10
+_FILL_MAX_WINDOWS = 5
+
+_fill_warned_no_llm = False
+_fill_pause_until = 0.0
+
+
+def _reset_fill_state() -> None:
+    """Reset the fill job's in-process state (used by tests)."""
+    global _fill_warned_no_llm, _fill_pause_until
+    _fill_warned_no_llm = False
+    _fill_pause_until = 0.0
+
+
+def _needs_fill(job: Job) -> bool:
+    return job.work_model == "unknown" or (
+        not job.salary_known and has_pay_context(job.description)
+    )
+
+
+def _view(job: Job) -> JobView:
+    return JobView(
+        title=job.title, location_text=job.location_text, department=job.department,
+        description=job.description, work_model=job.work_model,
+        salary_known=job.salary_known,
+    )
+
+
+def _select_fill_candidates(
+    session_factory, batch: int, user_id: int | None
+) -> tuple[list[tuple[int, str]], int]:
+    """([(job_id, content_hash)] needing the LLM, number settled without it).
+
+    Looks at windows of the newest candidates (cheap SQL predicates), keeps
+    those that really need the LLM (decided in Python) and marks the rest
+    filled so they leave the candidate set. The commit releases the locks.
+    """
+    picked: list[tuple[int, str]] = []
+    skipped = 0
+    window = batch * _FILL_WINDOW_FACTOR
+    for _ in range(_FILL_MAX_WINDOWS):
+        with session_factory() as s:
+            stmt = select(Job).where(
+                Job.status == "open",
+                Job.llm_filled_at.is_(None),
+                Job.fill_attempts < MAX_FILL_ATTEMPTS,
+                or_(Job.work_model == "unknown", Job.salary_known.is_(False)),
+            )
+            if user_id is not None:
+                stmt = stmt.where(Job.user_id == user_id)
+            rows = s.execute(
+                stmt.order_by(Job.first_seen_at.desc(), Job.id.desc())
+                .limit(window)
+                .with_for_update(of=Job, skip_locked=True)
+            ).scalars().all()
+            now = _utcnow()
+            for job in rows:
+                if not _needs_fill(job):
+                    job.llm_filled_at = now
+                    skipped += 1
+                elif len(picked) < batch:
+                    picked.append((job.id, job.content_hash))
+            s.commit()
+        if len(picked) >= batch or len(rows) < window:
+            break
+    return picked, skipped
+
+
+def _load_fill_view(session_factory, job_id: int, content_hash: str) -> JobView | None:
+    with session_factory() as s:
+        job = s.get(Job, job_id)
+        if (
+            job is None or job.status != "open" or job.llm_filled_at is not None
+            or job.content_hash != content_hash
+        ):
+            return None
+        return _view(job)
+
+
+def _write_fill(session_factory, job_id: int, content_hash: str, result) -> bool:
+    """Persist the validated result in a fresh transaction; False (result
+    discarded) when ingest rewrote the job meanwhile."""
+    with session_factory() as s:
+        job = s.execute(
+            select(Job).where(Job.id == job_id).with_for_update()
+        ).scalar_one_or_none()
+        if job is None or job.content_hash != content_hash or job.status != "open":
+            s.rollback()
+            return False
+        validated = validate_fill(result, job.description, _view(job))
+        if validated.work_model != "unknown":
+            job.work_model = validated.work_model
+        if validated.salary_min is not None:
+            job.salary_min = validated.salary_min
+            job.salary_max = validated.salary_max
+            job.salary_currency = validated.salary_currency
+            job.salary_period = validated.salary_period
+            job.salary_known = True
+        job.llm_filled_at = _utcnow()
+        s.commit()
+        return True
+
+
+def _bump_attempts(session_factory, job_id: int, content_hash: str) -> None:
+    with session_factory() as s:
+        s.execute(
+            update(Job)
+            .where(Job.id == job_id, Job.content_hash == content_hash)
+            .values(fill_attempts=Job.fill_attempts + 1)
+        )
+        s.commit()
+
+
+async def fill_missing_job_fields(
+    session_factory,
+    llm: LLMProvider | None,
+    *,
+    batch: int,
+    user_id: int | None = None,
+    clock=time.monotonic,
+) -> int:
+    """Ask the LLM for the work model / salary the rules left unknown; returns
+    how many jobs went through the LLM (jobs settled without it do not count).
+
+    No LLM (no key): warns once, does nothing. Rate limit: pauses the job for
+    FILL_RATE_LIMIT_PAUSE_SECONDS, stops the batch, counts no attempt. Invalid
+    response / LLM error / unexpected failure: counts an attempt (after 3 the
+    job is no longer tried). Never logs job text or the LLM's answer.
+    """
+    global _fill_warned_no_llm, _fill_pause_until
+    if llm is None:
+        if not _fill_warned_no_llm:
+            logger.warning("GROQ_API_KEY not set: job field fill disabled")
+            _fill_warned_no_llm = True
+        return 0
+    if clock() < _fill_pause_until:
+        return 0
+    picked, skipped = _select_fill_candidates(session_factory, batch, user_id)
+    if skipped:
+        logger.info("fill: %d jobs settled without the LLM", skipped)
+    done = 0
+    for job_id, content_hash in picked:
+        view = _load_fill_view(session_factory, job_id, content_hash)
+        if view is None:
+            continue
+        try:
+            result = await fill_fields(llm, view)  # no DB transaction held
+            _write_fill(session_factory, job_id, content_hash, result)
+        except LLMRateLimited:
+            _fill_pause_until = clock() + FILL_RATE_LIMIT_PAUSE_SECONDS
+            logger.warning(
+                "LLM rate limited; pausing job fill for %ds", FILL_RATE_LIMIT_PAUSE_SECONDS
+            )
+            return done
+        except LLMError as exc:
+            # class name and job id only: the message may echo the posting
+            logger.warning("job %s fill failed (%s)", job_id, type(exc).__name__)
+            _bump_attempts(session_factory, job_id, content_hash)
+        except Exception as exc:  # noqa: BLE001 - isolate one job's failure
+            logger.warning("job %s unexpected fill failure (%s)", job_id, type(exc).__name__)
+            _bump_attempts(session_factory, job_id, content_hash)
+        done += 1
+    return done

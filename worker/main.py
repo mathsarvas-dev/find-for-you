@@ -92,7 +92,7 @@ async def main() -> None:
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
     from rumo_core.sources import aclose_sources
-    from worker.collect_jobs import embed_pending_jobs
+    from worker.collect_jobs import embed_pending_jobs, fill_missing_job_fields
     from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
@@ -114,6 +114,13 @@ async def main() -> None:
     )
     registry.register(
         "interview_turns", partial(process_interview_turns, SessionLocal, llm), 3
+    )
+    # every 60 s with a small batch: the Groq rate limiter is shared with the
+    # interview, whose turns keep priority (registered after interview_turns)
+    registry.register(
+        "fill_missing_job_fields",
+        partial(fill_missing_job_fields, SessionLocal, llm, batch=settings.llm_fill_batch),
+        60,
     )
     registry.register(
         "embed_chunks",
