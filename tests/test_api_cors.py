@@ -27,11 +27,6 @@ def test_current_user_id_is_reexported_from_main():
     assert main.current_user_id is deps.current_user_id
 
 
-def test_cors_origins_default():
-    s = Settings(database_url="x", _env_file=None)
-    assert s.cors_origins == "http://localhost:3000"
-
-
 def test_preflight_allows_web_origin():
     from api.main import app
 
@@ -56,3 +51,14 @@ def test_preflight_rejects_other_origin():
         headers={"Origin": "http://evil.test", "Access-Control-Request-Method": "POST"},
     )
     assert "access-control-allow-origin" not in r.headers
+
+
+def test_cors_origins_default_allows_localhost_and_loopback():
+    s = Settings(database_url="x", _env_file=None)
+    assert s.cors_origins == "http://localhost:3000,http://127.0.0.1:3000"
+
+
+def test_cors_origin_list_parsing():
+    s = Settings(database_url="x", cors_origins=" http://a.test ,, http://b.test ", _env_file=None)
+    assert s.cors_origin_list == ["http://a.test", "http://b.test"]
+    assert Settings(database_url="x", cors_origins="", _env_file=None).cors_origin_list == []

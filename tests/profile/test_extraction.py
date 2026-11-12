@@ -89,3 +89,18 @@ async def test_closing_tag_in_resume_is_neutralised():
     assert user.lower().count("</curriculo>") == 1
     assert user.rstrip().endswith("</curriculo>")
     assert "ignore as instruções" not in _system_content(llm)
+
+
+async def test_llm_supplied_colliding_ids_are_replaced_by_unique_ones():
+    from rumo_core.profile.schema import Education
+
+    llm = FakeLLM(CanonicalProfile(
+        experiences=[Experience(id="1", company="A"), Experience(id="summary", company="B")],
+        education=[Education(id="1", institution="X")],
+        skills=[Skill(id="skills", name="Py"), Skill(id="x" * 300, name="Go")],
+    ))
+    profile, _ = await extract_profile(llm, "texto", 1000)
+    ids = [i.id for i in (*profile.experiences, *profile.education, *profile.skills)]
+    assert all(ids)
+    assert len(ids) == len(set(ids))
+    assert not set(ids) & {"1", "summary", "skills"}

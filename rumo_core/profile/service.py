@@ -12,21 +12,36 @@ from rumo_core.profile.chunker import build_chunks
 from rumo_core.profile.schema import CanonicalProfile
 
 
+_RESERVED_IDS = {"summary", "skills"}
+_MAX_ID_LEN = 64
+
+
 def _fill_empty_ids(profile: CanonicalProfile) -> CanonicalProfile:
-    """Deterministically fill EMPTY ids (existing ids are kept), so confirming
-    the same content twice yields the same ids and hash. Id = sha1 of the
-    section and item content, plus an occurrence counter for identical items."""
+    """Deterministically fill EMPTY ids (valid existing ids are kept), so
+    confirming the same content twice yields the same ids and hash. Items whose
+    id is duplicated (first occurrence kept), reserved or too long are re-id'd
+    the same way. Id = sha1 of the section and item content, plus an occurrence
+    counter for identical items."""
     out = profile.model_copy(deep=True)
     seen: dict[str, int] = {}
+    used: set[str] = set()
+
+    def bad(id_: str) -> bool:
+        return (
+            not id_ or id_ in used or id_ in _RESERVED_IDS or len(id_) > _MAX_ID_LEN
+        )
 
     def make(section: str, item) -> str:
         content = json.dumps(
             item.model_dump(exclude={"id"}), sort_keys=True, ensure_ascii=False
         )
         key = f"{section}:{content}"
-        n = seen.get(key, 0)
-        seen[key] = n + 1
-        return hashlib.sha1(f"{key}:{n}".encode("utf-8")).hexdigest()[:8]
+        while True:
+            n = seen.get(key, 0)
+            seen[key] = n + 1
+            new = hashlib.sha1(f"{key}:{n}".encode("utf-8")).hexdigest()[:8]
+            if new not in used and new not in _RESERVED_IDS:
+                return new
 
     for name in CanonicalProfile.model_fields:
         value = getattr(out, name)
@@ -34,10 +49,12 @@ def _fill_empty_ids(profile: CanonicalProfile) -> CanonicalProfile:
             continue
         for item in value:
             for ach in getattr(item, "achievements", []):
-                if not ach.id:
+                if bad(ach.id):
                     ach.id = make(f"{name}.achievement", ach)
-            if not item.id:
+                used.add(ach.id)
+            if bad(item.id):
                 item.id = make(name, item)
+            used.add(item.id)
     return out
 
 

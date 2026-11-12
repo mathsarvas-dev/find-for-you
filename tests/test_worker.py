@@ -45,3 +45,40 @@ async def test_failing_job_is_retried_next_interval():
     assert await reg.run_due(5) == []
     await reg.run_due(10)
     assert len(attempts) == 2
+
+
+async def test_retry_startup_retries_then_succeeds():
+    from worker.main import retry_startup
+
+    calls, sleeps = [], []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("no table yet")
+        return 7
+
+    async def fake_sleep(d):
+        sleeps.append(d)
+
+    assert await retry_startup(flaky, attempts=5, delay=2.0, sleep=fake_sleep) == 7
+    assert len(calls) == 3 and sleeps == [2.0, 2.0]
+
+
+async def test_retry_startup_raises_after_exhausting_attempts():
+    import pytest
+
+    from worker.main import retry_startup
+
+    calls, sleeps = [], []
+
+    def broken():
+        calls.append(1)
+        raise RuntimeError("down")
+
+    async def fake_sleep(d):
+        sleeps.append(d)
+
+    with pytest.raises(RuntimeError):
+        await retry_startup(broken, attempts=3, delay=1.0, sleep=fake_sleep)
+    assert len(calls) == 3 and len(sleeps) == 2

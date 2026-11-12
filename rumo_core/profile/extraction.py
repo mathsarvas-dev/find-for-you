@@ -4,7 +4,7 @@ import json
 import re
 
 from rumo_core.llm.base import LLMProvider
-from rumo_core.profile.schema import CanonicalProfile, assign_ids
+from rumo_core.profile.schema import CanonicalProfile, assign_ids, blank_ids
 
 _SCHEMA_JSON = json.dumps(CanonicalProfile.model_json_schema(), ensure_ascii=False)
 
@@ -36,4 +36,4 @@ async def extract_profile(
         {"role": "user", "content": f"<curriculo>\n{text}\n</curriculo>"},
     ]
     profile = await llm.complete_json(messages, CanonicalProfile)
-    return assign_ids(profile), truncated
+    return assign_ids(blank_ids(profile)), truncated

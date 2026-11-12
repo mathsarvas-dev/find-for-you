@@ -19,6 +19,8 @@ import {
 const POLL_MS = 2000;
 /** Depois disso sem terminar a vetorização, explica a demora. */
 const SLOW_MS = 30_000;
+/** Depois disso ainda "na fila", o worker pode estar parado ou sem chave do Groq. */
+const PENDING_SLOW_MS = 30_000;
 
 type Phase =
   | { name: "loading" }
@@ -296,6 +298,16 @@ export default function OnboardingPage() {
                 ? "Extraindo os dados: cargos, datas, conquistas e habilidades."
                 : "Na fila para leitura. Começa em instantes."}
             </p>
+            {importStatus === "pending" && now - phase.startedAt >= PENDING_SLOW_MS && (
+              <div className="notice notice--warn notice--flush" role="status" aria-live="polite">
+                <strong>A leitura não começou.</strong>
+                <p>
+                  O worker pode não estar rodando ou a chave do Groq pode estar faltando. Veja{" "}
+                  <code>docker compose logs worker</code> e confirme que GROQ_API_KEY está definida
+                  no arquivo .env (depois reinicie o worker).
+                </p>
+              </div>
+            )}
             <p className="muted">
               Costuma levar menos de um minuto. A página consulta a importação a cada 2 segundos.
             </p>

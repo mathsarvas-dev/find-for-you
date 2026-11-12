@@ -94,3 +94,17 @@ def assign_ids(profile: CanonicalProfile) -> CanonicalProfile:
                 if not ach.id:
                     ach.id = _new_id()
     return out
+
+
+def blank_ids(profile: CanonicalProfile) -> CanonicalProfile:
+    """Return a copy with EVERY id cleared (LLM-written ids are untrustworthy)."""
+    out = profile.model_copy(deep=True)
+    for name in CanonicalProfile.model_fields:
+        value = getattr(out, name)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            item.id = ""
+            for ach in getattr(item, "achievements", []):
+                ach.id = ""
+    return out

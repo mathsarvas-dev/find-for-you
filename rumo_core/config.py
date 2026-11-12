@@ -16,7 +16,11 @@ class Settings(BaseSettings):
     extract_max_chars: int = Field(20_000, gt=0)
     embed_batch_size: int = Field(8, gt=0)
     # Comma-separated list of browser origins allowed to call the API.
-    cors_origins: str = "http://localhost:3000"
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+
+    @property
+    def cors_origin_list(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
 
 @lru_cache

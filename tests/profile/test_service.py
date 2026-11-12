@@ -163,3 +163,39 @@ def test_value_error_rolls_back_pending_profile(session, monkeypatch):
         confirm_profile(session, uid, _profile(), None)
     assert not session.new
     assert get_current_profile(session, uid) is None
+
+
+def _bad_ids():
+    return CanonicalProfile.model_validate({
+        "summary": "Dev",
+        "experiences": [
+            {"id": "1", "company": "Acme", "title": "Dev"},
+            {"id": "summary", "company": "Beta", "title": "Lead"},
+            {"id": "x" * 300, "company": "Gama", "title": "CTO"},
+        ],
+        "education": [{"id": "1", "institution": "USP"}],
+        "skills": [{"id": "skills", "name": "Python"}],
+    })
+
+
+def test_confirm_reids_duplicate_reserved_and_overlong_ids(session):
+    uid = session.info["uids"][0]
+    row = confirm_profile(session, uid, _bad_ids(), None)
+    chunks = _chunks(session, uid, row.version)
+    assert len(chunks) == 6  # summary, 3 experiences, education, skills
+    refs = set(chunks)
+    assert "1" in refs  # first occurrence is kept
+    data = row.data
+    ids = [i["id"] for sec in ("experiences", "education", "skills") for i in data[sec]]
+    assert len(ids) == len(set(ids))
+    assert all(i and i not in ("summary", "skills") and len(i) <= 64 for i in ids)
+
+
+def test_confirm_with_bad_ids_is_idempotent_on_double_submit(session):
+    uid = session.info["uids"][0]
+    a = confirm_profile(session, uid, _bad_ids(), None)
+    b = confirm_profile(session, uid, _bad_ids(), None)
+    c = confirm_profile(session, uid, CanonicalProfile.model_validate(a.data), None)
+    assert a.id == b.id == c.id
+    rows = session.scalars(select(Profile).where(Profile.user_id == uid)).all()
+    assert len(rows) == 1

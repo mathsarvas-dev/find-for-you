@@ -49,6 +49,24 @@ def build_llm(settings):
     )
 
 
+async def retry_startup(
+    fn: Callable[[], object],
+    attempts: int = 10,
+    delay: float = 2.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+):
+    """Call fn, retrying on any exception (e.g. DB up but migrations not yet
+    applied). Re-raises the last error once attempts are exhausted."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception:
+            logger.exception("startup failed (attempt %d/%d)", attempt, attempts)
+            if attempt == attempts:
+                raise
+            await sleep(delay)
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     from functools import partial
@@ -59,7 +77,7 @@ async def main() -> None:
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
     settings = get_settings()
-    reset = reset_stuck_imports(SessionLocal)
+    reset = await retry_startup(lambda: reset_stuck_imports(SessionLocal))
     if reset:
         logger.info("reset %d stuck imports to pending", reset)
     llm = build_llm(settings)

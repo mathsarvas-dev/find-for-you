@@ -16,9 +16,7 @@ app = FastAPI(title="Rumo")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        o.strip() for o in get_settings().cors_origins.split(",") if o.strip()
-    ],
+    allow_origins=get_settings().cors_origin_list,
     allow_methods=["GET", "POST"],
     allow_headers=["*"],
 )

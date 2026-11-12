@@ -15,17 +15,30 @@ services:
       timeout: 5s
       retries: 10
 
+  migrate:
+    build: .
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+psycopg://rumo:rumo@db:5432/rumo
+    command: alembic upgrade head
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+
   api:
     build: .
     env_file: .env
     environment:
       DATABASE_URL: postgresql+psycopg://rumo:rumo@db:5432/rumo
-    command: sh -c "alembic upgrade head && uvicorn api.main:app --host 0.0.0.0 --port 8000"
+    command: uvicorn api.main:app --host 0.0.0.0 --port 8000
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
   worker:
     build:
@@ -36,11 +49,14 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://rumo:rumo@db:5432/rumo
     command: python -m worker.main
+    restart: unless-stopped
     volumes:
       - hf_cache:/root/.cache/huggingface
     depends_on:
       db:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
 
 volumes:
   hf_cache:

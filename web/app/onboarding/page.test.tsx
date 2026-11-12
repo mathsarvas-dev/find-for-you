@@ -121,6 +121,21 @@ describe("OnboardingPage", () => {
     expect(m.getImport).toHaveBeenCalledTimes(3);
   });
 
+  it("import ainda pending após 30 s: avisa sobre worker parado ou chave do Groq", async () => {
+    m.getProfile.mockResolvedValue(null);
+    m.getImport.mockResolvedValue(importState("pending"));
+    render(<OnboardingPage />);
+    await uploadFile();
+    expect(await screen.findByText("Passo 2 de 3")).toBeInTheDocument();
+    await tick(10_000);
+    expect(screen.queryByText("A leitura não começou.")).not.toBeInTheDocument();
+    await tick(21_000);
+    const notice = await screen.findByRole("status");
+    expect(notice).toHaveTextContent("A leitura não começou.");
+    expect(notice).toHaveTextContent("docker compose logs worker");
+    expect(notice).toHaveTextContent("GROQ_API_KEY");
+  });
+
   it("import com status error: mostra o erro legível e para", async () => {
     m.getProfile.mockResolvedValue(null);
     m.getImport.mockResolvedValue(
