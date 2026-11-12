@@ -161,3 +161,113 @@ def test_apply_is_pure():
     apply_suggestion(p, SuggestionDraft(op="append_achievement", target_ref="e1", text="x"),
                      answer="x", gap=_gap())
     assert p.model_dump() == before
+
+
+def _ach(text):
+    return SuggestionDraft(op="append_achievement", target_ref="e1", text=text)
+
+
+@pytest.mark.parametrize("draft_text,answer", [
+    ("Reduzi a latência em quarenta por cento", "melhorei a latência"),
+    ("Liderei dez pessoas", "liderei um time"),
+    ("Atendi mil clientes", "atendi muitos clientes"),
+    ("Faturei 2 milhões", "faturei 2 reais"),
+    ("Dobrei a receita", "aumentei a receita"),
+    ("Triplicou o uso", "aumentou o uso"),
+])
+def test_lexicon_words_must_come_from_answer(draft_text, answer):
+    assert _v(_ach(draft_text), answer) is not None
+
+
+@pytest.mark.parametrize("draft_text,answer", [
+    ("Reduzi a latência em quarenta por cento", "reduzi QUARENTA por cento"),
+    ("Liderei dez pessoas", "Liderei DEZ pessoas"),
+    ("Atendi mil clientes", "atendi mil clientes"),
+    ("Faturei 2 milhões", "faturei 2 milhões"),
+    ("Dobrei a receita", "dobrei a receita"),
+    ("Triplicou o uso", "triplicou o uso"),
+    ("Liderei três pessoas", "liderei tres pessoas"),  # accent folded
+])
+def test_lexicon_words_accepted_when_in_answer(draft_text, answer):
+    assert _v(_ach(draft_text), answer) is None
+
+
+def test_lexicon_is_word_bounded():
+    assert _v(_ach("Liderei dez pessoas"), "liderei dezenas de pessoas") is not None
+
+
+def test_month_names_and_current_markers_in_dates():
+    g = _gap("experience_missing_dates")
+    d = SuggestionDraft(op="set_experience_dates", target_ref="e1", start="mar/2018")
+    assert _v(d, "comecei em 2018", gap=g) is not None
+    assert _v(d, "comecei em mar/2018", gap=g) is None
+    d = SuggestionDraft(op="set_experience_dates", target_ref="e1", start="2019", end="atual")
+    assert _v(d, "comecei em 2019", gap=g) is not None
+    assert _v(d, "comecei em 2019 e estou lá atualmente e atual", gap=g) is None
+    d = SuggestionDraft(op="set_experience_dates", target_ref="e1", end="present")
+    assert _v(d, "sai", gap=g) is not None
+
+
+def test_dates_sources_exclude_description_and_achievements():
+    g = _gap("experience_missing_dates")
+    d = SuggestionDraft(op="set_experience_dates", target_ref="e1", end="2019")
+    # description is "Backend em 2019" but dates may only use answer + existing start/end
+    p = _profile()
+    p.experiences[0].start = ""
+    assert _v(d, "sai", gap=g, profile=p) is not None
+    p.experiences[0].start = "2019"
+    assert _v(d, "sai", gap=g, profile=p) is None
+
+
+def test_token_boundary_130_does_not_satisfy_30():
+    assert not numbers_supported("30%", ["cresci 130%"])
+    assert not numbers_supported("130%", ["cresci 30%"])
+    assert numbers_supported("30%", ["cresci 30%"])
+
+
+def test_skill_match_is_word_bounded():
+    g = _gap("missing_skills", None)
+    for name, answer in [("Java", "uso JavaScript"), ("SQL", "uso MySQL"),
+                         ("Go", "gosto de dados"), ("R", "trabalho com dados")]:
+        assert _v(SuggestionDraft(op="add_skill", name=name), answer, gap=g) is not None
+    for name, answer in [("C++", "programo em c++ há anos"), ("C#", "uso C# e Go."),
+                         ("Go", "uso Go.")]:
+        assert _v(SuggestionDraft(op="add_skill", name=name), answer, gap=g) is None
+
+
+def test_skill_level_must_appear_in_answer():
+    g = _gap("missing_skills", None)
+    d = SuggestionDraft(op="add_skill", name="Docker", level="avançado")
+    assert _v(d, "uso docker", gap=g) is not None
+    assert _v(d, "uso docker em nível avançado", gap=g) is None
+    d = SuggestionDraft(op="add_skill", name="Docker", level="5 anos")
+    assert _v(d, "uso docker, 5 anos", gap=g) is None
+    assert _v(d, "uso docker", gap=g) is not None
+    assert _v(SuggestionDraft(op="add_skill", name="Docker"), "uso docker", gap=g) is None
+
+
+def test_skill_empty_name_rejected():
+    g = _gap("missing_skills", None)
+    assert _v(SuggestionDraft(op="add_skill", name="  "), "uso docker", gap=g) is not None
+
+
+def test_description_unsupported_number_and_empty():
+    g = _gap("experience_without_description")
+    d = SuggestionDraft(op="set_experience_description", target_ref="e1", text="Equipe de 12")
+    assert _v(d, "equipe pequena", gap=g) is not None
+    assert _v(d, "equipe de 12", gap=g) is None
+    empty = SuggestionDraft(op="set_experience_description", target_ref="e1", text=" ")
+    assert _v(empty, "x", gap=g) is not None
+
+
+def test_summary_unsupported_number_and_empty():
+    g = _gap("missing_summary", None)
+    assert _v(SuggestionDraft(op="set_summary", text="10 anos de experiência"), "tenho experiência", gap=g) is not None
+    assert _v(SuggestionDraft(op="set_summary", text="10 anos de experiência"), "tenho 10 anos", gap=g) is None
+    assert _v(SuggestionDraft(op="set_summary", text=""), "x", gap=g) is not None
+
+
+def test_note_unsupported_number():
+    g = _gap("missing_skills", None)
+    assert _v(SuggestionDraft(op="add_note", text="Ganhou 3 prêmios"), "ganhei prêmios", gap=g) is not None
+    assert _v(SuggestionDraft(op="add_note", text="Ganhou 3 prêmios"), "ganhei 3 prêmios", gap=g) is None

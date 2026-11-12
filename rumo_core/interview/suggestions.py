@@ -1,6 +1,7 @@
 """Interview suggestions: schema, anti-invention validator and pure application."""
 
 import re
+import unicodedata
 from typing import Literal
 
 from pydantic import BaseModel
@@ -67,6 +68,74 @@ def numbers_supported(text: str, sources: list[str]) -> bool:
     return wanted <= available
 
 
+# Word-form numbers, multipliers, months and "current job" markers. Each group is
+# a set of equivalent folded (accent-less, lowercase) words; a group found in a
+# suggestion must be found (word-bounded) in the sources too.
+_LEXICON_GROUPS: tuple[tuple[str, ...], ...] = (
+    ("dois", "duas", "two"), ("tres", "three"), ("quatro", "four"), ("cinco", "five"),
+    ("seis", "six"), ("sete", "seven"), ("oito", "eight"), ("nove", "nine"),
+    ("dez", "ten"), ("onze", "eleven"), ("doze", "twelve"), ("treze", "thirteen"),
+    ("catorze", "quatorze", "fourteen"), ("quinze", "fifteen"),
+    ("dezesseis", "dezasseis", "sixteen"), ("dezessete", "dezassete", "seventeen"),
+    ("dezoito", "eighteen"), ("dezenove", "dezanove", "nineteen"),
+    ("vinte", "twenty"), ("trinta", "thirty"), ("quarenta", "forty"),
+    ("cinquenta", "fifty"), ("sessenta", "sixty"), ("setenta", "seventy"),
+    ("oitenta", "eighty"), ("noventa", "ninety"),
+    ("cem", "cento", "hundred"), ("duzentos", "duzentas"), ("trezentos", "trezentas"),
+    ("quatrocentos", "quatrocentas"), ("quinhentos", "quinhentas"),
+    ("seiscentos", "seiscentas"), ("setecentos", "setecentas"),
+    ("oitocentos", "oitocentas"), ("novecentos", "novecentas"),
+    ("mil", "thousand"), ("milhao", "milhoes", "million", "millions"),
+    ("bilhao", "bilhoes", "billion", "billions"),
+    ("meia duzia", "meia-duzia", "meio duzia", "duzia", "dozen"),
+    ("por cento", "percent", "percentage"),
+    ("dobro", "dobrei", "dobrou", "dobrar", "dobramos", "double", "doubled"),
+    ("triplo", "triplicou", "triplicei", "triplicamos", "triple", "tripled"),
+    ("quadruplo", "quadruplicou", "quadruplicei", "quadruplicamos", "quadrupled"),
+    ("janeiro", "jan", "january"), ("fevereiro", "fev", "feb", "february"),
+    ("marco", "mar", "march"), ("abril", "abr", "apr", "april"),
+    ("maio", "mai", "may"), ("junho", "jun", "june"), ("julho", "jul", "july"),
+    ("agosto", "ago", "aug", "august"), ("setembro", "set", "sep", "sept", "september"),
+    ("outubro", "out", "oct", "october"), ("novembro", "nov", "november"),
+    ("dezembro", "dez", "dec", "december"),
+    ("atual", "atualmente", "presente", "hoje", "current", "currently", "present", "now"),
+)
+# Months/numbers share spellings (dez, mar...): resolve by first matching group.
+_WORD_TO_GROUPS: dict[str, list[int]] = {}
+for _i, _g in enumerate(_LEXICON_GROUPS):
+    for _w in _g:
+        _WORD_TO_GROUPS.setdefault(_w, []).append(_i)
+_LEXICON_RE = re.compile(
+    r"(?<!\w)(" + "|".join(
+        re.escape(w) for w in sorted(_WORD_TO_GROUPS, key=len, reverse=True)
+    ) + r")(?!\w)"
+)
+
+
+def _fold(text: str) -> str:
+    nfkd = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in nfkd if not unicodedata.combining(c)).lower()
+
+
+def _lexicon_words(text: str) -> set[str]:
+    return set(_LEXICON_RE.findall(_fold(text)))
+
+
+def lexicon_supported(text: str, sources: list[str]) -> bool:
+    """Every lexicon word (spelled-out number, month, multiplier, current-job
+    marker) in `text` must appear in the sources, word-bounded and accent-folded."""
+    wanted = _lexicon_words(text)
+    if not wanted:
+        return True
+    available = _lexicon_words(" ".join(sources))
+    return wanted <= available
+
+
+def _word_in(needle: str, haystack: str) -> bool:
+    pattern = r"(?<!\w)" + re.escape(_fold(needle.strip())) + r"(?!\w)"
+    return re.search(pattern, _fold(haystack)) is not None
+
+
 def _find_experience(profile: CanonicalProfile, ref: str | None) -> Experience | None:
     if not ref:
         return None
@@ -104,7 +173,10 @@ def validate_suggestion(
             return "experiência alvo não existe no perfil"
         if draft.target_ref != gap.target_ref:
             return "experiência alvo diferente da lacuna"
-        sources += _item_sources(exp)
+        if draft.op == "set_experience_dates":
+            sources += [exp.start, exp.end]
+        else:
+            sources += _item_sources(exp)
         if draft.op == "set_experience_dates":
             if not (draft.start.strip() or draft.end.strip()):
                 return "datas vazias"
@@ -121,8 +193,11 @@ def validate_suggestion(
         name = draft.name.strip()
         if not name:
             return "nome da habilidade vazio"
-        if name.lower() not in answer.lower():
+        if not _word_in(name, answer):
             return "habilidade não aparece na resposta"
+        level = (draft.level or "").strip()
+        if level and not (_word_in(level, answer) and numbers_supported(level, [answer])):
+            return "nível da habilidade não aparece na resposta"
         checked = name
     elif draft.op == "set_preference":
         if draft.key not in PREFERENCE_KEYS:
@@ -135,6 +210,8 @@ def validate_suggestion(
 
     if not numbers_supported(checked, sources):
         return "número ou data que não aparece na resposta"
+    if not lexicon_supported(checked, sources):
+        return "número por extenso, mês ou período que não aparece na resposta"
     return None
 
 
