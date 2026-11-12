@@ -17,6 +17,9 @@ dependencies = [
   "httpx",
   "pgvector",
   "psycopg[binary]",
+  "pypdf",
+  "python-docx",
+  "python-multipart",
 ]
 
 [project.optional-dependencies]
@@ -24,7 +27,7 @@ dev = ["pytest", "pytest-asyncio"]
 embeddings = ["sentence-transformers"]
 
 [tool.setuptools]
-packages = ["rumo_core", "api", "worker"]
+packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "api", "worker"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

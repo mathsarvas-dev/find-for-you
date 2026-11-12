@@ -7,4 +7,5 @@ COPY api/ api/
 COPY worker/ worker/
 COPY alembic/ alembic/
 COPY alembic.ini ./
-RUN pip install --no-cache-dir .
+ARG WITH_EMBEDDINGS=0
+RUN if [ "$WITH_EMBEDDINGS" = "1" ]; then       pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu &&       pip install --no-cache-dir ".[embeddings]";     else       pip install --no-cache-dir .;     fi

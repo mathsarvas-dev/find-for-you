@@ -35,10 +35,65 @@ async def heartbeat() -> None:
     logger.info("heartbeat")
 
 
+def build_llm(settings):
+    """Real Groq provider, or None when no API key is configured."""
+    if not settings.groq_api_key:
+        return None
+    import httpx
+
+    from rumo_core.llm.groq import GroqProvider
+    from rumo_core.llm.ratelimit import RateLimiter
+
+    return GroqProvider(
+        settings, httpx.AsyncClient(timeout=60), RateLimiter(settings.groq_max_per_minute)
+    )
+
+
+async def retry_startup(
+    fn: Callable[[], object],
+    attempts: int = 10,
+    delay: float = 2.0,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+):
+    """Call fn, retrying on any exception (e.g. DB up but migrations not yet
+    applied). Re-raises the last error once attempts are exhausted."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception:
+            logger.exception("startup failed (attempt %d/%d)", attempt, attempts)
+            if attempt == attempts:
+                raise
+            await sleep(delay)
+
+
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    from functools import partial
+
+    from rumo_core.config import get_settings
+    from rumo_core.db import SessionLocal
+    from rumo_core.embeddings.bge_m3 import BgeM3Embedder
+    from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
+
+    settings = get_settings()
+    reset = await retry_startup(lambda: reset_stuck_imports(SessionLocal))
+    if reset:
+        logger.info("reset %d stuck imports to pending", reset)
+    llm = build_llm(settings)
+    embedder = BgeM3Embedder()  # model loads lazily, only when chunks are pending
     registry = JobRegistry()
     registry.register("heartbeat", heartbeat, 10)
+    registry.register(
+        "extract_imports",
+        partial(process_pending_imports, SessionLocal, llm, settings.extract_max_chars),
+        3,
+    )
+    registry.register(
+        "embed_chunks",
+        partial(embed_pending_chunks, SessionLocal, embedder, settings.embed_batch_size),
+        5,
+    )
     logger.info("worker started")
     while True:
         await registry.run_due(time.monotonic())
