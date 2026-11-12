@@ -5,7 +5,8 @@ Every public function commits itself at the end (like profile.service).
 
 from typing import Literal
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from rumo_core.interview.gaps import Gap, detect_gaps
@@ -16,6 +17,7 @@ from rumo_core.interview.suggestions import (
     validate_suggestion,
 )
 from rumo_core.models import AnswerBankItem, ChatMessage, InterviewSession, ProfileSuggestion
+from rumo_core.profile.locks import lock_user_interview_start, lock_user_profile
 from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import confirm_profile, get_current_profile
 
@@ -41,6 +43,10 @@ class WrongState(InterviewError):
 
 class NotFound(InterviewError):
     message = "Não encontrado."
+
+
+class InvalidSuggestion(InterviewError):
+    message = "A sugestão não é válida."
 
 
 class TargetMissing(InterviewError):
@@ -80,8 +86,11 @@ def _load(
 
 
 def start_interview(session: Session, user_id: int) -> InterviewSession:
+    # Per-user lock: a double click cannot create two active sessions.
+    lock_user_interview_start(session, user_id)
     latest = get_current_profile(session, user_id)
     if latest is None:
+        session.rollback()
         raise NoProfile()
     active = session.scalars(
         select(InterviewSession)
@@ -90,6 +99,7 @@ def start_interview(session: Session, user_id: int) -> InterviewSession:
         .limit(1)
     ).first()
     if active is not None:
+        session.commit()  # releases the lock
         return active
     row = InterviewSession(
         user_id=user_id, profile_version=latest.version, state="generating"
@@ -138,6 +148,9 @@ def skip_question(session: Session, user_id: int, session_id: int) -> None:
 
 def finish_interview(session: Session, user_id: int, session_id: int) -> None:
     row = _load(session, user_id, session_id)
+    if row.state == "done":
+        session.rollback()
+        raise WrongState("A entrevista já foi encerrada.")
     row.state = "done"
     row.error = None
     session.commit()
@@ -188,6 +201,9 @@ def resolve_suggestion(
     else:
         draft = SuggestionDraft.model_validate(sug.payload)
 
+    # Row lock (above) first, then the per-user profile lock: the latest
+    # version is read only after every concurrent profile write has committed.
+    lock_user_profile(session, user_id)
     answer_msg = session.get(ChatMessage, sug.message_id)
     answer = answer_msg.content if answer_msg is not None else ""
     latest = get_current_profile(session, user_id)
@@ -200,7 +216,9 @@ def resolve_suggestion(
     reason = validate_suggestion(draft, answer=answer, profile=profile, gap=gap)
     if reason is not None:
         session.rollback()
-        raise TargetMissing(f"Não foi possível aplicar a sugestão: {reason}.")
+        if reason == "experiência alvo não existe no perfil":
+            raise TargetMissing()
+        raise InvalidSuggestion(f"Não foi possível aplicar a sugestão: {reason}.")
 
     status = "adjusted" if action == "adjust" else "accepted"
     if action == "adjust":
@@ -208,19 +226,16 @@ def resolve_suggestion(
         sug.payload = draft.model_dump()
 
     if draft.op == "set_preference":
-        item = session.scalars(
-            select(AnswerBankItem).where(
-                AnswerBankItem.user_id == user_id, AnswerBankItem.key == draft.key
-            )
-        ).first()
-        if item is None:
-            session.add(AnswerBankItem(
-                user_id=user_id, key=draft.key, value=draft.value.strip(),
-                source_message_id=sug.message_id,
-            ))
-        else:
-            item.value = draft.value.strip()
-            item.source_message_id = sug.message_id
+        stmt = pg_insert(AnswerBankItem).values(
+            user_id=user_id, key=draft.key, value=draft.value.strip(),
+            source_message_id=sug.message_id,
+        )
+        session.execute(stmt.on_conflict_do_update(
+            index_elements=["user_id", "key"],
+            set_={"value": stmt.excluded.value,
+                  "source_message_id": stmt.excluded.source_message_id,
+                  "updated_at": func.now()},
+        ))
         sug.status = status
         session.commit()
         return sug
@@ -231,13 +246,18 @@ def resolve_suggestion(
         session.rollback()
         raise TargetMissing() from None
 
-    # confirm_profile commits: status and the new version land in ONE transaction.
+    # confirm_profile commits: status and the new version land in ONE
+    # transaction (the profile lock is held until that commit).
     predicted = latest.version + 1
     sug.status = status
     sug.applied_version = predicted
     session.flush()
     row = confirm_profile(session, user_id, new_profile, narrative=latest.narrative)
-    if row.version != predicted:
+    # Never leave a committed version with a pending suggestion (confirm_profile
+    # may have rolled back and lost the flushed status, or been idempotent).
+    session.refresh(sug)
+    if sug.status != status or sug.applied_version != row.version:
+        sug.status = status
         sug.applied_version = row.version
         session.commit()
     return sug

@@ -148,9 +148,12 @@ async def test_answer_turn_creates_suggestion_and_next_question(uid):
 
 
 async def test_skip_turn_has_no_suggestion_but_asks_next(uid):
-    sid = _new_session(uid, state="awaiting_answer", asked_count=1, current_gap_id=GAP1,
-                       handled_gaps=[GAP1])
-    _answer(uid, sid, "(pulou)", kind="skip")
+    sid = _new_session(uid, state="awaiting_answer", asked_count=1, current_gap_id=GAP1)
+    from rumo_core.interview.service import skip_question
+
+    with SessionLocal() as s:
+        skip_question(s, uid, sid)
+    assert _get(sid).handled_gaps == [GAP1]
     llm = FakeLLM(TurnResult(next_question="Qual sua pretensão?"))
     assert await _run(uid, llm) == 1
     iv = _get(sid)
@@ -332,3 +335,23 @@ async def test_user_scope_filter(uid):
                 s.execute(delete(model).where(model.user_id == uid2))
             s.execute(delete(User).where(User.id == uid2))
             s.commit()
+
+
+async def test_error_on_answer_turn_then_retry_one_suggestion_one_question(uid):
+    from rumo_core.interview.service import retry_interview
+
+    sid = _new_session(uid, state="awaiting_answer", asked_count=1, current_gap_id=GAP1)
+    _answer(uid, sid, "Reduzi a latência em 30%")
+    assert await _run(uid, FakeLLM(exc=LLMInvalidResponse("bad"))) == 1
+    assert _get(sid).state == "error" and _sugs(sid) == []
+    with SessionLocal() as s:
+        retry_interview(s, uid, sid)
+    draft = SuggestionDraft(op="append_achievement", target_ref="e1",
+                            text="Reduzi a latência em 30%")
+    llm = FakeLLM(TurnResult(suggestion=draft, next_question="Qual sua pretensão?"))
+    assert await _run(uid, llm) == 1
+    assert len(_sugs(sid)) == 1
+    assert [m.kind for m in _msgs(sid)] == ["answer", "question"]
+    iv = _get(sid)
+    assert iv.state == "awaiting_answer" and iv.asked_count == 2
+    assert await _run(uid, FakeLLM()) == 0
