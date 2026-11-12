@@ -92,23 +92,46 @@ def test_collect_job_registration_uses_settings():
     settings = Settings(
         _env_file=None, database_url="postgresql+psycopg://u:p@localhost/x",
         collect_interval_hours=4, collect_delay_seconds=0.5,
-        collect_max_companies_per_run=7,
+        collect_max_companies_per_run=7, collect_max_seconds=45,
     )
     sf = object()
     job = build_collect_job(settings, sf)
     assert job.func is collect_companies and job.args == (sf,)
     assert job.keywords == {
-        "interval_hours": 4, "delay_seconds": 0.5, "max_companies": 7,
+        "interval_hours": 4, "delay_seconds": 0.5, "max_companies": 7, "max_seconds": 45,
     }
 
 
-def test_collect_max_companies_setting_default_and_positive():
+def test_collect_max_seconds_setting_default_and_positive():
     import pytest
     from pydantic import ValidationError
 
     from rumo_core.config import Settings
 
     s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/x")
-    assert s.collect_max_companies_per_run == 3
+    assert s.collect_max_seconds == 60
     with pytest.raises(ValidationError):
-        Settings(_env_file=None, database_url="x", collect_max_companies_per_run=0)
+        Settings(_env_file=None, database_url="x", collect_max_seconds=0)
+
+
+def test_embed_jobs_registration_is_one_small_batch():
+    """A job-embedding backlog (~0.4 texts/s on CPU) must not hold the
+    sequential loop for more than a few seconds per tick."""
+    from rumo_core.config import Settings
+    from worker.collect_jobs import embed_pending_jobs
+    from worker.main import build_embed_jobs_job
+
+    s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/x")
+    assert s.job_embed_batch_size == 2 and s.embed_batch_size == 8
+    sf, emb = object(), object()
+    job = build_embed_jobs_job(s, sf, emb)
+    assert job.func is embed_pending_jobs and job.args == (sf, emb, 2)
+    assert job.keywords == {"max_batches": 1}
+    s = Settings(_env_file=None, database_url="x", job_embed_batch_size=3)
+    assert build_embed_jobs_job(s, sf, emb).args == (sf, emb, 3)
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="x", job_embed_batch_size=0)
+

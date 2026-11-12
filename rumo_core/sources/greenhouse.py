@@ -18,7 +18,11 @@ from rumo_core.sources.base import (
 API_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
 USER_AGENT = "Rumo/0.1 job-search-tool"
 MAX_RETRIES = 3
-MAX_RETRY_AFTER_SECONDS = 60.0
+# Total time one fetch may spend sleeping between retries. The worker runs its
+# jobs one after another, so a long wait here would delay interview turns; a
+# Retry-After beyond what is left fails the fetch (SourceUnavailable) and the
+# company is retried later on its own backoff schedule.
+MAX_RETRY_SLEEP_SECONDS = 10.0
 MAX_TOKEN_LEN = 100
 _TOKEN = re.compile(r"[a-z0-9_-]+")
 
@@ -31,7 +35,7 @@ def _retry_delay(response: httpx.Response, attempt: int) -> float:
         except ValueError:
             value = None
         if value is not None and math.isfinite(value) and value >= 0:
-            return min(value, MAX_RETRY_AFTER_SECONDS)
+            return value
     return float(2**attempt)
 
 
@@ -133,6 +137,7 @@ class GreenhouseSource:
         token = self.normalize_identifier(identifier)
         url = API_URL.format(token=quote(token, safe=""))
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+        slept = 0.0
         for attempt in range(MAX_RETRIES + 1):
             try:
                 async with self._client.stream("GET", url, headers=headers) as resp:
@@ -149,7 +154,8 @@ class GreenhouseSource:
             except httpx.HTTPError as exc:
                 raise SourceUnavailable(f"Greenhouse request failed: {type(exc).__name__}") from exc
             if body is None:
-                if attempt < MAX_RETRIES:
+                if attempt < MAX_RETRIES and slept + delay <= MAX_RETRY_SLEEP_SECONDS:
+                    slept += delay
                     await self._sleep(delay)
                     continue
                 raise SourceUnavailable(f"Greenhouse unavailable (HTTP {status}) after retries")

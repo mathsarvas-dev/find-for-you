@@ -51,8 +51,8 @@ def build_llm(settings):
 
 def build_collect_job(settings, session_factory):
     """collect_companies bound to the settings; at most
-    collect_max_companies_per_run companies per tick so the sequential job loop
-    stays responsive."""
+    collect_max_companies_per_run companies and collect_max_seconds per tick
+    so the sequential job loop stays responsive."""
     from functools import partial
 
     from worker.collect_jobs import collect_companies
@@ -63,6 +63,21 @@ def build_collect_job(settings, session_factory):
         interval_hours=settings.collect_interval_hours,
         delay_seconds=settings.collect_delay_seconds,
         max_companies=settings.collect_max_companies_per_run,
+        max_seconds=settings.collect_max_seconds,
+    )
+
+
+def build_embed_jobs_job(settings, session_factory, embedder):
+    """embed_pending_jobs limited to ONE batch of job_embed_batch_size per
+    tick: a backlog (~0.4 texts/s on CPU) never holds the sequential loop
+    (and so the interview turns) for more than a few seconds."""
+    from functools import partial
+
+    from worker.collect_jobs import embed_pending_jobs
+
+    return partial(
+        embed_pending_jobs, session_factory, embedder, settings.job_embed_batch_size,
+        max_batches=1,
     )
 
 
@@ -92,7 +107,7 @@ async def main() -> None:
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
     from rumo_core.sources import aclose_sources
-    from worker.collect_jobs import embed_pending_jobs, fill_missing_job_fields
+    from worker.collect_jobs import fill_missing_job_fields
     from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
@@ -127,16 +142,9 @@ async def main() -> None:
         partial(embed_pending_chunks, SessionLocal, embedder, settings.embed_batch_size),
         5,
     )
-    # after embed_chunks (profile first); one batch per tick so a long backlog
-    # (~0.4 texts/s on CPU) never starves the other jobs
-    registry.register(
-        "embed_jobs",
-        partial(
-            embed_pending_jobs, SessionLocal, embedder, settings.embed_batch_size,
-            max_batches=1,
-        ),
-        5,
-    )
+    # after embed_chunks (profile first); one small batch per tick so a long
+    # backlog (~0.4 texts/s on CPU) never starves the other jobs
+    registry.register("embed_jobs", build_embed_jobs_job(settings, SessionLocal, embedder), 5)
     # every 60 s; per-company next_run_at governs the real collection frequency
     registry.register("collect_companies", build_collect_job(settings, SessionLocal), 60)
     logger.info("worker started")

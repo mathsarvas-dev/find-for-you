@@ -133,16 +133,33 @@ async def test_429_retry_after_respected_and_capped():
     await src.fetch_jobs("x")
     assert sleeps == [7.0]
 
-    src, _, sleeps = make([httpx.Response(429, headers={"Retry-After": "9999"}), ok({"jobs": []})])
+    # a long Retry-After is not waited out (it would stall the worker loop):
+    # the company fails now and is retried on its own backoff schedule
+    for val in ("9999", "11", "60"):
+        src, reqs, sleeps = make(
+            [httpx.Response(429, headers={"Retry-After": val}), ok({"jobs": []})])
+        with pytest.raises(SourceUnavailable):
+            await src.fetch_jobs("x")
+        assert sleeps == [] and len(reqs) == 1
+
+    src, _, sleeps = make([httpx.Response(429, headers={"Retry-After": "10"}), ok({"jobs": []})])
     await src.fetch_jobs("x")
-    assert sleeps == [60.0]
+    assert sleeps == [10.0]
+
+
+async def test_total_retry_sleep_per_fetch_capped_at_10s():
+    src, reqs, sleeps = make([httpx.Response(429, headers={"Retry-After": "6"})] * 4)
+    with pytest.raises(SourceUnavailable):
+        await src.fetch_jobs("x")
+    assert sleeps == [6.0] and len(reqs) == 2
+    assert sum(sleeps) <= 10
 
 
 @pytest.mark.parametrize("val", ["nan", "inf", "abc", "-5", ""])
 async def test_429_bad_retry_after_falls_back(val):
     src, _, sleeps = make([httpx.Response(429, headers={"Retry-After": val}), ok({"jobs": []})])
     await src.fetch_jobs("x")
-    assert len(sleeps) == 1 and 0 <= sleeps[0] <= 60
+    assert len(sleeps) == 1 and 0 <= sleeps[0] <= 10
 
 
 async def test_429_exhausted_is_unavailable():

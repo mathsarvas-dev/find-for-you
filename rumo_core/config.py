@@ -15,9 +15,14 @@ class Settings(BaseSettings):
     upload_max_bytes: int = Field(5_000_000, gt=0)
     extract_max_chars: int = Field(20_000, gt=0)
     embed_batch_size: int = Field(8, gt=0)
+    # Jobs embedded per worker tick (~0.4 texts/s on CPU): small so a job
+    # backlog never delays interview turns by more than a few seconds.
+    job_embed_batch_size: int = Field(2, gt=0)
     collect_interval_hours: int = Field(6, gt=0)
     collect_delay_seconds: float = Field(1.0, ge=0)
     collect_max_companies_per_run: int = Field(3, gt=0)
+    # A collect tick stops claiming companies after this many seconds.
+    collect_max_seconds: float = Field(60, gt=0)
     fetch_timeout_seconds: float = Field(20, gt=0)
     fetch_max_bytes: int = Field(20_000_000, gt=0)
     llm_fill_batch: int = Field(3, gt=0)
