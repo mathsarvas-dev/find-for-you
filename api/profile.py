@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from api.main import current_user_id
+from api.deps import current_user_id
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
 from rumo_core.models import ProfileChunk, ProfileImport

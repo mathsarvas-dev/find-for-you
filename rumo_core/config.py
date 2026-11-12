@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     upload_max_bytes: int = Field(5_000_000, gt=0)
     extract_max_chars: int = Field(20_000, gt=0)
     embed_batch_size: int = Field(8, gt=0)
+    # Comma-separated list of browser origins allowed to call the API.
+    cors_origins: str = "http://localhost:3000"
 
 
 @lru_cache
