@@ -104,3 +104,11 @@ async def test_llm_supplied_colliding_ids_are_replaced_by_unique_ones():
     assert all(ids)
     assert len(ids) == len(set(ids))
     assert not set(ids) & {"1", "summary", "skills"}
+
+
+async def test_notes_from_llm_are_cleared():
+    from rumo_core.profile.schema import Note
+
+    llm = FakeLLM(CanonicalProfile(notes=[Note(id="n", topic="t", text="inventada")]))
+    profile, _ = await extract_profile(llm, "texto", 1000)
+    assert profile.notes == []

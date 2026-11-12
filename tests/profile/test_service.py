@@ -199,3 +199,51 @@ def test_confirm_with_bad_ids_is_idempotent_on_double_submit(session):
     assert a.id == b.id == c.id
     rows = session.scalars(select(Profile).where(Profile.user_id == uid)).all()
     assert len(rows) == 1
+
+
+def test_confirm_with_notes_idempotent_and_reuses_embeddings(session):
+    from rumo_core.profile.schema import Note
+
+    uid = session.info["uids"][0]
+
+    def prof(extra=()):
+        p = _profile()
+        p.notes = [Note(topic="missing_skills", text="Uso Docker"), *extra]
+        return p
+
+    a = confirm_profile(session, uid, prof(), None)
+    b = confirm_profile(session, uid, prof(), None)
+    assert a.id == b.id
+    notes = a.data["notes"]
+    assert len(notes[0]["id"]) == 8
+    nid = notes[0]["id"]
+    c1 = _chunks(session, uid, 1)
+    assert c1[nid].kind == "note"
+    c1[nid].embedding = [0.1] * 1024
+    c1[nid].model_version = "m1"
+    session.commit()
+    row = confirm_profile(session, uid, prof([Note(topic="t", text="outra")]), None)
+    assert row.version == 2
+    assert _chunks(session, uid, 2)[nid].embedding is not None
+
+
+def test_concurrent_confirm_same_content_one_version(session):
+    import threading
+
+    uid = session.info["uids"][0]
+    barrier = threading.Barrier(3)
+    out = []
+
+    def go():
+        with SessionLocal() as other:
+            barrier.wait()
+            out.append(confirm_profile(other, uid, _profile(), narrative="n").version)
+
+    ts = [threading.Thread(target=go) for _ in range(3)]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert out == [1, 1, 1]
+    session.rollback()
+    assert len(session.scalars(select(Profile).where(Profile.user_id == uid)).all()) == 1

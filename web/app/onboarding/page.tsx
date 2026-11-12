@@ -386,7 +386,7 @@ export default function OnboardingPage() {
           )}
           <div className="panel__foot">
             <Link href="/">← Voltar ao início</Link>
-            {phase.error && (
+            {phase.error ? (
               <button
                 type="button"
                 className="button"
@@ -394,6 +394,10 @@ export default function OnboardingPage() {
               >
                 Tentar de novo
               </button>
+            ) : (
+              <Link className="button" href="/onboarding/interview">
+                Continuar para a entrevista
+              </Link>
             )}
           </div>
         </section>
@@ -467,6 +471,10 @@ function ExistingProfile({
         <p className="muted">
           Você pode revisar e editar o perfil salvo, ou enviar outro currículo para começar de uma
           leitura nova. Confirmar cria uma nova versão; a anterior fica guardada.
+        </p>
+        <p>
+          <Link href="/onboarding/interview">Continuar para a entrevista</Link>
+          <span className="muted"> · perguntas curtas para completar o que falta no perfil.</span>
         </p>
       </div>
       <div className="panel__foot">

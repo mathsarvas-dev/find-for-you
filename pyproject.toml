@@ -27,7 +27,7 @@ dev = ["pytest", "pytest-asyncio"]
 embeddings = ["sentence-transformers"]
 
 [tool.setuptools]
-packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "api", "worker"]
+packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "rumo_core.interview", "api", "worker"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

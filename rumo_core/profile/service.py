@@ -8,6 +8,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from rumo_core.models import Profile, ProfileChunk
+from rumo_core.profile.locks import lock_user_profile
 from rumo_core.profile.chunker import build_chunks
 from rumo_core.profile.schema import CanonicalProfile
 
@@ -117,6 +118,9 @@ def confirm_profile(
     older version had the same hash)."""
     profile = _fill_empty_ids(profile)
     content_hash = _profile_hash(profile, narrative)
+    # Serialises all profile writes of the user until the commit below, so
+    # the version race (IntegrityError path) is unreachable in practice.
+    lock_user_profile(session, user_id)
     for attempt in range(2):
         latest = get_current_profile(session, user_id)
         if latest is not None and latest.content_hash == content_hash:

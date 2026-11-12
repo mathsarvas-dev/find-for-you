@@ -35,7 +35,7 @@ def _ref(item, section: str) -> str:
 
 def build_chunks(profile: CanonicalProfile, narrative: str | None) -> list[Chunk]:
     """Build chunks in a fixed order: summary, experiences, education, skills
-    (languages are folded into the skills chunk), projects, certifications.
+    (languages are folded into the skills chunk), projects, certifications, notes.
     Empty chunks are omitted; content_hash is sha256 of the text. Items must
     have ids (run assign_ids first), otherwise ValueError is raised."""
     raw: list[tuple[str, str, str]] = []
@@ -80,5 +80,8 @@ def build_chunks(profile: CanonicalProfile, narrative: str | None) -> list[Chunk
     for c in profile.certifications:
         raw.append((_ref(c, "certification"), "certification",
                     _join([c.name, c.issuer, c.date])))
+
+    for n in (n for n in profile.notes if n.text.strip()):
+        raw.append((_ref(n, "note"), "note", _join([n.topic, n.text])))
 
     return [Chunk(ref, kind, text, _hash(text)) for ref, kind, text in raw if text]

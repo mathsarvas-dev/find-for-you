@@ -6,6 +6,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from api.deps import current_user_id
+from api.interview import router as interview_router
 from api.profile import router as profile_router
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
@@ -22,6 +23,7 @@ app.add_middleware(
 )
 
 app.include_router(profile_router)
+app.include_router(interview_router)
 
 
 @app.exception_handler(OperationalError)

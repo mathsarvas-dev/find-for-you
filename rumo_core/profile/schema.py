@@ -65,6 +65,12 @@ class Project(BaseModel):
     url: str = ""
 
 
+class Note(BaseModel):
+    id: str = ""
+    topic: str = ""
+    text: str = ""
+
+
 class CanonicalProfile(BaseModel):
     basics: Basics = Field(default_factory=Basics)
     summary: str = ""
@@ -74,6 +80,7 @@ class CanonicalProfile(BaseModel):
     languages: list[Language] = Field(default_factory=list)
     certifications: list[Certification] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
+    notes: list[Note] = Field(default_factory=list)
 
 
 def _new_id() -> str:

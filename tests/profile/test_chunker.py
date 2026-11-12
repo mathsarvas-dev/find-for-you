@@ -64,3 +64,15 @@ def test_reserved_source_ref_rejected():
         {"projects": [{"id": "skills", "name": "X"}]})
     with pytest.raises(ValueError):
         build_chunks(p, None)
+
+
+def test_notes_become_chunks_with_stable_source_ref():
+    from rumo_core.profile.schema import Note
+    prof = CanonicalProfile(notes=[
+        Note(id="n1", topic="missing_skills", text="Uso Docker"),
+        Note(id="n2", topic="x", text="  "),
+    ])
+    chunks = [c for c in build_chunks(prof, None) if c.kind == "note"]
+    assert [c.source_ref for c in chunks] == ["n1"]
+    assert "missing_skills" in chunks[0].text and "Uso Docker" in chunks[0].text
+    assert build_chunks(prof, None) == build_chunks(prof, None)

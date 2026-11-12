@@ -97,6 +97,10 @@ describe("OnboardingPage", () => {
     m.getProfile.mockResolvedValue(stored(4));
     render(<OnboardingPage />);
     expect(await screen.findByRole("button", { name: "Ver perfil atual" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continuar para a entrevista" })).toHaveAttribute(
+      "href",
+      "/onboarding/interview",
+    );
     fireEvent.click(screen.getByRole("button", { name: "Enviar outro currículo" }));
     expect(await screen.findByLabelText(/Arquivo do currículo/)).toBeInTheDocument();
   });
@@ -177,6 +181,10 @@ describe("OnboardingPage", () => {
     await uploadFile();
     fireEvent.click(await screen.findByRole("button", { name: "Confirmar perfil" }));
     expect(await screen.findByText("0 de 4")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Continuar para a entrevista" })).toHaveAttribute(
+      "href",
+      "/onboarding/interview",
+    );
 
     m.getProfile.mockResolvedValueOnce(stored(2)).mockResolvedValue(stored(4));
     await tick(2000);
