@@ -177,7 +177,13 @@ SYSTEM_PROMPT = (
     "que estejam escritos no perfil; ao falar da vaga, use a palavra \"vaga\" e cite no "
     "máximo o título e a empresa dela. Em gaps, você pode citar requisitos, tecnologias e "
     "números escritos na vaga que faltam no perfil. "
-    "6) Não repita a nota no texto e nunca invente nada."
+    "6) Em rationale e strengths, NÃO nomeie ferramentas, tecnologias, certificações nem "
+    "requisitos que não estejam escritos no perfil, nem copie palavras da vaga para "
+    "descrever o candidato; ao citar a vaga, use o título ou a empresa exatamente como "
+    "escritos. "
+    "7) Não use as palavras atualmente, atual, hoje, presente, set, out, mar; não escreva "
+    "meses nem números por extenso; não inclua links nem e-mails. "
+    "8) Não repita a nota no texto e nunca invente nada."
 )
 
 
@@ -272,12 +278,131 @@ def _job_sources(job: JobView | None) -> list[str]:
     return [job.title or "", job.company_name or "", job.description or ""]
 
 
-def _sentence_ok(
-    sentence: str, profile_sources: list[str], job: JobView | None, extra: list[str] = ()
-) -> bool:
-    sources = [*profile_sources, *extra]
-    if job is not None and _JOB_MARKER.search(_fold(sentence)):
-        sources += [job.title or "", job.company_name or ""]
+def _job_words_text(job: JobView | None) -> str:
+    if job is None:
+        return ""
+    return "\n".join(
+        f or ""
+        for f in (job.title, job.company_name, job.location_text, job.work_model,
+                  job.seniority, job.department, job.description)
+    )
+
+
+# Ordinary PT/EN prose and generic hiring vocabulary (accent-folded). A word
+# that is in the posting but not in the profile is rejected in rationale and
+# strengths unless it is here (or has <= 3 letters): invented skills realistically
+# come from the posting, whatever their case or position.
+_STOPWORDS = frozenset("""
+para pela pelo pelas pelos como mais menos muito muita muitos muitas pouco pouca
+este esta estes estas esse essa esses essas isso isto aquele aquela aquilo
+seus suas sua seu nosso nossa nossos nossas voce voces deles delas dele dela
+qual quais quando onde porque pois porem entao tambem ainda apenas somente sempre
+nunca nada tudo todo toda todos todas cada outro outra outros outras mesmo mesma
+entre sobre sob desde apos antes depois durante contra sera serao
+seja sejam esta estao estar estava sendo sido foram fora possui possuem temos
+tendo teve tinha haver pode podem poder deve devem dever precisa precisam
+fazer feito fazem busca buscamos buscando procuramos procura oferecemos
+oferece queremos quer bons boas otimo otima excelente forte fortes solido
+solida solidos solidas grande grandes novo nova novos novas melhor melhores
+alto alta altos altas baixo baixa nivel niveis base basico basica avancado avancada
+intermediario intermediaria fluente fluencia conhecimento conhecimentos experiencia
+experiencias experiente vivencia atuacao atuar atua atuou trabalho trabalhar
+trabalha trabalhou trabalhando projeto projetos area areas time times equipe equipes
+empresa empresas cliente clientes produto produtos servico servicos negocio negocios
+pessoa pessoas profissional profissionais candidato candidata candidatos candidatas
+perfil perfis vaga vagas cargo cargos funcao funcoes posicao oportunidade
+oportunidades requisito requisitos requisitado desejavel desejaveis diferencial
+diferenciais obrigatorio obrigatoria necessario necessaria exigido exigida exige
+pede pedem pedido responsabilidade responsabilidades atividade atividades
+habilidade habilidades competencia competencias tecnica tecnicas tecnico tecnicos
+ferramenta ferramentas tecnologia tecnologias desenvolvimento desenvolver
+desenvolvedor desenvolvedora engenharia engenheiro engenheira analise analista
+dados sistema sistemas solucao solucoes processo processos qualidade
+comunicacao lideranca colaboracao aprendizado senioridade senior pleno junior
+anos meses tempo remoto remota hibrido hibrida presencial modelo local
+idioma idiomas ingles portugues espanhol formacao graduacao curso cursos
+superior relacionada relacionadas relacionado relacionados similar similares
+principal principais foco focado focada ambiente ambientes parte partes
+alinhado alinhada aderente aderencia compativel combina combinam
+atende atendem atender cumpre falta faltam ausencia ausente lacuna lacunas
+ponto pontos destaque destaca indica indicam mostra mostram demonstra
+that this these those will would should could have from with
+were been being into onto over under about above after before during
+your their they them which what when where while also only
+very more most less some such than then there here other others each both
+strong good great solid experience experiences years year months knowledge skill
+skills team teams work working role roles position jobs candidate candidates
+profile requirement requirements required preferred plus nice must able ability
+company companies product products project projects including include includes
+""".split())
+
+_VOLATILE = re.compile(
+    r"(?<!\w)(atualmente|atual|presente|hoje|currently|current|present|now|"
+    r"set|out|mar|mai|ago|may)(?!\w)",
+    re.IGNORECASE,
+)
+_CONTACT = re.compile(
+    r"(?:https?://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+"
+    r"|(?<![\w.])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|br|dev|app|co|me|info|xyz|"
+    r"example|ly|gl|ai|biz|site|online)(?![\w-])",
+    re.IGNORECASE,
+)
+
+
+def _words(text: str) -> set[str]:
+    return set(re.findall(r"\w+", _fold(text)))
+
+
+def _known(word: str, profile_words: set[str]) -> bool:
+    return (
+        word in profile_words
+        or (word.endswith("s") and word[:-1] in profile_words)
+        or word + "s" in profile_words
+    )
+
+
+def _no_job_only_words(text: str, profile_words: set[str], job_words: set[str]) -> bool:
+    for w in _words(text):
+        if len(w) <= 3 or w.isdigit() or w in _STOPWORDS:
+            continue
+        if w in job_words and not _known(w, profile_words):
+            return False
+    return True
+
+
+def _strip_exact(sentence: str, job: JobView | None) -> str:
+    """In a sentence about the job, remove the EXACT full title / company
+    string (case-insensitive); their individual words stay checked."""
+    if job is None or not _JOB_MARKER.search(_fold(sentence)):
+        return sentence
+    for value in (job.title, job.company_name):
+        value = (value or "").strip()
+        if value:
+            sentence = re.sub(
+                r"(?<!\w)" + re.escape(value) + r"(?!\w)", " ", sentence, flags=re.IGNORECASE
+            )
+    return sentence
+
+
+@dataclass(frozen=True)
+class _Ctx:
+    profile_sources: list[str]
+    profile_words: set[str]
+    job: JobView | None
+    job_words: set[str]
+    job_sources: list[str]
+
+
+def _sentence_ok(sentence: str, ctx: _Ctx, *, gap: bool) -> bool:
+    if gap:
+        # a gap states what the profile lacks: it may cite the posting's own
+        # terms and numbers (title/company/description)
+        sources = [*ctx.profile_sources, *ctx.job_sources]
+    else:
+        sentence = _strip_exact(sentence, ctx.job)
+        sources = ctx.profile_sources
+        if not _no_job_only_words(sentence, ctx.profile_words, ctx.job_words):
+            return False
     if not numbers_supported(sentence, sources):
         return False
     if not lexicon_supported(sentence, sources):
@@ -286,35 +411,51 @@ def _sentence_ok(
     return all(_term_in(t, haystack) for t in _salient_terms(sentence))
 
 
-def _text_ok(
-    text: str, profile_sources: list[str], job: JobView | None, extra: list[str] = ()
-) -> bool:
+def _text_ok(text: str, ctx: _Ctx, *, gap: bool = False) -> bool:
+    if _CONTACT.search(text):
+        return False
     sentences = [s for s in _SENTENCE_SPLIT.split(text) if s.strip()]
-    return bool(sentences) and all(
-        _sentence_ok(s, profile_sources, job, extra) for s in sentences
+    return bool(sentences) and all(_sentence_ok(s, ctx, gap=gap) for s in sentences)
+
+
+def _drop_unsupported_volatile(text: str, sources: list[str]) -> str:
+    """Remove current-job/month words the profile does not back (in a rationale
+    they are ordinary prose far more often than date claims) instead of failing."""
+
+    def _sub(m: re.Match[str]) -> str:
+        return m.group(0) if lexicon_supported(m.group(0), sources) else ""
+
+    out = _VOLATILE.sub(_sub, text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"\s+([,.;:!?])", r"\1", out)
+    out = re.sub(
+        r"(^|[.!?]\s+)[,;:]?\s*(\w)", lambda m: m.group(1) + m.group(2).upper(), out
     )
+    return out.strip()
 
 
 def validate_match(
     draft: MatchDraft, profile: CanonicalProfile, *, job: JobView | None = None
 ) -> MatchResult:
-    """Drop strengths/gaps that cite anything absent from the profile (or, in a
-    sentence about the job, from the job title/company). Raises MatchInvalid if
-    the score is not an int in 0..100, the rationale fails, or no item survives."""
+    """Drop strengths/gaps that cite anything absent from the profile; gaps may
+    also cite the posting. Raises MatchInvalid if the score is not an int in
+    0..100, the rationale fails, or no item survives."""
     score = draft.score
     if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 100:
         raise MatchInvalid("score")
     sources = [_render(profile, list(profile.experiences), extra=True)]
-    rationale = (draft.rationale or "").strip()
-    if not rationale or not _text_ok(rationale, sources, job):
+    ctx = _Ctx(
+        profile_sources=sources,
+        profile_words=_words(sources[0]),
+        job=job,
+        job_words=_words(_job_words_text(job)),
+        job_sources=_job_sources(job),
+    )
+    rationale = _drop_unsupported_volatile((draft.rationale or "").strip(), sources)
+    if not rationale or not _text_ok(rationale, ctx):
         raise MatchInvalid("rationale")
-    strengths = [s.strip() for s in draft.strengths if s.strip() and _text_ok(s, sources, job)]
-    # a gap states what the profile lacks: it may cite the posting's own terms
-    # and numbers (description/title/company), never anything from nowhere
-    job_sources = _job_sources(job)
-    gaps = [
-        g.strip() for g in draft.gaps if g.strip() and _text_ok(g, sources, job, job_sources)
-    ]
+    strengths = [s.strip() for s in draft.strengths if s.strip() and _text_ok(s, ctx)]
+    gaps = [g.strip() for g in draft.gaps if g.strip() and _text_ok(g, ctx, gap=True)]
     if not strengths and not gaps:
         raise MatchInvalid("items")
     return MatchResult(score=score, rationale=rationale, strengths=strengths, gaps=gaps)
