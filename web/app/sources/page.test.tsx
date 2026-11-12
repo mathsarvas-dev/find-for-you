@@ -151,10 +151,13 @@ describe("SourcesPage", () => {
     expect(m.companies).toHaveBeenCalledTimes(2);
   });
 
-  it("90 s com coleta pendente: avisa que o worker pode estar parado", async () => {
+  it("5 min com coleta pendente: avisa que o worker pode estar parado", async () => {
     m.companies.mockResolvedValue([pending]);
     await renderPage();
-    await tick(80_000);
+    // 90 s pendente é normal com o worker saudável (fila de empresas, vetorização)
+    await tick(90_000);
+    expect(screen.queryByText(/docker compose logs worker/)).toBeNull();
+    await tick(200_000);
     expect(screen.queryByText(/docker compose logs worker/)).toBeNull();
     await tick(10_000);
     expect(screen.getByText(/A coleta ainda não começou/)).toBeInTheDocument();

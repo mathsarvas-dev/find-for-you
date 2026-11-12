@@ -9,8 +9,13 @@ import { ApiError } from "@/lib/profile";
 import { isPending, listCompanies, type Company } from "@/lib/sources";
 
 const POLL_MS = 10_000;
-/** Depois disso com coleta pendente, o worker provavelmente não está rodando. */
-const SLOW_MS = 90_000;
+/**
+ * Depois disso com coleta pendente, o worker provavelmente não está rodando.
+ * Folgado de propósito: o worker coleta poucas empresas por ciclo de 60 s e
+ * divide o laço com a vetorização e o preenchimento das vagas, então uma fila
+ * de várias empresas leva alguns minutos mesmo com o worker saudável.
+ */
+const SLOW_MS = 300_000;
 /** Atualiza os tempos relativos ("há 5 min") e percebe coletas que venceram. */
 const CLOCK_MS = 30_000;
 
