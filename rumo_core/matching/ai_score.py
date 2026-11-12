@@ -248,17 +248,22 @@ def _technical(tok: str) -> bool:
     return False
 
 
-def _salient_terms(sentence: str) -> list[str]:
-    """Proper names and technical terms. The first word of a sentence is only
-    checked when it looks technical (capitalised by grammar otherwise)."""
+def _salient_terms_at(sentence: str) -> list[tuple[str, int]]:
+    """Proper names and technical terms with their offsets. The first word of
+    a sentence is only checked when it looks technical (capitalised by grammar
+    otherwise)."""
     out = []
     for idx, m in enumerate(_TOKEN.finditer(sentence)):
         tok = m.group(0).rstrip(".-/")
         if not tok or tok.isdigit():
             continue
         if _technical(tok) or (idx > 0 and tok[0].isupper()):
-            out.append(tok)
+            out.append((tok, m.start()))
     return out
+
+
+def _salient_terms(sentence: str) -> list[str]:
+    return [t for t, _ in _salient_terms_at(sentence)]
 
 
 def _term_in(term: str, haystack_folded: str) -> bool:
@@ -289,9 +294,10 @@ def _job_words_text(job: JobView | None) -> str:
 
 
 # Ordinary PT/EN prose and generic hiring vocabulary (accent-folded). A word
-# that is in the posting but not in the profile is rejected in rationale and
-# strengths unless it is here (or has <= 3 letters): invented skills realistically
-# come from the posting, whatever their case or position.
+# that is in the posting but not in the profile is rejected in strengths unless
+# it is here (or has <= 3 letters): invented skills realistically come from the
+# posting, whatever their case or position. The rationale uses the narrower
+# skill-like check (_job_skill_words), and these words are excluded from it too.
 _STOPWORDS = frozenset("""
 para pela pelo pelas pelos como mais menos muito muita muitos muitas pouco pouca
 este esta estes estas esse essa esses essas isso isto aquele aquela aquilo
@@ -341,12 +347,24 @@ _VOLATILE = re.compile(
     r"set|out|mar|mai|ago|may)(?!\w)",
     re.IGNORECASE,
 )
-_CONTACT = re.compile(
-    r"(?:https?://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+"
-    r"|(?<![\w.])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|br|dev|app|co|me|info|xyz|"
-    r"example|ly|gl|ai|biz|site|online)(?![\w-])",
-    re.IGNORECASE,
+_CONTACT = re.compile(r"(?:https?://|www\.)\S+|[\w.+-]+@[\w-]+\.[\w.-]+", re.IGNORECASE)
+# bare domains: lowercase labels only, so ASP.NET / VB.NET / Socket.IO are not domains
+_BARE_DOMAIN = re.compile(
+    r"(?<![\w.])[a-z0-9-]+(?:\.[a-z0-9-]+)*\.(?:com|net|org|io|br|dev|app|co|me|info|xyz|"
+    r"example|ly|gl|ai|biz|site|online)(?![\w-])"
 )
+
+
+def _has_contact(text: str, profile_folded: str) -> bool:
+    """URL, email or bare domain. A dotted name that the profile itself
+    contains (e.g. socket.io as a skill) is not a contact: the profile text
+    used here never contains links or emails."""
+    if _CONTACT.search(text):
+        return True
+    return any(
+        not re.search(r"(?<!\w)" + re.escape(_fold(m.group(0))) + r"(?!\w)", profile_folded)
+        for m in _BARE_DOMAIN.finditer(text)
+    )
 
 
 def _words(text: str) -> set[str]:
@@ -362,12 +380,42 @@ def _known(word: str, profile_words: set[str]) -> bool:
 
 
 def _no_job_only_words(text: str, profile_words: set[str], job_words: set[str]) -> bool:
+    """Strict (strengths): no posting word absent from the profile."""
     for w in _words(text):
         if len(w) <= 3 or w.isdigit() or w in _STOPWORDS:
             continue
         if w in job_words and not _known(w, profile_words):
             return False
     return True
+
+
+_LIST_SPLIT = re.compile(r"[,;:()\[\]\n]")
+
+
+def _job_skill_words(job: JobView | None) -> set[str]:
+    """Skill-like words of the posting: its capitalised/technical terms, the
+    company name, and single-word items of comma lists that name such terms
+    ("Kubernetes, Terraform, dbt, git, observabilidade")."""
+    if job is None:
+        return set()
+    out = _words(job.company_name or "")
+    for sentence in _SENTENCE_SPLIT.split(_job_words_text(job)):
+        terms = _salient_terms(sentence)
+        for t in terms:
+            out |= _words(t)
+        if terms and "," in sentence:
+            for item in _LIST_SPLIT.split(sentence):
+                tokens = item.split()
+                if len(tokens) == 1:
+                    out |= _words(tokens[0])
+    return {w for w in out if not w.isdigit() and w not in _STOPWORDS}
+
+
+def _no_job_skill_words(text: str, ctx: "_Ctx") -> bool:
+    """Narrow (rationale): no skill-like posting word absent from the profile."""
+    return not any(
+        w in ctx.job_skill_words and not _known(w, ctx.profile_words) for w in _words(text)
+    )
 
 
 def _strip_exact(sentence: str, job: JobView | None) -> str:
@@ -388,8 +436,10 @@ def _strip_exact(sentence: str, job: JobView | None) -> str:
 class _Ctx:
     profile_sources: list[str]
     profile_words: set[str]
+    profile_folded: str
     job: JobView | None
     job_words: set[str]
+    job_skill_words: set[str]
     job_sources: list[str]
 
 
@@ -411,10 +461,57 @@ def _sentence_ok(sentence: str, ctx: _Ctx, *, gap: bool) -> bool:
     return all(_term_in(t, haystack) for t in _salient_terms(sentence))
 
 
-def _text_ok(text: str, ctx: _Ctx, *, gap: bool = False) -> bool:
-    if _CONTACT.search(text):
+# A rationale clause with one of these states an absence ("mas não cita
+# Kubernetes"), so, like a gap, it may name what the posting asks for.
+_NEGATION = re.compile(
+    r"(?<!\w)(nao|sem|falta|faltam|faltar|ausencia|ausente|nem|apenas|carece|"
+    r"not|without|lacks?|missing)(?!\w)"
+)
+_CLAUSE_SEP = re.compile(r"[,;:()]|\s(?=(?:mas|porem|but|embora|contudo|entretanto)\s)")
+
+
+def _clause_spans(sentence: str) -> list[tuple[int, int, bool]]:
+    folded = _fold(sentence)  # same length as `sentence` for PT/EN text
+    if len(folded) != len(sentence):
+        folded = sentence.lower()
+    spans, start = [], 0
+    for m in _CLAUSE_SEP.finditer(folded):
+        spans.append((start, m.start()))
+        start = m.end()
+    spans.append((start, len(sentence)))
+    return [(s, e, bool(_NEGATION.search(folded[s:e]))) for s, e in spans if s < e]
+
+
+def _rationale_sentence_ok(sentence: str, ctx: _Ctx) -> bool:
+    sentence = _strip_exact(sentence, ctx.job)
+    with_job = [*ctx.profile_sources, *ctx.job_sources]
+    spans = _clause_spans(sentence)
+    for s, e, negated in spans:
+        clause = sentence[s:e]
+        sources = with_job if negated else ctx.profile_sources
+        if not numbers_supported(clause, sources):
+            return False
+        if not lexicon_supported(clause, sources):
+            return False
+        if not negated and not _no_job_skill_words(clause, ctx):
+            return False
+    # capitalised/technical terms: found over the whole sentence (so a term
+    # right after a comma is not a "first word"), checked per its clause
+    profile_hay = ctx.profile_folded
+    job_hay = _fold("\n".join(with_job))
+    for term, pos in _salient_terms_at(sentence):
+        negated = any(s <= pos < e and n for s, e, n in spans)
+        if not _term_in(term, job_hay if negated else profile_hay):
+            return False
+    return True
+
+
+def _text_ok(text: str, ctx: _Ctx, *, gap: bool = False, rationale: bool = False) -> bool:
+    if _has_contact(text, ctx.profile_folded):
         return False
     sentences = [s for s in _SENTENCE_SPLIT.split(text) if s.strip()]
+    if rationale:
+        return bool(sentences) and all(_rationale_sentence_ok(s, ctx) for s in sentences)
     return bool(sentences) and all(_sentence_ok(s, ctx, gap=gap) for s in sentences)
 
 
@@ -437,9 +534,9 @@ def _drop_unsupported_volatile(text: str, sources: list[str]) -> str:
 def validate_match(
     draft: MatchDraft, profile: CanonicalProfile, *, job: JobView | None = None
 ) -> MatchResult:
-    """Drop strengths/gaps that cite anything absent from the profile; gaps may
-    also cite the posting. Raises MatchInvalid if the score is not an int in
-    0..100, the rationale fails, or no item survives."""
+    """Drop strengths/gaps that cite anything absent from the profile; gaps (and
+    negated rationale clauses) may also cite the posting. Raises MatchInvalid if
+    the score is not an int in 0..100, the rationale fails, or no item survives."""
     score = draft.score
     if isinstance(score, bool) or not isinstance(score, int) or not 0 <= score <= 100:
         raise MatchInvalid("score")
@@ -447,12 +544,14 @@ def validate_match(
     ctx = _Ctx(
         profile_sources=sources,
         profile_words=_words(sources[0]),
+        profile_folded=_fold(sources[0]),
         job=job,
         job_words=_words(_job_words_text(job)),
+        job_skill_words=_job_skill_words(job),
         job_sources=_job_sources(job),
     )
     rationale = _drop_unsupported_volatile((draft.rationale or "").strip(), sources)
-    if not rationale or not _text_ok(rationale, ctx):
+    if not rationale or not _text_ok(rationale, ctx, rationale=True):
         raise MatchInvalid("rationale")
     strengths = [s.strip() for s in draft.strengths if s.strip() and _text_ok(s, ctx)]
     gaps = [g.strip() for g in draft.gaps if g.strip() and _text_ok(g, ctx, gap=True)]

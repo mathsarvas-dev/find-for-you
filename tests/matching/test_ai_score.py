@@ -368,3 +368,96 @@ async def test_score_job_invalid_draft_raises_match_invalid():
     llm = FakeLLM(good_draft(rationale="Tem 15 anos de casa."))
     with pytest.raises(MatchInvalid):
         await score_job(llm, make_profile(), make_job())
+
+
+RICH_JOB = dict(
+    title="Engenheira de Dados Sênior",
+    company_name="Globex",
+    description=(
+        "Buscamos pessoa engenheira de dados sênior para construir e manter pipelines "
+        "escaláveis em Python e SQL, orquestrados com Airflow. Você vai garantir a "
+        "confiabilidade, a governança e a otimização de custos da plataforma de dados na "
+        "nuvem, colaborando com times de produto e analytics. Inglês avançado. "
+        "Requisitos: Kubernetes, Spark, Terraform, dbt, observabilidade."
+    ),
+)
+
+PLAUSIBLE_RATIONALES = [
+    "O perfil tem boa aderência: experiência com Python, SQL e Airflow na Acme, alinhada à vaga.",
+    "A candidata constrói pipelines em Python e Airflow e reduziu o custo de nuvem em 30%, "
+    "o que conversa com a vaga.",
+    "Experiência relevante em engenharia de dados com Python e SQL; inglês avançado atende "
+    "ao requisito de idioma.",
+    "O perfil cobre a base técnica (Python, SQL, Airflow), mas não mostra Spark nem liderança.",
+    "Perfil compatível: atua como engenheira de dados na Acme desde 2020 com pipelines em Python.",
+    "A experiência com pipelines e otimização de custos na nuvem é um bom indício para a vaga.",
+    "Há boa aderência técnica, porém faltam evidências de governança de dados.",
+    "O perfil demonstra experiência sólida com pipelines de dados, mas não cita Kubernetes.",
+    "O perfil pode construir e manter uma plataforma escalável; a otimização de custos e a "
+    "governança são escaláveis com Python.",
+]
+
+
+@pytest.mark.parametrize("rationale", PLAUSIBLE_RATIONALES)
+def test_plausible_rationale_with_rich_posting_is_valid(rationale):
+    res = validate_match(
+        good_draft(rationale=rationale), make_profile(), job=make_job(**RICH_JOB)
+    )
+    assert res.rationale
+
+
+@pytest.mark.parametrize(
+    "rationale",
+    [
+        "O perfil usa Python e kubernetes.",
+        "O perfil tem experiência com spark e dbt.",
+        "Domina Terraform, com pipelines em Python.",
+        "O perfil cobre Python, Kubernetes e SQL.",
+        "Experiência com observabilidade em Python.",
+    ],
+)
+def test_job_skill_claimed_in_rationale_raises(rationale):
+    with pytest.raises(MatchInvalid):
+        validate_match(good_draft(rationale=rationale), make_profile(), job=make_job(**RICH_JOB))
+
+
+def test_negated_clause_may_name_missing_requirement_and_number():
+    job = make_job(**{**RICH_JOB, "description": RICH_JOB["description"] + " 8 anos."})
+    res = validate_match(
+        good_draft(rationale="Boa base em Python, mas não tem os 8 anos nem Kubernetes."),
+        make_profile(), job=job,
+    )
+    assert "Kubernetes" in res.rationale
+
+
+def test_strengths_keep_strict_job_word_check():
+    draft = good_draft(rationale=NEUTRAL, strengths=["Pipelines escaláveis e confiáveis", "Domina SQL"])
+    res = validate_match(draft, make_profile(), job=make_job(**RICH_JOB))
+    assert res.strengths == ["Domina SQL"]
+
+
+def test_dotted_tech_names_are_not_contacts():
+    profile = make_profile(skills=[Skill(name="ASP.NET"), Skill(name="C#"),
+                                   Skill(name="Socket.IO"), Skill(name="Node.js"),
+                                   Skill(name="Python")])
+    draft = good_draft(
+        rationale="O perfil tem experiência com ASP.NET e C#.",
+        strengths=["Usa Socket.IO e Node.js", "Domina socket.io com Python"],
+    )
+    res = validate_match(draft, profile, job=make_job())
+    assert res.rationale == "O perfil tem experiência com ASP.NET e C#."
+    assert res.strengths == ["Usa Socket.IO e Node.js", "Domina socket.io com Python"]
+
+
+@pytest.mark.parametrize(
+    "rationale",
+    [
+        "O perfil tem Python; veja https://evil.example/x.",
+        "O perfil tem Python; contato rh@globex.com.",
+        "O perfil tem Python; veja www.globex.com.",
+        "O perfil tem Python; candidate-se em globex.io.",
+    ],
+)
+def test_urls_and_emails_in_rationale_raise(rationale):
+    with pytest.raises(MatchInvalid):
+        validate_match(good_draft(rationale=rationale), make_profile(), job=make_job())
