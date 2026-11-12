@@ -1,4 +1,5 @@
 import { Suspense } from "react";
+import Link from "next/link";
 import { connection } from "next/server";
 import { StatusRow } from "@/components/StatusRow";
 import { checkHealth, type HealthReport } from "@/lib/health";
@@ -13,6 +14,15 @@ export default function StatusPage() {
       <Suspense fallback={<HealthPanelLoading />}>
         <HealthPanel />
       </Suspense>
+      <section className="next-step" aria-labelledby="proximo-passo">
+        <p>
+          <strong id="proximo-passo">Perfil</strong>: envie seu currículo, confira o que foi lido e
+          confirme. É a base para comparar vagas.
+        </p>
+        <Link className="button" href="/onboarding">
+          Montar meu perfil
+        </Link>
+      </section>
     </main>
   );
 }
