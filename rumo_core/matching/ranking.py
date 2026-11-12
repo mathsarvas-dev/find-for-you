@@ -118,6 +118,27 @@ def _usable(session: Session, user_id: int, model_version: str):
     return profile.version, used
 
 
+def usable_profile(session: Session, user_id: int,
+                   model_version: str) -> tuple[int | None, int]:
+    """(current profile version or None, embedded chunks usable for scoring)."""
+    return _usable(session, user_id, model_version)
+
+
+def job_vec_score(session: Session, user_id: int, job_id: int, *,
+                  model_version: str) -> float | None:
+    """vec_score of one of the user's jobs (no filters, any status but
+    duplicate); None when the job or the profile has no usable embedding."""
+    version, used = _usable(session, user_id, model_version)
+    if version is None or used == 0:
+        return None
+    scores = _scores(user_id, version, SearchFilters(),
+                     model_version=model_version, status="all")
+    v = session.scalar(
+        select(scores.c.vec_score).where(scores.c.job_id == job_id)
+    )
+    return float(v) if v is not None else None
+
+
 def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
               model_version: str, status: str = "open",
               limit: int = 50, offset: int = 0) -> RankPage:
