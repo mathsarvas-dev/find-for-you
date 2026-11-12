@@ -219,7 +219,14 @@ export default function InterviewPage() {
   async function submit(send: (id: number) => Promise<{ state: InterviewState }>) {
     if (!data) return;
     await track(async () => {
-      const { state } = await send(data.id);
+      let state: InterviewState;
+      try {
+        ({ state } = await send(data.id));
+      } catch (err) {
+        // 409: a aba está desatualizada; recarrega e deixa o erro subir para o AnswerBox.
+        if (err instanceof ApiError && err.status === 409 && mounted.current) await refresh();
+        throw err;
+      }
       if (!mounted.current) return;
       setData({ ...data, state });
       await refresh();
@@ -523,10 +530,16 @@ function DonePanel({
       <div className="panel__foot">
         <Link href="/onboarding">← Voltar ao perfil</Link>
         <div className="actions">
+          {pending > 0 && (
+            <span id="nova-bloqueada" className="muted">
+              Resolva as sugestões pendentes antes de iniciar outra entrevista
+            </span>
+          )}
           <button
             type="button"
             className="button button--secondary"
-            disabled={acting}
+            disabled={acting || pending > 0}
+            aria-describedby={pending > 0 ? "nova-bloqueada" : undefined}
             onClick={onStartNew}
           >
             Nova entrevista

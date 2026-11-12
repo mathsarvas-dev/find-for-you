@@ -216,7 +216,11 @@ async def process_interview_turns(
         )
         _revert(session_factory, session_id)
         return 0
-    except LLMInvalidResponse:
+    except LLMInvalidResponse as exc:
+        # class name and session id only: the message may echo user text
+        logger.warning(
+            "interview %s invalid LLM response (%s)", session_id, type(exc).__name__
+        )
         _set_state(session_factory, session_id, "error", MSG_INVALID)
         return 1
     except LLMError:

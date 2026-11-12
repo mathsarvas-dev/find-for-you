@@ -244,6 +244,15 @@ async def test_invalid_llm_json_sets_error_and_retry_resumes_without_duplicate_q
     assert [m.kind for m in _msgs(sid)] == ["question"]
 
 
+async def test_invalid_response_logs_class_and_session_only(uid, caplog):
+    sid = _new_session(uid)
+    with caplog.at_level("WARNING"):
+        await _run(uid, FakeLLM(exc=LLMInvalidResponse("segredo-do-usuario-xyz")))
+    assert any("LLMInvalidResponse" in r.getMessage() and str(sid) in r.getMessage()
+               for r in caplog.records)
+    assert "segredo-do-usuario-xyz" not in caplog.text
+
+
 async def test_llm_error_sets_error_state(uid):
     sid = _new_session(uid)
     assert await _run(uid, FakeLLM(exc=LLMError("boom"))) == 1

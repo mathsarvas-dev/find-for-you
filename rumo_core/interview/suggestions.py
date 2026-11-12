@@ -14,6 +14,7 @@ SuggestionOp = Literal[
     "set_experience_description",
     "set_experience_dates",
     "set_summary",
+    "set_headline",
     "add_skill",
     "set_preference",
     "add_note",
@@ -145,8 +146,10 @@ def _find_experience(profile: CanonicalProfile, ref: str | None) -> Experience |
 def _allowed_ops(gap: Gap) -> tuple[str, ...]:
     if gap.kind in _EXPERIENCE_GAPS:
         return (*_EXPERIENCE_OPS, "add_note")
-    if gap.kind in ("missing_summary", "missing_target_role"):
+    if gap.kind == "missing_summary":
         return ("set_summary", "add_note")
+    if gap.kind == "missing_target_role":
+        return ("set_headline", "add_note")
     if gap.kind == "missing_skills":
         return ("add_skill", "add_note")
     if gap.kind.startswith("pref_"):
@@ -185,7 +188,7 @@ def validate_suggestion(
             if not draft.text.strip():
                 return "texto vazio"
             checked = draft.text
-    elif draft.op in ("set_summary", "add_note"):
+    elif draft.op in ("set_summary", "set_headline", "add_note"):
         if not draft.text.strip():
             return "texto vazio"
         checked = draft.text
@@ -237,6 +240,8 @@ def apply_suggestion(
                 exp.end = draft.end.strip()
     elif draft.op == "set_summary":
         out.summary = draft.text.strip()
+    elif draft.op == "set_headline":
+        out.basics.headline = draft.text.strip()
     elif draft.op == "add_skill":
         out.skills.append(Skill(name=draft.name.strip(), level=draft.level))
     out.notes.append(Note(topic=gap.kind, text=answer.strip()))

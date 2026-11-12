@@ -91,7 +91,11 @@ def test_op_must_fit_gap():
     d = SuggestionDraft(op="set_summary", text="Resumo")
     assert _v(d, "Resumo") is not None  # experience gap
     assert _v(d, "Resumo", gap=_gap("missing_summary", None)) is None
-    assert _v(d, "Resumo", gap=_gap("missing_target_role", None)) is None
+    assert _v(d, "Resumo", gap=_gap("missing_target_role", None)) is not None
+    h = SuggestionDraft(op="set_headline", text="Engenheira de dados")
+    assert _v(h, "Engenheira de dados", gap=_gap("missing_target_role", None)) is None
+    assert _v(h, "Engenheira de dados", gap=_gap("missing_summary", None)) is not None
+    assert _v(h, "Engenheira de dados") is not None  # experience gap
     assert _v(d, "Resumo", gap=_gap("missing_skills", None)) is not None
     note = SuggestionDraft(op="add_note", text="algo")
     assert _v(note, "algo", gap=_gap("missing_skills", None)) is None
@@ -271,3 +275,25 @@ def test_note_unsupported_number():
     g = _gap("missing_skills", None)
     assert _v(SuggestionDraft(op="add_note", text="Ganhou 3 prêmios"), "ganhei prêmios", gap=g) is not None
     assert _v(SuggestionDraft(op="add_note", text="Ganhou 3 prêmios"), "ganhei 3 prêmios", gap=g) is None
+
+
+def test_set_headline_validation():
+    g = _gap("missing_target_role", None)
+    assert _v(SuggestionDraft(op="set_headline", text="  "), "x", gap=g) is not None
+    assert _v(SuggestionDraft(op="set_headline", text="Dev sênior de 10 anos"),
+              "quero ser dev", gap=g) is not None  # invented number
+    assert _v(SuggestionDraft(op="set_headline", text="Dev em dois times"),
+              "quero ser dev", gap=g) is not None  # lexicon word not in answer
+    assert _v(SuggestionDraft(op="set_headline", text="Dev de 10 anos"),
+              "sou dev de 10 anos", gap=g) is None
+
+
+def test_set_headline_sets_headline_not_summary_and_appends_note():
+    p = _profile()
+    p.summary = "Resumo atual"
+    out = apply_suggestion(p, SuggestionDraft(op="set_headline", text="  Engenheira de dados "),
+                           answer=" Engenheira de dados ", gap=_gap("missing_target_role", None))
+    assert out.basics.headline == "Engenheira de dados"
+    assert out.summary == "Resumo atual"
+    assert out.notes[-1].topic == "missing_target_role"
+    assert p.basics.headline == ""  # pure

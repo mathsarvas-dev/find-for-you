@@ -273,6 +273,20 @@ describe("InterviewPage", () => {
     expect(region).not.toHaveAttribute("aria-live");
   });
 
+  it("409 ao responder ou pular recarrega a entrevista (aba desatualizada)", async () => {
+    m.get.mockResolvedValue(interview("awaiting_answer"));
+    m.answer.mockRejectedValueOnce(new ApiError(409, "Esta pergunta já foi respondida."));
+    m.skip.mockRejectedValueOnce(new ApiError(409, "Esta pergunta já foi respondida."));
+    render(<InterviewPage />);
+    fireEvent.change(await screen.findByLabelText("Sua resposta"), { target: { value: "Umas 40 rotas." } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar resposta" }));
+    await vi.waitFor(() => expect(m.answer).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(m.get).toHaveBeenCalledTimes(2));
+    fireEvent.click(await screen.findByRole("button", { name: "Pular" }));
+    await vi.waitFor(() => expect(m.skip).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(m.get).toHaveBeenCalledTimes(3));
+  });
+
   it("Pular chama skip", async () => {
     m.get.mockResolvedValueOnce(interview("awaiting_answer")).mockResolvedValue(interview("generating"));
     m.skip.mockResolvedValue({ state: "generating" });
@@ -340,6 +354,28 @@ describe("InterviewPage", () => {
     expect(screen.getByText(/Ainda há 1 sugestão pendente/)).toBeInTheDocument();
     expect(m.start).not.toHaveBeenCalled();
     expect(m.getProfile).not.toHaveBeenCalled();
+    // com sugestão pendente, não dá para iniciar outra entrevista
+    const novo = screen.getByRole("button", { name: "Nova entrevista" });
+    expect(novo).toBeDisabled();
+    expect(
+      screen.getByText("Resolva as sugestões pendentes antes de iniciar outra entrevista"),
+    ).toBeInTheDocument();
+    fireEvent.click(novo);
+    expect(m.start).not.toHaveBeenCalled();
+  });
+
+  it("encerrada sem pendências: Nova entrevista inicia uma", async () => {
+    m.get
+      .mockResolvedValueOnce(
+        answered("done", { suggestions: [{ ...pendingSuggestion, status: "rejected" as const }] }),
+      )
+      .mockResolvedValue(interview("generating"));
+    m.start.mockResolvedValue({ id: 5, state: "generating" });
+    render(<InterviewPage />);
+    expect(await screen.findByText("Entrevista encerrada")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Resolva as sugestões pendentes antes de iniciar outra entrevista"),
+    ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Nova entrevista" }));
     await vi.waitFor(() => expect(m.start).toHaveBeenCalledTimes(1));
     expect(await screen.findByText(/Preparando a primeira pergunta/)).toBeInTheDocument();

@@ -382,24 +382,6 @@ def test_two_different_suggestions_concurrently_no_lost_update(s):
     assert sorted(x.applied_version for x in sugs) == [2, 3]
 
 
-def test_resolve_concurrent_with_direct_confirm_no_lost_update(s):
-    uid = s.info["uid"]
-    sug = _suggestion(s, _awaiting(s), ACH)
-
-    def edit(o):
-        p = _profile()
-        p.skills.append(Skill(id="s2", name="Go"))
-        return confirm_profile(o, uid, p, narrative="n1")
-
-    res = _parallel([lambda o: resolve_suggestion(o, uid, sug, "accept", None), edit])
-    assert all(not isinstance(r, Exception) for r in res), res
-    assert s.get(ProfileSuggestion, sug).status == "accepted"
-    latest = _latest(s)
-    # the resolve is applied on top of the latest version at that moment, so it is
-    # never lost; the edit only wins/loses by ordering, never silently overwrites it
-    assert _achievements(latest) == {"Reduzi a latência em 30%"}
-
-
 def test_resolve_after_concurrent_edit_keeps_both_changes(s):
     """Deterministic interleave: an edit holds the profile lock while resolve waits."""
     uid = s.info["uid"]
@@ -456,3 +438,26 @@ def test_concurrent_set_preference_upserts_single_row(s):
     s.rollback()
     items = s.scalars(select(AnswerBankItem).where(AnswerBankItem.user_id == uid)).all()
     assert len(items) == 1 and items[0].value in ("8000", "9000")
+
+
+def test_accept_set_headline_sets_headline_keeps_summary_and_clears_gap(s):
+    from rumo_core.interview.gaps import detect_gaps
+
+    uid = s.info["uid"]
+    gap = "missing_target_role:-"
+    prof = _profile()
+    prof.summary = "Resumo existente"
+    _confirmed(s, prof)
+    iv = start_interview(s, uid)
+    iv.state = "awaiting_answer"
+    iv.current_gap_id = gap
+    s.commit()
+    draft = SuggestionDraft(op="set_headline", text="Engenheira de dados")
+    sug_id = _suggestion(s, iv.id, draft, answer="Engenheira de dados", gap=gap)
+    out = resolve_suggestion(s, uid, sug_id, "accept", None)
+    assert out.status == "accepted" and out.applied_version == 2
+    latest = _latest(s)
+    assert latest.data["basics"]["headline"] == "Engenheira de dados"
+    assert latest.data["summary"] == "Resumo existente"
+    assert "missing_target_role" not in {
+        g.kind for g in detect_gaps(CanonicalProfile.model_validate(latest.data))}

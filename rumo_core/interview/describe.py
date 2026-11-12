@@ -1,5 +1,6 @@
 """Human-readable before/after text for a profile suggestion (pure, no DB)."""
 
+from rumo_core.interview.gaps import PREFERENCE_LABELS
 from rumo_core.interview.suggestions import SuggestionDraft
 from rumo_core.profile.schema import CanonicalProfile, Experience
 
@@ -29,11 +30,14 @@ def describe_suggestion(
     if op == "set_summary":
         return (profile.summary.strip() if profile and profile.summary.strip() else EMPTY,
                 payload.text)
+    if op == "set_headline":
+        current = profile.basics.headline.strip() if profile else ""
+        return (current or EMPTY, payload.text)
     if op == "add_skill":
         names = [_skill(s.name, s.level) for s in profile.skills] if profile else []
         return (", ".join(names) or EMPTY, _skill(payload.name, payload.level))
     if op == "set_preference":
-        return (EMPTY, f"{payload.key}: {payload.value}")
+        return (EMPTY, f"{PREFERENCE_LABELS.get(payload.key, payload.key)}: {payload.value}")
     if op == "add_note":
         return (EMPTY, payload.text)
 

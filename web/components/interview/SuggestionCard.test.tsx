@@ -140,3 +140,29 @@ describe("SuggestionCard", () => {
     await vi.waitFor(() => expect(onResolve).toHaveBeenCalledTimes(2));
   });
 });
+
+describe("SuggestionCard set_headline", () => {
+  it("rotula como Cargo-alvo e ajusta o texto", async () => {
+    const onResolve = vi.fn(async () => {});
+    render(
+      <SuggestionCard
+        suggestion={sug({
+          op: "set_headline",
+          payload: { op: "set_headline", text: "Engenheira de dados" },
+          before: "—",
+          after: "Engenheira de dados",
+        })}
+        onResolve={onResolve}
+      />,
+    );
+    expect(screen.getByText("Cargo-alvo")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Ajustar" }));
+    const input = screen.getByLabelText("Cargo-alvo");
+    fireEvent.change(input, { target: { value: "Engenheira de dados sênior" } });
+    fireEvent.click(screen.getByRole("button", { name: /Salvar|Aplicar|Confirmar/ }));
+    expect(onResolve).toHaveBeenCalledWith("adjust", {
+      op: "set_headline",
+      text: "Engenheira de dados sênior",
+    });
+  });
+});

@@ -67,6 +67,24 @@ def test_summary_skill_preference_note():
     assert describe_suggestion(p, SuggestionDraft(op="add_note", text="obs")) == ("—", "obs")
 
 
+def test_set_headline_before_after():
+    p = _profile()
+    d = SuggestionDraft(op="set_headline", text="Engenheira de dados")
+    assert describe_suggestion(p, d) == ("—", "Engenheira de dados")
+    p.basics.headline = "Dev"
+    assert describe_suggestion(p, d) == ("Dev", "Engenheira de dados")
+    assert describe_suggestion(None, d) == ("—", "Engenheira de dados")
+
+
+def test_preference_uses_pt_label_single_source():
+    from rumo_core.interview.gaps import PREFERENCE_KEYS, PREFERENCE_LABELS
+
+    assert set(PREFERENCE_LABELS) == set(PREFERENCE_KEYS)
+    d = SuggestionDraft(op="set_preference", key="salary_expectation", value="R$ 8.000")
+    assert describe_suggestion(_profile(), d) == (
+        "—", "pretensão salarial: R$ 8.000")
+
+
 def test_missing_target_or_profile_does_not_crash():
     d = SuggestionDraft(op="set_experience_description", target_ref="zz", text="Novo")
     assert describe_suggestion(_profile(), d) == ("(item removido)", "Novo")

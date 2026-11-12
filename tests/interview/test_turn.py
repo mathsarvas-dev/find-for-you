@@ -84,7 +84,7 @@ async def test_prompt_has_json_schema_and_wraps_answer():
     system, user = llm.calls[0][0]["content"], llm.calls[0][1]["content"]
     assert "json" in system.lower()
     for name in ("append_achievement", "set_experience_description", "set_experience_dates",
-                 "set_summary", "add_skill", "set_preference", "add_note", "next_question"):
+                 "set_summary", "set_headline", "add_skill", "set_preference", "add_note", "next_question"):
         assert name in system
     assert "minha resposta" not in system
     assert user.count("minha resposta") == 1
@@ -159,3 +159,28 @@ async def test_llm_errors_propagate():
     llm = FakeLLM(exc=LLMError("boom"))
     with pytest.raises(LLMError):
         await run_turn(llm, profile=_profile(), answered_gap=None, answer=None, next_gap=_gap())
+
+
+async def test_prompt_maps_target_role_to_set_headline_not_summary():
+    llm = FakeLLM(TurnResult(next_question="Q"))
+    await run_turn(llm, profile=_profile(), answered_gap=None, answer=None, next_gap=_gap())
+    system = llm.calls[0][0]["content"]
+    assert "missing_target_role -> set_headline" in system
+    assert "missing_summary -> set_summary" in system
+    assert "missing_summary ou missing_target_role" not in system
+
+
+async def test_skipped_question_prompt_says_skipped_not_first():
+    llm = FakeLLM(TurnResult(next_question="Q"))
+    await run_turn(llm, profile=_profile(), answered_gap=_gap(), answer=None,
+                   next_gap=_gap("missing_skills", None, "sem skills"))
+    user = llm.calls[0][1]["content"]
+    assert "foi pulada" in user and "NÃO é a primeira" in user
+    assert "Primeira pergunta" not in user
+
+
+async def test_true_first_turn_prompt_keeps_first_question_wording():
+    llm = FakeLLM(TurnResult(next_question="Q"))
+    await run_turn(llm, profile=_profile(), answered_gap=None, answer=None, next_gap=_gap())
+    user = llm.calls[0][1]["content"]
+    assert "Primeira pergunta" in user and "pulada" not in user

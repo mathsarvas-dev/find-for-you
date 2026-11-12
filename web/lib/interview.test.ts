@@ -151,6 +151,7 @@ describe("editableFields", () => {
     ["append_achievement", ["text"]],
     ["set_experience_description", ["text"]],
     ["set_summary", ["text"]],
+    ["set_headline", ["text"]],
     ["add_note", ["text"]],
     ["add_skill", ["name"]],
     ["set_preference", ["value"]],

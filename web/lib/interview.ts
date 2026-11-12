@@ -17,6 +17,7 @@ export type SuggestionOp =
   | "set_experience_description"
   | "set_experience_dates"
   | "set_summary"
+  | "set_headline"
   | "add_skill"
   | "set_preference"
   | "add_note";
@@ -131,6 +132,7 @@ export const OP_LABELS: Record<SuggestionOp, string> = {
   set_experience_description: "Descrição da experiência",
   set_experience_dates: "Datas da experiência",
   set_summary: "Resumo",
+  set_headline: "Cargo-alvo",
   add_skill: "Nova habilidade",
   set_preference: "Preferência",
   add_note: "Nota",
@@ -151,6 +153,8 @@ export function editableFields(op: SuggestionOp): EditableField[] {
       return [{ key: "text", label: "Descrição", multiline: true }];
     case "set_summary":
       return [{ key: "text", label: "Resumo", multiline: true }];
+    case "set_headline":
+      return [{ key: "text", label: "Cargo-alvo", multiline: false }];
     case "add_note":
       return [{ key: "text", label: "Nota", multiline: true }];
     case "add_skill":

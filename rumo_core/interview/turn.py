@@ -56,7 +56,9 @@ SYSTEM_PROMPT = (
     "append_achievement (text = conquista com o número do usuário), "
     "set_experience_description (text) ou set_experience_dates (start/end como o usuário "
     "escreveu); "
-    "missing_summary ou missing_target_role -> set_summary (text); "
+    "missing_summary -> set_summary (text = o resumo profissional); "
+    "missing_target_role -> set_headline (text = o cargo-alvo curto, ex.: o título que o usuário "
+    "disse; nunca o resumo); "
     "missing_skills -> add_skill (name = habilidade citada pelo usuário, level só se ele o disse); "
     "pref_<chave> -> set_preference com key=<chave> (a parte após pref_) e value = as palavras "
     "do usuário; "
@@ -99,7 +101,13 @@ def _user_message(
     if answered:
         gap_lines.append(_gap_line("Lacuna respondida", answered_gap))
     else:
-        parts.append("Primeira pergunta: ainda não há resposta; suggestion deve ser null.")
+        if answered_gap is not None:
+            parts.append(
+                "A pergunta anterior foi pulada (sem resposta) e esta NÃO é a primeira "
+                "pergunta; suggestion deve ser null."
+            )
+        else:
+            parts.append("Primeira pergunta: ainda não há resposta; suggestion deve ser null.")
     if next_gap is not None:
         gap_lines.append(_gap_line("Próxima lacuna", next_gap))
     else:
