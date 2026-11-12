@@ -23,3 +23,8 @@
 - **Coleta:** empresa com quadro realmente esvaziado fica em falha enquanto tiver ≥5 vagas abertas; considerar aceitar após N falhas seguidas ou mostrar claramente na UI.
 - **Ingestão:** o SELECT de vagas existentes carrega todo o histórico fechado a cada coleta.
 - **Ingestão:** `raw`/`url`/`posted_at` não atualizam quando só eles mudam (o `content_hash` não os cobre).
+- **Quota do Groq:** o preenchimento por LLM limita só requisições/min; falta um orçamento de tokens/dia compartilhado com a entrevista (hoje mitigado: 4000 caracteres e lote de 3).
+- **UI Fontes:** "Coletar agora" durante uma coleta em andamento não aparece (lease de 30 min sobrescreve `next_run_at`); a lista de vagas volta à página 1 após uma coleta; o refresh de empresas não tem guarda de sequência; `pollError` só limpa no botão de nova tentativa; sem indicação de carregamento ao filtrar; `ADD_FALLBACK` depende do prefixo de erro de `profile.ts`.
+- **Preenchimento:** o LLM pode preencher um salário que as regras deixaram desconhecido de propósito (faixas em duas moedas) — validar a moeda contra o país/menção única.
+- **Ingestão:** vaga pulada por erro de banco fica fora do dedupe por fingerprint até a próxima coleta; adicionar empresa lê até 20 MB de JSON de forma síncrona na API.
+- **Marco 3 (menores das tarefas 1–7):** ver lista de itens adiados na revisão final (embed mantém locks de linha durante `EMBED_LOCK`, `zip(strict=True)` fora do try, spans do fill herdam a regra mais fraca de `extract_salary`, adicionar empresa duplicada busca antes de dar 409).
