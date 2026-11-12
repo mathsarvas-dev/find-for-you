@@ -74,6 +74,8 @@ async def main() -> None:
     from rumo_core.config import get_settings
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
+    from rumo_core.sources import aclose_sources
+    from worker.collect_jobs import collect_companies
     from worker.interview_jobs import process_interview_turns, reset_working_sessions
     from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
 
@@ -101,10 +103,25 @@ async def main() -> None:
         partial(embed_pending_chunks, SessionLocal, embedder, settings.embed_batch_size),
         5,
     )
+    # every 60 s; per-company next_run_at governs the real collection frequency
+    registry.register(
+        "collect_companies",
+        partial(
+            collect_companies,
+            SessionLocal,
+            interval_hours=settings.collect_interval_hours,
+            delay_seconds=settings.collect_delay_seconds,
+        ),
+        60,
+    )
     logger.info("worker started")
-    while True:
-        await registry.run_due(time.monotonic())
-        await asyncio.sleep(1)
+    try:
+        while True:
+            await registry.run_due(time.monotonic())
+            await asyncio.sleep(1)
+    finally:
+        # also runs on KeyboardInterrupt (asyncio.run cancels this task)
+        await aclose_sources()
 
 
 if __name__ == "__main__":
