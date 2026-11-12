@@ -33,7 +33,7 @@ def test_collection_settings_defaults():
     assert s.collect_delay_seconds == 1.0
     assert s.fetch_timeout_seconds == 20
     assert s.fetch_max_bytes == 20_000_000
-    assert s.llm_fill_batch == 5
+    assert s.llm_fill_batch == 3
 
 
 @pytest.mark.parametrize(

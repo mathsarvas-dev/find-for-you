@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     collect_max_companies_per_run: int = Field(3, gt=0)
     fetch_timeout_seconds: float = Field(20, gt=0)
     fetch_max_bytes: int = Field(20_000_000, gt=0)
-    llm_fill_batch: int = Field(5, gt=0)
+    llm_fill_batch: int = Field(3, gt=0)
     # Comma-separated list of browser origins allowed to call the API.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

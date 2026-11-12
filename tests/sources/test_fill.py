@@ -309,8 +309,32 @@ def test_prompt_wraps_posting_and_has_json_schema():
     assert body.rfind("</vaga>") > body.find("HOSTILE-MARK")
 
 
-def test_description_truncated_to_8000():
+def test_description_truncated_to_4000():
+    # keeps each fill call small: the Groq token budget is shared with the interview
     llm = RecordingLLM()
-    asyncio.run(fill_fields(llm, view(description="a" * 9000 + "TAIL-MARK")))
+    asyncio.run(fill_fields(llm, view(description="a" * 4000 + "TAIL-MARK")))
     assert "TAIL-MARK" not in llm.calls[0][1]["content"]
-    assert llm.calls[0][1]["content"].count("a") < 8100
+    assert llm.calls[0][1]["content"].count("a") < 4100
+
+
+LONG_PAD = "We build tools for teams. " * 200  # ~5200 chars, beyond the prompt cut
+
+
+def test_truncation_does_not_weaken_validation():
+    """Validation reads the FULL description: what the LLM could not see is
+    still checked, and claims not backed by the full text are still rejected."""
+    desc = LONG_PAD + "The salary is USD 120,000 - 150,000 per year. This role is not remote."
+    assert len(LONG_PAD) > 4000
+    current = view(description=desc)
+    # negation beyond the cut still blocks the claim
+    assert validate_fill(FillResult(work_model="remote"), desc, current).work_model == "unknown"
+    # a fabricated amount is rejected
+    fake = FillResult(salary_min=Decimal(999000), salary_currency="USD")
+    assert validate_fill(fake, desc, current).salary_min is None
+    # the real amount, only present beyond the cut, is backed by the full text
+    real = FillResult(salary_min=Decimal(120000), salary_max=Decimal(150000),
+                      salary_currency="USD", salary_period="year")
+    out = validate_fill(real, desc, current)
+    assert (out.salary_min, out.salary_max, out.salary_period) == (120000, 150000, "year")
+    # ... and validating against the truncated prompt text would reject it
+    assert validate_fill(real, desc[:4000], current).salary_min is None

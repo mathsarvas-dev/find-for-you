@@ -351,3 +351,20 @@ async def test_persisted_amounts_have_two_decimals(uid):
         salary_currency="USD", salary_period="year")))
     j = _get(jid)
     assert j.salary_known and j.salary_min == Decimal("120000.00")
+
+
+async def test_long_description_prompt_truncated_but_validated_against_full_text(uid):
+    pad = "We build tools for teams. " * 200  # ~5200 chars, beyond the prompt cut
+    jid = _job(uid, description=pad + "The salary is USD 120,000 - 150,000 per year. "
+                                      "Remote work is not available.")
+    llm = FakeLLM(FillResult(
+        work_model="remote", salary_min=Decimal(120000), salary_max=Decimal(150000),
+        salary_currency="USD", salary_period="year",
+    ))
+    assert await _run(uid, llm) == 1
+    prompt = llm.calls[0][1]["content"]
+    assert "120,000" not in prompt and "not available" not in prompt
+    j = _get(jid)
+    # the salary is backed by the full stored text; the negation there still applies
+    assert j.salary_known and j.salary_min == Decimal(120000)
+    assert j.work_model == "unknown"

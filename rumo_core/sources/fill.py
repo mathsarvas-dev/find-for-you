@@ -16,7 +16,9 @@ from rumo_core.llm.base import LLMProvider
 from rumo_core.profile.prompting import wrap_untrusted
 from rumo_core.sources.normalize import find_salary_spans, has_pay_context
 
-MAX_DESCRIPTION_CHARS = 8000
+# Small on purpose: the fill shares the Groq token budget with the interview.
+# Validation still reads the FULL stored description (see validate_fill).
+MAX_DESCRIPTION_CHARS = 4000
 _MAX_META = 300
 
 
