@@ -143,6 +143,39 @@ def test_invented_skill_in_strength_is_dropped_but_others_kept():
     assert res.gaps == ["Sem menção a liderança"]
 
 
+K8S_JOB = dict(description="Requisitos: Kubernetes e 5 anos de Python.")
+
+
+def test_gap_may_cite_term_from_job_description():
+    draft = good_draft(gaps=["Sem experiência com Kubernetes"])
+    res = validate_match(draft, make_profile(), job=make_job(**K8S_JOB))
+    assert res.gaps == ["Sem experiência com Kubernetes"]
+
+
+def test_gap_may_cite_number_from_job_description():
+    draft = good_draft(gaps=["A vaga pede 5 anos de Python"])
+    res = validate_match(draft, make_profile(), job=make_job(**K8S_JOB))
+    assert res.gaps == ["A vaga pede 5 anos de Python"]
+
+
+def test_job_term_in_strength_is_dropped():
+    draft = good_draft(strengths=["Experiência com Kubernetes", "Domina SQL"])
+    res = validate_match(draft, make_profile(), job=make_job(**K8S_JOB))
+    assert res.strengths == ["Domina SQL"]
+
+
+def test_job_number_in_rationale_still_raises():
+    draft = good_draft(rationale="O perfil tem 5 anos de Python.")
+    with pytest.raises(MatchInvalid):
+        validate_match(draft, make_profile(), job=make_job(**K8S_JOB))
+
+
+def test_gap_term_in_neither_profile_nor_job_is_dropped():
+    draft = good_draft(gaps=["Sem experiência com Terraform", "Sem experiência com Kubernetes"])
+    res = validate_match(draft, make_profile(), job=make_job(**K8S_JOB))
+    assert res.gaps == ["Sem experiência com Kubernetes"]
+
+
 def test_invented_number_in_strength_dropped():
     draft = good_draft(strengths=["Reduziu custo em 45%", "Domina SQL"])
     res = validate_match(draft, make_profile(), job=make_job())

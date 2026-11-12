@@ -173,9 +173,10 @@ SYSTEM_PROMPT = (
     "experiência que o perfil não descreve. "
     "4) rationale: até 600 caracteres, em português, explicando a nota. strengths e gaps: "
     "até 5 itens cada, frases curtas (até 160 caracteres), com pelo menos um item no total. "
-    "5) Cite somente números, datas, empresas, tecnologias e nomes que estejam escritos no "
-    "perfil. Ao falar da vaga, use a palavra \"vaga\" e cite no máximo o título e a empresa "
-    "dela; descreva lacunas com palavras comuns, sem nomes próprios nem números. "
+    "5) Em rationale e strengths, cite somente números, datas, empresas, tecnologias e nomes "
+    "que estejam escritos no perfil; ao falar da vaga, use a palavra \"vaga\" e cite no "
+    "máximo o título e a empresa dela. Em gaps, você pode citar requisitos, tecnologias e "
+    "números escritos na vaga que faltam no perfil. "
     "6) Não repita a nota no texto e nunca invente nada."
 )
 
@@ -265,8 +266,16 @@ def _term_in(term: str, haystack_folded: str) -> bool:
     )
 
 
-def _sentence_ok(sentence: str, profile_sources: list[str], job: JobView | None) -> bool:
-    sources = list(profile_sources)
+def _job_sources(job: JobView | None) -> list[str]:
+    if job is None:
+        return []
+    return [job.title or "", job.company_name or "", job.description or ""]
+
+
+def _sentence_ok(
+    sentence: str, profile_sources: list[str], job: JobView | None, extra: list[str] = ()
+) -> bool:
+    sources = [*profile_sources, *extra]
     if job is not None and _JOB_MARKER.search(_fold(sentence)):
         sources += [job.title or "", job.company_name or ""]
     if not numbers_supported(sentence, sources):
@@ -277,9 +286,13 @@ def _sentence_ok(sentence: str, profile_sources: list[str], job: JobView | None)
     return all(_term_in(t, haystack) for t in _salient_terms(sentence))
 
 
-def _text_ok(text: str, profile_sources: list[str], job: JobView | None) -> bool:
+def _text_ok(
+    text: str, profile_sources: list[str], job: JobView | None, extra: list[str] = ()
+) -> bool:
     sentences = [s for s in _SENTENCE_SPLIT.split(text) if s.strip()]
-    return bool(sentences) and all(_sentence_ok(s, profile_sources, job) for s in sentences)
+    return bool(sentences) and all(
+        _sentence_ok(s, profile_sources, job, extra) for s in sentences
+    )
 
 
 def validate_match(
@@ -296,7 +309,12 @@ def validate_match(
     if not rationale or not _text_ok(rationale, sources, job):
         raise MatchInvalid("rationale")
     strengths = [s.strip() for s in draft.strengths if s.strip() and _text_ok(s, sources, job)]
-    gaps = [g.strip() for g in draft.gaps if g.strip() and _text_ok(g, sources, job)]
+    # a gap states what the profile lacks: it may cite the posting's own terms
+    # and numbers (description/title/company), never anything from nowhere
+    job_sources = _job_sources(job)
+    gaps = [
+        g.strip() for g in draft.gaps if g.strip() and _text_ok(g, sources, job, job_sources)
+    ]
     if not strengths and not gaps:
         raise MatchInvalid("items")
     return MatchResult(score=score, rationale=rationale, strengths=strengths, gaps=gaps)
