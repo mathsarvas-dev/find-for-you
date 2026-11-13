@@ -167,30 +167,59 @@ def test_hostile_names_create_only_safe_tokens(session):
 
 
 @pytest.mark.db
-def test_reconcile_does_not_overwrite_concurrent_state_change(session, monkeypatch):
+@pytest.mark.parametrize("guard_case", ["pending_to_known", "known_to_pending"])
+def test_reconcile_does_not_overwrite_concurrent_state_change(session, guard_case):
+    """Race lands right before the first reconcile UPDATE on discovery_candidates."""
+    from sqlalchemy import event, update
+
     uid = session.info["uid"]
     refresh_candidates(session, uid)
-    session.add(Company(user_id=uid, source="greenhouse", identifier="alpha", name="A"))
-    session.add(Company(user_id=uid, source="greenhouse", identifier="beta", name="B"))
-    session.commit()
-    real = cmod._gather
+    if guard_case == "pending_to_known":
+        # pending rows whose company exists: reconcile would mark them known
+        session.add(Company(user_id=uid, source="greenhouse", identifier="alpha", name="A"))
+        session.add(Company(user_id=uid, source="greenhouse", identifier="beta", name="B"))
+        session.commit()
+    else:
+        # known rows whose company vanished: reconcile would reset them to pending
+        for ident in ("alpha", "beta"):
+            co = Company(user_id=uid, source="greenhouse", identifier=ident, name=ident)
+            session.add(co)
+            session.flush()
+            session.execute(update(DiscoveryCandidate).where(
+                DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == ident,
+            ).values(state="known", company_id=co.id))
+        session.commit()
+        session.execute(delete(Company).where(Company.user_id == uid))
+        session.commit()
+    before = {t: (r.state, r.company_id) for t, r in _cands(session, uid).items()}
+    assert before["alpha"][0] == before["beta"][0] == (
+        "pending" if guard_case == "pending_to_known" else "known")
 
-    def racing(sess, u):
-        out = real(sess, u)
-        with SessionLocal() as other:  # concurrent actor moves the rows
+    fired = []
+
+    def race(conn, cursor, statement, parameters, context, executemany):
+        if fired or not statement.lstrip().upper().startswith("UPDATE DISCOVERY_CANDIDATES"):
+            return
+        fired.append(statement)
+        with SessionLocal() as other:  # separate connection, commits immediately
             for tok, st in (("alpha", "rejected"), ("beta", "valid")):
-                row = other.scalar(select(DiscoveryCandidate).where(
-                    DiscoveryCandidate.user_id == u, DiscoveryCandidate.token == tok))
-                row.state = st
+                other.execute(update(DiscoveryCandidate).where(
+                    DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == tok,
+                ).values(state=st))
             other.commit()
-        return out
 
-    monkeypatch.setattr(cmod, "_gather", racing)
-    stats = refresh_candidates(session, uid)
+    eng = session.get_bind()
+    event.listen(eng, "before_cursor_execute", race)
+    try:
+        stats = refresh_candidates(session, uid)
+    finally:
+        event.remove(eng, "before_cursor_execute", race)
+    assert fired, "race never injected"
     session.expire_all()
     c = _cands(session, uid)
-    assert c["alpha"].state == "rejected" and c["alpha"].company_id is None
-    assert c["beta"].state == "valid" and c["beta"].company_id is None
+    assert c["alpha"].state == "rejected" and c["beta"].state == "valid"
+    assert c["alpha"].company_id == before["alpha"][1]
+    assert c["beta"].company_id == before["beta"][1]
     assert stats.known == 0
 
 
