@@ -42,6 +42,25 @@ export function emptyOverview(): Overview {
   };
 }
 
+function section<T extends object>(fallback: T, value: unknown): T {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? { ...fallback, ...(value as Partial<T>) }
+    : fallback;
+}
+
+/** Cada seção é mesclada com o padrão seguro: uma seção ausente não derruba a trilha. */
+export function normalizeOverview(body: unknown): Overview {
+  const base = emptyOverview();
+  const raw = (body !== null && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  return {
+    profile: section(base.profile, raw.profile),
+    interview: section(base.interview, raw.interview),
+    companies: section(base.companies, raw.companies),
+    jobs: section(base.jobs, raw.jobs),
+    matches: section(base.matches, raw.matches),
+  };
+}
+
 export async function getOverview(): Promise<Overview> {
-  return (await request<Overview>("/overview")).body;
+  return normalizeOverview((await request<unknown>("/overview")).body);
 }

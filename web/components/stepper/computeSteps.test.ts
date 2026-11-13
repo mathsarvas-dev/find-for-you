@@ -126,17 +126,22 @@ describe("computeSteps", () => {
     expect(apply.cta).toBeUndefined();
   });
 
-  it("obrigatórios prontos e entrevista pendente: a entrevista vira o atual", () => {
-    const steps = computeSteps(ov({
-      ...ready,
-      interview: { state: "in_progress" },
-      companies: { total: 1, active: 1 },
-      jobs: { open: 7 },
-      matches: { scored: 3 },
-    }));
-    expect(currentIds(steps)).toEqual(["interview"]);
-    expect(byId(steps, "interview").cta?.label).toBe("Continuar entrevista");
-    expect(byId(steps, "apply").state).toBe("blocked");
+  it("obrigatórios prontos e entrevista pendente: nenhum atual, entrevista segue opcional", () => {
+    for (const state of ["none", "in_progress"] as const) {
+      const steps = computeSteps(ov({
+        ...ready,
+        interview: { state },
+        companies: { total: 1, active: 1 },
+        jobs: { open: 7 },
+        matches: { scored: 3 },
+      }));
+      expect(currentIds(steps)).toEqual([]);
+      expect(byId(steps, "interview").state).toBe("optional");
+      expect(byId(steps, "interview").cta?.label).toBe(
+        state === "none" ? "Fazer a entrevista" : "Continuar entrevista",
+      );
+      expect(byId(steps, "apply").state).toBe("blocked");
+    }
   });
 
   it("test_details_show_real_numbers", () => {
@@ -165,11 +170,29 @@ describe("computeSteps", () => {
     expect(byId(big, "jobs").detail).toBe("1.340 vagas abertas");
   });
 
-  it("só passos atuais têm cta visível na trilha; concluídos têm reviewHref", () => {
-    const steps = computeSteps(ov({ ...ready, companies: { total: 1, active: 1 } }));
-    for (const s of steps) {
-      if (s.state === "done") expect(s.reviewHref).toBeTruthy();
-      else expect(s.reviewHref).toBeUndefined();
+  it("cta só no atual e no opcional; reviewHref só nos concluídos", () => {
+    const cases: Overview[] = [
+      ov(),
+      ov({ profile: { confirmed: true, version: 1 } }),
+      ov(ready),
+      ov({ ...ready, companies: { total: 1, active: 1 } }),
+      ov({ ...ready, interview: { state: "in_progress" }, companies: { active: 1 }, jobs: { open: 2 } }),
+      ov({ ...ready, interview: { state: "done" }, companies: { active: 1 }, jobs: { open: 2 }, matches: { scored: 1 } }),
+    ];
+    for (const o of cases) {
+      const steps = computeSteps(o);
+      expect(currentIds(steps).length).toBeLessThanOrEqual(1);
+      for (const s of steps) {
+        if (s.state === "current" || s.state === "optional") {
+          expect(s.cta?.label, s.id).toBeTruthy();
+          expect(s.cta?.href, s.id).toMatch(/^\//);
+        } else {
+          expect(s.cta, s.id).toBeUndefined();
+        }
+        if (s.state === "done") expect(s.reviewHref, s.id).toMatch(/^\//);
+        else expect(s.reviewHref, s.id).toBeUndefined();
+        if (s.state === "optional") expect(s.id).toBe("interview");
+      }
     }
   });
 });

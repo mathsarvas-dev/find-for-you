@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./profile";
 import { emptyOverview, getOverview, type Overview } from "./overview";
+import { computeSteps } from "@/components/stepper/computeSteps";
 
 function jsonResponse(status: number, body: unknown) {
   return new Response(JSON.stringify(body), {
@@ -30,6 +31,26 @@ describe("getOverview", () => {
     const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toMatch(/\/overview$/);
     expect(init.method ?? "GET").toBe("GET");
+  });
+
+  it("corpo sem seções vira os padrões seguros (computeSteps não quebra)", async () => {
+    const partial = {
+      profile: { confirmed: true, version: 2, vectorized: true },
+      companies: { total: 3, active: 2 },
+      jobs: { open: 9 },
+    };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, partial)));
+    const o = await getOverview();
+    expect(o.interview).toEqual({ state: "none" });
+    expect(o.matches).toEqual({ scored: 0, pending: 0 });
+    expect(o.profile).toEqual({ confirmed: true, version: 2, vectorized: true, name: null, email: null });
+    expect(o.companies).toEqual({ total: 3, active: 2, auto: 0 });
+    expect(() => computeSteps(o)).not.toThrow();
+  });
+
+  it("corpo nulo ou com seção que não é objeto também cai nos padrões", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, { matches: null, jobs: 5 })));
+    expect(await getOverview()).toEqual(emptyOverview());
   });
 
   it("erro com `detail` vira ApiError com a mensagem do servidor", async () => {

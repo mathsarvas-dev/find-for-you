@@ -72,15 +72,31 @@ describe("Stepper", () => {
     expect(markers[2]).toHaveTextContent("3");
   });
 
-  it("CTA só no passo atual, como link com estilo de botão", () => {
-    render(<Stepper steps={steps} orientation="vertical" />);
-    const links = screen.getAllByRole("link");
+  it("botão primário só no passo atual", () => {
+    const { container } = render(<Stepper steps={steps} orientation="vertical" />);
     const cta = screen.getByRole("link", { name: "Adicionar empresas" });
     expect(cta).toHaveAttribute("href", "/sources");
     expect(cta).toHaveClass("button");
-    expect(screen.queryByRole("link", { name: "Fazer a entrevista" })).toBeNull();
-    // Só o CTA e o "Revisar" do concluído.
-    expect(links).toHaveLength(2);
+    const buttons = container.querySelectorAll("a.button");
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0].closest("li")).toHaveAttribute("aria-current", "step");
+  });
+
+  it("passo opcional mostra o CTA como link de texto secundário, mesmo sem ser o atual", () => {
+    render(<Stepper steps={steps} orientation="vertical" />);
+    const link = within(items()[1]).getByRole("link", { name: "Fazer a entrevista" });
+    expect(link).toHaveAttribute("href", "/onboarding/interview");
+    expect(link).not.toHaveClass("button");
+    expect(link).toHaveClass("stepper__secondary");
+  });
+
+  it("futuros e bloqueados não têm links; total = CTA + opcional + Revisar", () => {
+    const withCtas = steps.map((s) =>
+      s.state === "upcoming" || s.state === "blocked" ? { ...s, cta: { label: "Nunca", href: "/x" } } : s,
+    );
+    render(<Stepper steps={withCtas} orientation="vertical" />);
+    expect(screen.queryByRole("link", { name: "Nunca" })).toBeNull();
+    expect(screen.getAllByRole("link")).toHaveLength(3);
   });
 
   it("'Revisar' nos concluídos, com o nome do passo para leitor de tela", () => {
@@ -108,6 +124,22 @@ describe("Stepper", () => {
     const { container } = render(<Stepper steps={steps} orientation="horizontal" />);
     const compact = container.querySelector(".stepper__compact");
     expect(compact).toHaveTextContent("Passo 3 de 5 · Fontes de vagas");
+  });
+
+  it("horizontal mantém a <ol> com o CTA atual e o link opcional ao lado da linha compacta", () => {
+    const { container } = render(<Stepper steps={steps} orientation="horizontal" />);
+    expect(container.querySelector(".stepper__compact")).not.toBeNull();
+    const list = container.querySelector("ol.stepper--horizontal") as HTMLElement;
+    expect(list).not.toBeNull();
+    const current = list.querySelector('[aria-current="step"]') as HTMLElement;
+    expect(current).toHaveClass("stepper__step--current");
+    const cta = within(current).getByRole("link", { name: "Adicionar empresas" });
+    expect(cta).toHaveClass("button");
+    expect(cta).toHaveAttribute("href", "/sources");
+    const optional = within(list.querySelector(".stepper__step--optional") as HTMLElement)
+      .getByRole("link", { name: "Fazer a entrevista" });
+    expect(optional).toHaveClass("stepper__secondary");
+    expect(optional).not.toHaveClass("button");
   });
 
   it("compactLabel substitui o texto compacto", () => {

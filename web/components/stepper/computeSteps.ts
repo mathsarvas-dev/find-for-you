@@ -23,7 +23,7 @@ type Draft = {
   title: string;
   detail: string;
   done: boolean;
-  /** "required" entra no cálculo do passo atual; "optional" só se os obrigatórios acabaram. */
+  /** Só "required" entra no cálculo do passo atual. */
   kind: "required" | "optional" | "blocked";
   cta?: Step["cta"];
   reviewHref: string;
@@ -132,9 +132,8 @@ export function computeSteps(o: Overview): Step[] {
     },
   ];
 
-  const firstRequired = drafts.find((d) => d.kind === "required" && !d.done);
-  const current =
-    firstRequired ?? drafts.find((d) => d.kind === "optional" && !d.done);
+  // Atual = primeiro obrigatório não concluído; o opcional nunca vira atual.
+  const current = drafts.find((d) => d.kind === "required" && !d.done);
 
   return drafts.map((d): Step => {
     const base = { id: d.id, title: d.title, detail: d.detail };
