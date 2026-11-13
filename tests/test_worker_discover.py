@@ -105,10 +105,10 @@ def uid2():
     _purge(user_id)
 
 
-def add_cand(uid, token, *, name_hint=None, **kw):
+def add_cand(uid, token, *, name_hint=None, origin_kind="catalog", **kw):
     with SessionLocal() as s:
         c = DiscoveryCandidate(user_id=uid, source="greenhouse", token=token,
-                               name_hint=name_hint, origin_kind="catalog", **kw)
+                               name_hint=name_hint, origin_kind=origin_kind, **kw)
         s.add(c)
         s.commit()
         return c.id
@@ -443,3 +443,131 @@ def test_job_registered_after_collect():
     names = list(reg._jobs)
     assert names[names.index("collect_companies") + 1] == "discover_companies"
     assert reg._jobs["discover_companies"][1] == 60
+
+
+@pytest.mark.db
+async def test_origin_priority_target_then_profile_before_catalog(uid):
+    cat = [add_cand(uid, f"cat{i}") for i in range(3)]  # inserted first
+    tgt = add_cand(uid, "mytarget", origin_kind="target")
+    prof = add_cand(uid, "myemployer", origin_kind="profile")
+    src = FakeSource({t: [raw(1)] for t in
+                      ("cat0", "cat1", "cat2", "mytarget", "myemployer")})
+    assert await run(uid, src, max_auto=2) == 2
+    assert src.calls == ["mytarget", "myemployer"]
+    assert cand(tgt).state == cand(prof).state == "valid"
+    assert all(cand(i).state == "pending" for i in cat)
+    assert {c.identifier for c in companies(uid)} == {"mytarget", "myemployer"}
+
+
+@pytest.fixture
+def three_users():
+    ids = [_new_user() for _ in range(3)]
+    yield ids
+    for u in ids:
+        _purge(u)
+
+
+def _only(monkeypatch, ids):
+    real = dmod._enabled_users
+
+    def enabled(session_factory, user_id):
+        return sorted(u for i in ids for u in real(session_factory, i))
+
+    monkeypatch.setattr(dmod, "_enabled_users", enabled)
+
+
+async def run_all(source, *, batch, now=NOW):
+    return await discover_companies(
+        SessionLocal, batch=batch, max_seconds=60, max_auto=100, delay=0,
+        max_attempts=3, source_getter=lambda name: source,
+        clock=lambda: 0.0, sleep=Sleeps(), utcnow=lambda: now,
+    )
+
+
+def _owners(src, ids):
+    return [int(t.split("x")[0][1:]) for t in src.calls]
+
+
+@pytest.mark.db
+async def test_round_robin_fairness_across_users(three_users, monkeypatch):
+    _only(monkeypatch, three_users)
+    for u in three_users:
+        for i in range(6):
+            add_cand(u, f"u{u}x{i}")
+    src = FakeSource()  # every board empty -> invalid
+    # one tick, batch 6, 3 users -> 2 each (not 6 for the lowest id)
+    assert await run_all(src, batch=6) == 6
+    owners = _owners(src, three_users)
+    assert sorted(owners) == sorted(three_users * 2)
+    # batch 1: the starting user rotates across ticks
+    firsts = []
+    for _ in range(4):
+        src.calls.clear()
+        assert await run_all(src, batch=1) == 1
+        firsts += _owners(src, three_users)
+    a, b, c = three_users
+    # previous tick started at a, so the next ones start at b, c, a, b
+    assert firsts == [b, c, a, b]
+
+
+@pytest.mark.db
+async def test_round_robin_gives_leftover_budget_to_busy_users(three_users, monkeypatch):
+    _only(monkeypatch, three_users)
+    a, b, c = three_users
+    for i in range(5):
+        add_cand(a, f"u{a}x{i}")
+    add_cand(b, f"u{b}x0")  # c has nothing
+    src = FakeSource()
+    assert await run_all(src, batch=6) == 6
+    owners = _owners(src, three_users)
+    assert owners.count(b) == 1 and owners.count(a) == 5
+
+
+@pytest.mark.db
+async def test_recheck_transient_failures_never_make_it_permanent(uid):
+    cid = add_cand(uid, "quiet")
+    src = FakeSource({"quiet": []})
+    await run(uid, src)  # empty -> invalid, +30 d
+    src.results["quiet"] = SourceUnavailable("down")
+    now = NOW + timedelta(days=30)
+    for attempt in (1, 2):
+        assert await run(uid, src, now=now) == 1
+        c = cand(cid)
+        assert c.state == "invalid" and c.attempts == attempt
+        assert c.retry_after == now + timedelta(hours=2 ** (attempt - 1))
+        now = c.retry_after
+    assert await run(uid, src, now=now) == 1
+    c = cand(cid)
+    # max attempts during a recheck: still invalid, but rechecked in 30 days
+    assert c.state == "invalid" and c.attempts == 0
+    assert c.retry_after == now + timedelta(days=30)
+    assert c.last_error == "SourceUnavailable"
+    src.results["quiet"] = [raw(1)]
+    assert await run(uid, src, now=now + timedelta(days=30)) == 1
+    assert cand(cid).state == "valid" and len(companies(uid)) == 1
+
+
+@pytest.mark.db
+async def test_on_conflict_branch_company_inserted_after_locked_check(uid, monkeypatch):
+    cid = add_cand(uid, "racy")
+    real = dmod._existing_company_id
+    seen = {"n": 0, "company": None}
+
+    def racing(s, user_id, source, token):
+        seen["n"] += 1
+        if seen["n"] == 2:  # the check under the user lock in _record_valid
+            # another transaction commits the same company right now (it must
+            # not block on the user-row lock: FOR NO KEY UPDATE vs FK KEY SHARE)
+            seen["company"] = add_company(uid, "racy", active=False, name="Theirs")
+            return None
+        return real(s, user_id, source, token)
+
+    monkeypatch.setattr(dmod, "_existing_company_id", racing)
+    src = FakeSource({"racy": [raw(1)]})
+    assert await run(uid, src) == 1
+    assert seen["n"] == 3  # pre-fetch, locked check, after the empty insert
+    c = cand(cid)
+    assert c.state == "known" and c.company_id == seen["company"]
+    [co] = companies(uid)
+    assert co.id == seen["company"] and co.active is False
+    assert co.name == "Theirs" and co.origin == "manual" and co.next_run_at is None
