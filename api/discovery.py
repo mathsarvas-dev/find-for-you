@@ -5,6 +5,7 @@ preference row (missing row = enabled, no target companies); PUT upserts
 atomically.
 """
 
+import logging
 import unicodedata
 from typing import Literal
 
@@ -17,9 +18,12 @@ from sqlalchemy.orm import Session
 from api.deps import current_user_id
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
-from rumo_core.discovery.candidates import MAX_TARGET_LEN, MAX_TARGETS
+from rumo_core.discovery.candidates import (
+    MAX_TARGET_LEN, MAX_TARGETS, refresh_candidates,
+)
 from rumo_core.models import Company, DiscoveryCandidate, UserPreference
 
+logger = logging.getLogger("api.discovery")
 router = APIRouter(tags=["discovery"])
 
 MAX_NAME_LEN = MAX_TARGET_LEN
@@ -142,6 +146,13 @@ def put_discovery(
     )
     session.execute(stmt)
     session.commit()
+    # New targets become pending right away (database only, no network); a
+    # failure here must not fail the save (the worker refreshes hourly anyway).
+    try:
+        refresh_candidates(session, user_id)
+    except Exception as exc:  # noqa: BLE001
+        session.rollback()
+        logger.warning("candidate refresh after PUT failed (%s)", type(exc).__name__)
     return _build(session, user_id)
 
 

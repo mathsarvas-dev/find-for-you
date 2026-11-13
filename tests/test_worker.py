@@ -135,3 +135,28 @@ def test_embed_jobs_registration_is_one_small_batch():
     with pytest.raises(ValidationError):
         Settings(_env_file=None, database_url="x", job_embed_batch_size=0)
 
+
+
+def test_configure_logging_keeps_httpx_quiet_so_tokens_never_reach_logs(caplog):
+    import asyncio
+    import logging
+
+    import httpx
+
+    from rumo_core.discovery.validate import validate_candidate
+    from rumo_core.sources.greenhouse import GreenhouseSource
+    from worker.main import configure_logging
+
+    configure_logging()
+    for name in ("httpx", "httpcore"):
+        assert logging.getLogger(name).level >= logging.WARNING
+
+    async def sleep(_s):
+        pass
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(
+        lambda r: httpx.Response(404, content=b"{}")))
+    source = GreenhouseSource(client, max_bytes=1000, sleep=sleep)
+    with caplog.at_level(logging.INFO):
+        asyncio.run(validate_candidate(source, "clinicafulanoltda"))
+    assert "clinicafulanoltda" not in caplog.text

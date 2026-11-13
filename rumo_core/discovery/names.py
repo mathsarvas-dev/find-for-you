@@ -10,6 +10,8 @@ LEGAL_SUFFIXES = frozenset(
     {"inc", "llc", "ltd", "gmbh", "ag", "sa", "ltda", "corp", "co", "plc"}
 )
 _WORD = re.compile(r"[a-z0-9]+")
+# "S.A.", "S/A", "S. A" -> "sa" (Brazilian legal suffix), before splitting on punctuation
+_SA = re.compile(r"(?<![a-z0-9])s\s?[./]\s?a(?![a-z0-9])")
 
 
 def token_variants(name: str) -> list[str]:
@@ -17,6 +19,7 @@ def token_variants(name: str) -> list[str]:
         return []
     folded = unicodedata.normalize("NFKD", name)
     folded = "".join(c for c in folded if not unicodedata.combining(c)).lower()
+    folded = _SA.sub("sa", folded)
     words = _WORD.findall(folded)
     core = list(words)
     while core and core[-1] in LEGAL_SUFFIXES:

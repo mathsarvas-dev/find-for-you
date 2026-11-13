@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -30,26 +30,12 @@ class RefreshStats:
 
 
 def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]:
-    """token -> (origin_kind, name_hint); first origin wins, deterministic."""
+    """token -> (origin_kind, name_hint); priority target > profile > catalog
+    (gathered in that order, first wins), deterministic."""
     found: dict[str, tuple[str, str | None]] = {}
 
     def add(token: str, kind: str, hint: str | None) -> None:
         found.setdefault(token, (kind, hint))
-
-    for entry in load_catalog():
-        add(entry.token, "catalog", entry.name)
-
-    profile = get_current_profile(session, user_id)
-    data = profile.data if profile is not None else None
-    experiences = data.get("experiences") if isinstance(data, dict) else None
-    if isinstance(experiences, list):
-        for exp in experiences:
-            company = exp.get("company") if isinstance(exp, dict) else None
-            if not isinstance(company, str) or not company.strip():
-                continue
-            name = company.strip()
-            for tok in token_variants(name):
-                add(tok, "profile", name[:255])
 
     pref = session.scalar(
         select(UserPreference)
@@ -66,6 +52,20 @@ def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]
                 continue
             for tok in token_variants(name):
                 add(tok, "target", name[:255])
+    profile = get_current_profile(session, user_id)
+    data = profile.data if profile is not None else None
+    experiences = data.get("experiences") if isinstance(data, dict) else None
+    if isinstance(experiences, list):
+        for exp in experiences:
+            company = exp.get("company") if isinstance(exp, dict) else None
+            if not isinstance(company, str) or not company.strip():
+                continue
+            name = company.strip()
+            for tok in token_variants(name):
+                add(tok, "profile", name[:255])
+
+    for entry in load_catalog():
+        add(entry.token, "catalog", entry.name)
     return found
 
 
@@ -74,7 +74,9 @@ def refresh_candidates(
 ) -> RefreshStats:
     """Insert missing candidates and reconcile pending/known ones.
 
-    Candidates in state valid/invalid/rejected are never modified. Commits the
+    Pending profile/target candidates no longer generated are deleted; pending
+    ones also carry the highest-priority origin. Candidates in state
+    valid/invalid/rejected/known are never retired. Commits the
     session (including any pending work the caller had in it).
     """
     found = _gather(session, user_id)
@@ -110,10 +112,31 @@ def refresh_candidates(
         created = len(states)
         known = sum(1 for s in states if s == "known")
 
-    # Reconcile with set-based UPDATEs guarded by state, so a concurrent move
-    # to valid/invalid/rejected is never overwritten.
+    # Retire pending profile/target candidates nobody generates any more and
+    # upgrade pending ones whose token now comes from a higher-priority origin;
+    # both guarded by state so concurrent valid/invalid/rejected changes win.
     cand = DiscoveryCandidate
     scope = (cand.user_id == user_id, cand.source == source)
+    session.execute(
+        delete(cand).where(
+            *scope, cand.state == "pending",
+            cand.origin_kind.in_(("profile", "target")),
+            cand.token.not_in(list(found)),
+        )
+    )
+    lower = {"target": ("profile", "catalog"), "profile": ("catalog",)}
+    for kind, below in lower.items():
+        tokens = [t for t, (k, _h) in found.items() if k == kind]
+        if tokens:
+            session.execute(
+                update(cand)
+                .where(*scope, cand.state == "pending",
+                       cand.origin_kind.in_(below), cand.token.in_(tokens))
+                .values(origin_kind=kind)
+            )
+
+    # Reconcile with set-based UPDATEs guarded by state, so a concurrent move
+    # to valid/invalid/rejected is never overwritten.
     match = (
         select(Company.id)
         .where(

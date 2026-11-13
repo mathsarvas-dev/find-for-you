@@ -450,6 +450,11 @@ async def test_origin_priority_target_then_profile_before_catalog(uid):
     cat = [add_cand(uid, f"cat{i}") for i in range(3)]  # inserted first
     tgt = add_cand(uid, "mytarget", origin_kind="target")
     prof = add_cand(uid, "myemployer", origin_kind="profile")
+    with SessionLocal() as s:  # backed by real sources, or refresh retires them
+        s.add(UserPreference(user_id=uid, target_companies=["mytarget"]))
+        s.add(Profile(user_id=uid, version=1, content_hash="h",
+                      data={"experiences": [{"company": "myemployer"}]}))
+        s.commit()
     src = FakeSource({t: [raw(1)] for t in
                       ("cat0", "cat1", "cat2", "mytarget", "myemployer")})
     assert await run(uid, src, max_auto=2) == 2
@@ -571,3 +576,17 @@ async def test_on_conflict_branch_company_inserted_after_locked_check(uid, monke
     [co] = companies(uid)
     assert co.id == seen["company"] and co.active is False
     assert co.name == "Theirs" and co.origin == "manual" and co.next_run_at is None
+
+
+@pytest.mark.db
+async def test_removed_target_is_never_validated(uid):
+    gone = add_cand(uid, "gonetarget", origin_kind="target")
+    with SessionLocal() as s:
+        s.add(UserPreference(user_id=uid, target_companies=[]))
+        s.commit()
+    src = FakeSource({"gonetarget": [raw(1)]})
+    assert await run(uid, src) == 0
+    assert src.calls == []
+    with SessionLocal() as s:
+        assert s.get(DiscoveryCandidate, gone) is None
+    assert companies(uid) == []

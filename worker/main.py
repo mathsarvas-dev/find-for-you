@@ -179,8 +179,16 @@ async def retry_startup(
             await sleep(delay)
 
 
-async def main() -> None:
+def configure_logging() -> None:
+    """Root INFO logging, but never httpx/httpcore at INFO: they log every
+    request URL, which carries board tokens derived from profile company names."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+async def main() -> None:
+    configure_logging()
     from rumo_core.config import get_settings
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder

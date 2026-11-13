@@ -82,8 +82,8 @@ def test_profile_experience_companies_become_candidates(session):
     assert "acmewidgets" in c and c["acmewidgets"].origin_kind == "profile"
     assert c["acmewidgets"].name_hint == "Acme Widgets Inc"
     assert "oldcorp" not in c
-    # first origin wins: alpha stays catalog
-    assert c["alpha"].origin_kind == "catalog"
+    # profile outranks catalog
+    assert c["alpha"].origin_kind == "profile"
 
 
 @pytest.mark.db
@@ -94,7 +94,7 @@ def test_target_companies_become_candidates(session):
     refresh_candidates(session, uid)
     c = _cands(session, uid)
     assert c["stripe"].origin_kind == "target"
-    assert c["beta"].origin_kind == "catalog"
+    assert c["beta"].origin_kind == "target"
 
 
 @pytest.mark.db
@@ -302,3 +302,116 @@ def test_volume_bounded_queries_and_target_cap(session):
     assert len(stmts) <= 10
     toks = set(_cands(session, uid))
     assert "firm49" in toks and "target49" in toks and "target50" not in toks
+
+
+@pytest.mark.db
+def test_origin_priority_target_over_profile_over_catalog(session):
+    uid = session.info["uid"]
+    refresh_candidates(session, uid)  # alpha, beta pending as catalog
+    assert {r.origin_kind for r in _cands(session, uid).values()} == {"catalog"}
+    _profile(session, uid, ["Alpha", "Beta"])
+    session.add(UserPreference(user_id=uid, target_companies=["Beta"]))
+    session.commit()
+    refresh_candidates(session, uid)
+    session.expire_all()
+    c = _cands(session, uid)
+    assert c["alpha"].origin_kind == "profile"
+    assert c["beta"].origin_kind == "target"
+
+
+@pytest.mark.db
+def test_origin_upgrade_only_touches_pending(session):
+    uid = session.info["uid"]
+    refresh_candidates(session, uid)
+    row = _cands(session, uid)["alpha"]
+    row.state = "rejected"
+    session.commit()
+    session.add(UserPreference(user_id=uid, target_companies=["Alpha"]))
+    session.commit()
+    refresh_candidates(session, uid)
+    session.expire_all()
+    assert _cands(session, uid)["alpha"].origin_kind == "catalog"
+
+
+@pytest.mark.db
+def test_removed_target_pending_candidate_is_retired(session):
+    uid = session.info["uid"]
+    pref = UserPreference(user_id=uid, target_companies=["Acme", "Globex"])
+    session.add(pref)
+    session.commit()
+    refresh_candidates(session, uid)
+    assert {"acme", "globex"} <= set(_cands(session, uid))
+    pref.target_companies = ["Globex"]
+    session.commit()
+    refresh_candidates(session, uid)
+    session.expire_all()
+    toks = set(_cands(session, uid))
+    assert "acme" not in toks and "globex" in toks
+    assert {"alpha", "beta"} <= toks  # catalog never deleted
+
+
+@pytest.mark.db
+def test_removed_profile_employer_is_retired(session):
+    uid = session.info["uid"]
+    _profile(session, uid, ["Initech", "Hooli"], version=1)
+    refresh_candidates(session, uid)
+    assert {"initech", "hooli"} <= set(_cands(session, uid))
+    _profile(session, uid, ["Hooli"], version=2)
+    refresh_candidates(session, uid)
+    toks = set(_cands(session, uid))
+    assert "initech" not in toks and "hooli" in toks
+
+
+@pytest.mark.db
+def test_retire_never_touches_non_pending(session):
+    uid = session.info["uid"]
+    names = ["Aa1", "Bb2", "Cc3", "Dd4"]
+    session.add(UserPreference(user_id=uid, target_companies=names))
+    session.commit()
+    refresh_candidates(session, uid)
+    for tok, st in (("aa1", "valid"), ("bb2", "invalid"), ("cc3", "rejected"),
+                    ("dd4", "known")):
+        _cands(session, uid)[tok].state = st
+    session.commit()
+    session.execute(delete(UserPreference).where(UserPreference.user_id == uid))
+    session.commit()
+    refresh_candidates(session, uid)
+    session.expire_all()
+    c = _cands(session, uid)
+    assert c["aa1"].state == "valid" and c["bb2"].state == "invalid"
+    assert c["cc3"].state == "rejected"
+    assert "dd4" in c  # known without a company goes back to pending, not deleted
+
+
+@pytest.mark.db
+def test_retire_is_state_guarded_against_concurrent_change(session):
+    from sqlalchemy import event, update
+
+    uid = session.info["uid"]
+    pref = UserPreference(user_id=uid, target_companies=["Acme"])
+    session.add(pref)
+    session.commit()
+    refresh_candidates(session, uid)
+    pref.target_companies = []
+    session.commit()
+    fired = []
+
+    def race(conn, cursor, statement, parameters, context, executemany):
+        if fired or not statement.lstrip().upper().startswith("DELETE FROM DISCOVERY_CANDIDATES"):
+            return
+        fired.append(1)
+        with SessionLocal() as other:
+            other.execute(update(DiscoveryCandidate).where(
+                DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == "acme",
+            ).values(state="rejected"))
+            other.commit()
+
+    eng = session.get_bind()
+    event.listen(eng, "before_cursor_execute", race)
+    try:
+        refresh_candidates(session, uid)
+    finally:
+        event.remove(eng, "before_cursor_execute", race)
+    assert fired
+    session.expire_all()
+    assert _cands(session, uid)["acme"].state == "rejected"

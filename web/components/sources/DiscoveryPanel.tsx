@@ -361,7 +361,7 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
               {atCap && data.enabled && data.pending > 0 && (
                 <p className="discovery__cap">
                   Limite de {data.max_auto} empresas automáticas atingido; os candidatos na fila
-                  esperam até alguma ser removida.
+                  esperam até você pausar alguma (pausar libera uma vaga).
                 </p>
               )}
             </div>
@@ -524,6 +524,19 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
   );
 }
 
+const LAST_ERROR_LABELS: Record<string, string> = {
+  SourceNotFound: "quadro não encontrado",
+  SourceUnavailable: "fonte indisponível",
+  TimeoutError: "fonte indisponível",
+  SourceBadResponse: "resposta inesperada",
+};
+
+function lastErrorLabel(raw: string): string {
+  return Object.prototype.hasOwnProperty.call(LAST_ERROR_LABELS, raw)
+    ? LAST_ERROR_LABELS[raw]
+    : "erro na validação";
+}
+
 function CandidateRow({ candidate: c }: { candidate: Candidate }) {
   const tone = STATE_TONE[c.state] ?? "off";
   return (
@@ -538,7 +551,7 @@ function CandidateRow({ candidate: c }: { candidate: Candidate }) {
         </span>
         <span>{`origem: ${originKindLabel(c.origin_kind)}`}</span>
       </p>
-      {c.last_error && <p className="candidate__error">{c.last_error}</p>}
+      {c.last_error && <p className="candidate__error">{lastErrorLabel(c.last_error)}</p>}
     </li>
   );
 }

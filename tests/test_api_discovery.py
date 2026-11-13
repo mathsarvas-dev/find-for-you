@@ -213,3 +213,38 @@ def test_companies_expose_origin_and_filter(env, as_user):
     assert [r["identifier"] for r in c.get("/companies", params={"origin": "auto"}).json()] == ["aut"]
     assert [r["identifier"] for r in c.get("/companies", params={"origin": "manual"}).json()] == ["man"]
     assert c.get("/companies", params={"origin": "x"}).status_code == 422
+
+
+@pytest.mark.db
+def test_put_makes_targets_pending_immediately_and_retires_removed(env, as_user):
+    new_user, _, _ = env
+    uid = new_user()
+    c = as_user(uid)
+    r = c.put("/discovery", json={"enabled": True, "target_companies": ["Zzyzx Labs"]})
+    assert r.status_code == 200, r.text
+    with SessionLocal() as s:
+        row = s.scalar(select(DiscoveryCandidate).where(
+            DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == "zzyzxlabs"))
+        assert row is not None and row.state == "pending" and row.origin_kind == "target"
+    assert r.json()["pending"] >= 1
+    c.put("/discovery", json={"enabled": True, "target_companies": []})
+    with SessionLocal() as s:
+        assert s.scalar(select(DiscoveryCandidate).where(
+            DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == "zzyzxlabs")) is None
+
+
+@pytest.mark.db
+def test_put_succeeds_when_refresh_fails(env, as_user, monkeypatch, caplog):
+    import api.discovery as mod
+
+    def boom(*a, **k):
+        raise RuntimeError("secret-company-name")
+
+    monkeypatch.setattr(mod, "refresh_candidates", boom)
+    new_user, _, _ = env
+    uid = new_user()
+    c = as_user(uid)
+    with caplog.at_level("WARNING"):
+        r = c.put("/discovery", json={"enabled": True, "target_companies": ["Acme"]})
+    assert r.status_code == 200 and r.json()["target_companies"] == ["Acme"]
+    assert "RuntimeError" in caplog.text and "secret-company-name" not in caplog.text

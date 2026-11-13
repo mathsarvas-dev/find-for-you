@@ -271,6 +271,8 @@ describe("DiscoveryPanel", () => {
     m.get.mockResolvedValueOnce({ ...base, pending: 5, auto_companies: 30, max_auto: 30 });
     await renderPanel();
     expect(screen.getByText(/Limite de 30 empresas automáticas atingido/)).toBeInTheDocument();
+    expect(screen.getByText(/pausar alguma/)).toBeInTheDocument();
+    expect(screen.queryByText(/removida/)).toBeNull();
     await tick(30_000);
     expect(m.get).toHaveBeenCalledTimes(2);
   });
@@ -425,6 +427,32 @@ describe("DiscoveryPanel", () => {
       const list = screen.getByRole("list", { name: "Candidatos" });
       for (const label of ["na fila", "adicionada", "sem vagas ou inexistente", "já existe", "ignorada"]) {
         expect(within(list).getByText(label)).toBeInTheDocument();
+      }
+    });
+
+    it("last_error aparece em PT-BR, nunca o nome da classe", async () => {
+      m.get.mockResolvedValue(base);
+      m.list.mockResolvedValue({
+        total: 5,
+        items: [
+          candidate(1, { last_error: "SourceNotFound" }),
+          candidate(2, { last_error: "SourceUnavailable" }),
+          candidate(3, { last_error: "TimeoutError" }),
+          candidate(4, { last_error: "SourceBadResponse" }),
+          candidate(5, { last_error: "AlgoEstranho" }),
+        ],
+      });
+      await renderPanel();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Ver candidatos" }));
+      });
+      const list = screen.getByRole("list", { name: "Candidatos" });
+      expect(within(list).getByText("quadro não encontrado")).toBeInTheDocument();
+      expect(within(list).getAllByText("fonte indisponível")).toHaveLength(2);
+      expect(within(list).getByText("resposta inesperada")).toBeInTheDocument();
+      expect(within(list).getByText("erro na validação")).toBeInTheDocument();
+      for (const raw of ["SourceNotFound", "SourceUnavailable", "TimeoutError", "AlgoEstranho"]) {
+        expect(within(list).queryByText(raw)).toBeNull();
       }
     });
 

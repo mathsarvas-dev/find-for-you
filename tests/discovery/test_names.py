@@ -47,3 +47,18 @@ def test_variants_accepted_by_greenhouse_connector():
     gh = GreenhouseSource.__new__(GreenhouseSource)
     for t in token_variants("Café Münch GmbH") + token_variants("Foo Bar Inc"):
         assert gh.normalize_identifier(t) == t
+
+
+@pytest.mark.parametrize(
+    "name", ["Itaú Unibanco S.A.", "Itaú Unibanco S/A", "Itaú Unibanco S.A", "Itaú Unibanco SA",
+             "Itaú Unibanco S. A."],
+)
+def test_variants_brazilian_sa_suffix(name):
+    assert "itauunibanco" in token_variants(name)
+
+
+def test_variants_ltda_with_dot_and_sa_not_inside_words():
+    assert "stone" in token_variants("Stone Ltda.")
+    assert "stone" in token_variants("Stone Pagamentos S/A") or "stonepagamentos" in token_variants("Stone Pagamentos S/A")
+    assert "bus-a" not in token_variants("Bus/A Foo")
+    assert token_variants("Cs.a")[0] == "csa"
