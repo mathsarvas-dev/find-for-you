@@ -89,6 +89,7 @@ class CompanyOut(BaseModel):
     last_error: str | None
     consecutive_failures: int
     open_jobs: int
+    origin: str
 
 
 class JobItem(BaseModel):
@@ -131,7 +132,7 @@ def _company_out(c: Company) -> CompanyOut:
         country=c.country, active=c.active, last_run_at=c.last_run_at,
         last_success_at=c.last_success_at, next_run_at=c.next_run_at,
         last_error=c.last_error, consecutive_failures=c.consecutive_failures,
-        open_jobs=c.open_jobs,
+        open_jobs=c.open_jobs, origin=c.origin,
     )
 
 
@@ -204,11 +205,15 @@ async def add_company(
 
 @router.get("/companies", response_model=list[CompanyOut])
 def list_companies(
+    origin: Literal["manual", "auto"] | None = None,
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
 ):
+    conds = [Company.user_id == user_id]
+    if origin is not None:
+        conds.append(Company.origin == origin)
     rows = session.scalars(
-        select(Company).where(Company.user_id == user_id).order_by(Company.name, Company.id)
+        select(Company).where(*conds).order_by(Company.name, Company.id)
     ).all()
     return [_company_out(c) for c in rows]
 

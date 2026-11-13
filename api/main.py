@@ -10,6 +10,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
 from api.deps import current_user_id
+from api.discovery import router as discovery_router
 from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.profile import router as profile_router
@@ -32,6 +33,7 @@ app.include_router(profile_router)
 app.include_router(interview_router)
 app.include_router(sources_router)
 app.include_router(matching_router)
+app.include_router(discovery_router)
 
 
 def _json_safe(value):
