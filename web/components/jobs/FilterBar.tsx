@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
 import {
   LANGUAGE_LABEL,
   SENIORITY_LABEL,
@@ -97,6 +97,38 @@ function toggle<T>(list: T[], value: T, on: boolean): T[] {
   return on ? (list.includes(value) ? list : [...list, value]) : list.filter((v) => v !== value);
 }
 
+/** Até 560 px o painel começa recolhido. */
+const NARROW_QUERY = "(max-width: 560px)";
+
+function subscribeNarrow(onChange: () => void) {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") return () => {};
+  const mq = window.matchMedia(NARROW_QUERY);
+  mq.addEventListener("change", onChange);
+  return () => mq.removeEventListener("change", onChange);
+}
+
+const isNarrow = () =>
+  typeof window !== "undefined" &&
+  typeof window.matchMedia === "function" &&
+  window.matchMedia(NARROW_QUERY).matches;
+
+/** Pré-render e hidratação assumem tela larga (aberto); o cliente corrige depois. */
+const serverNarrow = () => false;
+
+function activeCount(d: Draft): number {
+  return [
+    d.countries.trim() !== "",
+    d.departments.trim() !== "",
+    d.work_models.length > 0,
+    d.seniorities.length > 0,
+    d.languages.length > 0,
+    d.salary.trim() !== "",
+  ].filter(Boolean).length;
+}
+
+const activeText = (n: number) =>
+  n === 0 ? "nenhum ativo" : `${n} ${n === 1 ? "ativo" : "ativos"}`;
+
 type FilterBarProps = {
   /** Filtros salvos; lidos só ao montar. */
   initial: SearchFilters;
@@ -106,24 +138,33 @@ type FilterBarProps = {
   status?: string;
   /** Erro ao salvar, vindo da página. */
   error?: string | null;
+  /** true assim que há uma edição esperando o debounce; false quando ele dispara. */
+  onEditing?: (pending: boolean) => void;
 };
 
 /** Filtros manuais. Cada mudança, depois do debounce, vira um PUT do perfil de busca (na página). */
-export function FilterBar({ initial, onChange, status, error }: FilterBarProps) {
+export function FilterBar({ initial, onChange, status, error, onEditing }: FilterBarProps) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial));
   const [dirty, setDirty] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  /** null: segue a largura da tela; depois do primeiro clique, vale a escolha da pessoa. */
+  const [chosenOpen, setChosenOpen] = useState<boolean | null>(null);
+  const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, serverNarrow);
+  const open = chosenOpen ?? !narrow;
   const onChangeRef = useRef(onChange);
+  const onEditingRef = useRef(onEditing);
   const id = useId();
 
   useEffect(() => {
     onChangeRef.current = onChange;
-  }, [onChange]);
+    onEditingRef.current = onEditing;
+  }, [onChange, onEditing]);
 
   useEffect(() => {
     if (!dirty) return;
     const timer = setTimeout(() => {
       const parsed = parse(draft);
+      onEditingRef.current?.(false);
       setProblem(parsed.error);
       if (parsed.filters) onChangeRef.current(parsed.filters);
     }, FILTER_DEBOUNCE_MS);
@@ -133,6 +174,7 @@ export function FilterBar({ initial, onChange, status, error }: FilterBarProps) 
   function update(patch: Partial<Draft>) {
     setDraft((d) => ({ ...d, ...patch }));
     setDirty(true);
+    onEditingRef.current?.(true);
   }
 
   const salaryErr = problem?.field === "salary" ? problem.message : null;
@@ -140,131 +182,144 @@ export function FilterBar({ initial, onChange, status, error }: FilterBarProps) 
 
   return (
     <section className="panel filters" aria-labelledby={`${id}-title`}>
-      <div className="panel__head">
-        <h2 id={`${id}-title`}>Filtros</h2>
+      <div className="panel__head filters__head">
+        <h2 id={`${id}-title`}>
+          <button
+            type="button"
+            className="filters__toggle"
+            aria-expanded={open}
+            aria-controls={`${id}-body`}
+            onClick={() => setChosenOpen(!open)}
+          >
+            <span className="filters__chevron" aria-hidden="true" />
+            Filtros <span className="filters__count">· {activeText(activeCount(draft))}</span>
+          </button>
+        </h2>
         <span className="mono" aria-live="polite">
           {status ?? ""}
         </span>
       </div>
 
-      <div className="filters__fields">
-        <div className="field">
-          <label className="field__label" htmlFor={`${id}-countries`}>
-            Países
-          </label>
-          <input
-            id={`${id}-countries`}
-            className="input"
-            type="text"
-            autoComplete="off"
-            placeholder="BR, PT, DE"
-            value={draft.countries}
-            onChange={(e) => update({ countries: e.target.value })}
-          />
-        </div>
-        <div className="field">
-          <label className="field__label" htmlFor={`${id}-departments`}>
-            Departamentos
-          </label>
-          <input
-            id={`${id}-departments`}
-            className="input"
-            type="text"
-            autoComplete="off"
-            placeholder="Engineering, Data"
-            value={draft.departments}
-            onChange={(e) => update({ departments: e.target.value })}
-          />
-        </div>
-        <div className="filters__salary">
+      <div id={`${id}-body`} className="filters__body" hidden={!open}>
+        <div className="filters__fields">
           <div className="field">
-            <label className="field__label" htmlFor={`${id}-salary`}>
-              Salário mínimo por ano
+            <label className="field__label" htmlFor={`${id}-countries`}>
+              Países
             </label>
             <input
-              id={`${id}-salary`}
-              className="input mono"
-              type="number"
-              inputMode="numeric"
-              min={0}
-              step={1000}
-              placeholder="120000"
-              value={draft.salary}
-              aria-invalid={salaryErr ? true : undefined}
-              aria-describedby={salaryErr ? `${id}-salary-err` : undefined}
-              onChange={(e) => update({ salary: e.target.value })}
-            />
-          </div>
-          <div className="field filters__currency">
-            <label className="field__label" htmlFor={`${id}-currency`}>
-              Moeda
-            </label>
-            <input
-              id={`${id}-currency`}
-              className="input mono"
+              id={`${id}-countries`}
+              className="input"
               type="text"
               autoComplete="off"
-              maxLength={8}
-              placeholder="BRL"
-              value={draft.currency}
-              aria-invalid={currencyErr ? true : undefined}
-              aria-describedby={currencyErr ? `${id}-salary-err` : undefined}
-              onChange={(e) => update({ currency: e.target.value })}
+              placeholder="BR, PT, DE"
+              value={draft.countries}
+              onChange={(e) => update({ countries: e.target.value })}
             />
           </div>
-          {(salaryErr || currencyErr) && (
-            <p id={`${id}-salary-err`} className="field__error filters__error">
-              {salaryErr ?? currencyErr}
-            </p>
-          )}
+          <div className="field">
+            <label className="field__label" htmlFor={`${id}-departments`}>
+              Departamentos
+            </label>
+            <input
+              id={`${id}-departments`}
+              className="input"
+              type="text"
+              autoComplete="off"
+              placeholder="Engineering, Data"
+              value={draft.departments}
+              onChange={(e) => update({ departments: e.target.value })}
+            />
+          </div>
+          <div className="filters__salary">
+            <div className="field">
+              <label className="field__label" htmlFor={`${id}-salary`}>
+                Salário mínimo por ano
+              </label>
+              <input
+                id={`${id}-salary`}
+                className="input mono"
+                type="number"
+                inputMode="numeric"
+                min={0}
+                step={1000}
+                placeholder="120000"
+                value={draft.salary}
+                aria-invalid={salaryErr ? true : undefined}
+                aria-describedby={salaryErr ? `${id}-salary-err` : undefined}
+                onChange={(e) => update({ salary: e.target.value })}
+              />
+            </div>
+            <div className="field filters__currency">
+              <label className="field__label" htmlFor={`${id}-currency`}>
+                Moeda
+              </label>
+              <input
+                id={`${id}-currency`}
+                className="input mono"
+                type="text"
+                autoComplete="off"
+                maxLength={8}
+                placeholder="BRL"
+                value={draft.currency}
+                aria-invalid={currencyErr ? true : undefined}
+                aria-describedby={currencyErr ? `${id}-salary-err` : undefined}
+                onChange={(e) => update({ currency: e.target.value })}
+              />
+            </div>
+            {(salaryErr || currencyErr) && (
+              <p id={`${id}-salary-err`} className="field__error filters__error" role="alert">
+                {salaryErr ?? currencyErr}
+              </p>
+            )}
+          </div>
         </div>
-      </div>
 
-      <div className="filters__groups">
-        <OptionGroup
-          legend="Modelo"
-          options={WORK_MODELS}
-          selected={draft.work_models}
-          onToggle={(v, on) => update({ work_models: toggle(draft.work_models, v, on) })}
-        />
-        <OptionGroup
-          legend="Idioma da vaga"
-          options={LANGUAGES}
-          selected={draft.languages}
-          onToggle={(v, on) => update({ languages: toggle(draft.languages, v, on) })}
-        />
-        <OptionGroup
-          legend="Senioridade"
-          options={SENIORITIES}
-          selected={draft.seniorities}
-          onToggle={(v, on) => update({ seniorities: toggle(draft.seniorities, v, on) })}
-        />
-      </div>
+        <div className="filters__groups">
+          <OptionGroup
+            legend="Modelo"
+            options={WORK_MODELS}
+            selected={draft.work_models}
+            onToggle={(v, on) => update({ work_models: toggle(draft.work_models, v, on) })}
+          />
+          <OptionGroup
+            legend="Idioma da vaga"
+            options={LANGUAGES}
+            selected={draft.languages}
+            onToggle={(v, on) => update({ languages: toggle(draft.languages, v, on) })}
+          />
+          <OptionGroup
+            legend="Senioridade"
+            options={SENIORITIES}
+            selected={draft.seniorities}
+            onToggle={(v, on) => update({ seniorities: toggle(draft.seniorities, v, on) })}
+          />
+        </div>
 
-      <div className="filters__switches">
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={draft.accept_no_salary}
-            onChange={(e) => update({ accept_no_salary: e.target.checked })}
-          />
-          <span>Aceitar vagas sem salário</span>
-        </label>
-        <label className="check">
-          <input
-            type="checkbox"
-            checked={draft.include_unknown}
-            onChange={(e) => update({ include_unknown: e.target.checked })}
-          />
-          <span>
-            Incluir desconhecidos{" "}
-            <span className="muted">(vagas em que a fonte não diz país, modelo, senioridade ou idioma)</span>
-          </span>
-        </label>
+        <div className="filters__switches">
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={draft.accept_no_salary}
+              onChange={(e) => update({ accept_no_salary: e.target.checked })}
+            />
+            <span>Aceitar vagas sem salário</span>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={draft.include_unknown}
+              onChange={(e) => update({ include_unknown: e.target.checked })}
+            />
+            <span>
+              Incluir desconhecidos{" "}
+              <span className="muted">(vagas em que a fonte não diz país, modelo, senioridade ou idioma)</span>
+            </span>
+          </label>
+        </div>
       </div>
 
       {error && (
-        <div className="notice" role="alert">
+        <div className="notice notice--top" role="alert">
           <strong>Os filtros não foram salvos.</strong>
           <p>{error}</p>
         </div>

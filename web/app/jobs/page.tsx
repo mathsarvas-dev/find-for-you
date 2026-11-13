@@ -6,6 +6,7 @@ import { FilterBar } from "@/components/jobs/FilterBar";
 import { MatchList } from "@/components/jobs/MatchList";
 import { MatchPanel, type PanelState } from "@/components/jobs/MatchPanel";
 import {
+  DEFAULT_FILTERS,
   getMatch,
   getSearchProfile,
   hasPending,
@@ -25,12 +26,17 @@ const POLL_MS = 10_000;
 /** Limite da API para `limit`. */
 const MAX_LIMIT = 100;
 
-type Phase = { name: "loading" } | { name: "error"; message: string } | { name: "ready" };
+type Phase =
+  | { name: "loading" }
+  | { name: "error"; message: string; status: number | null }
+  | { name: "ready" };
 type Meta = Omit<MatchPage, "items">;
 type Flash = { kind: "ok" | "error"; text: string };
 
 const message = (err: unknown) =>
   err instanceof ApiError ? err.message : "Algo deu errado ao falar com a API. Tente de novo.";
+
+const statusOf = (err: unknown) => (err instanceof ApiError ? err.status : null);
 
 const countText = (n: number) => `${n} ${n === 1 ? "vaga" : "vagas"}`;
 
@@ -55,6 +61,9 @@ export default function JobsPage() {
   const [meta, setMeta] = useState<Meta | null>(null);
   const [items, setItems] = useState<MatchItem[]>([]);
   const [saving, setSaving] = useState(false);
+  /** Edição de filtro esperando o debounce do FilterBar. */
+  const [editing, setEditing] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [flash, setFlash] = useState<Flash | null>(null);
@@ -68,6 +77,8 @@ export default function JobsPage() {
   const [now, setNow] = useState(0);
   /** Só a resposta da requisição de lista mais recente vale. */
   const latest = useRef(0);
+  /** Só o salvamento de filtros mais recente controla "salvando…". */
+  const saveSeq = useRef(0);
   const mounted = useRef(true);
   const itemsRef = useRef<MatchItem[]>([]);
   /** Seleção atual para o atalho de teclado (várias teclas antes do próximo render). */
@@ -104,7 +115,7 @@ export default function JobsPage() {
       })
       .catch((err) => {
         if (cancelled || id !== latest.current) return;
-        setPhase({ name: "error", message: message(err) });
+        setPhase({ name: "error", message: message(err), status: statusOf(err) });
       });
     return () => {
       cancelled = true;
@@ -115,6 +126,7 @@ export default function JobsPage() {
     setPhase({ name: "loading" });
     setPollError(null);
     setSaveError(null);
+    setEditing(false);
     setBootKey((k) => k + 1);
   }
 
@@ -128,40 +140,46 @@ export default function JobsPage() {
       setMoreError(null);
     } catch (err) {
       if (!mounted.current || id !== latest.current) return;
-      setPhase({ name: "error", message: message(err) });
+      setPhase({ name: "error", message: message(err), status: statusOf(err) });
     }
   }, [apply]);
 
   /** FilterBar já esperou 300 ms: salva o perfil de busca e recarrega a lista. */
   const saveFilters = useCallback(
     async (next: SearchFilters) => {
-      const id = ++latest.current;
+      const saveId = ++saveSeq.current;
+      // Listas pedidas antes deste salvamento usam filtros velhos: descarta.
+      ++latest.current;
       setSaving(true);
       setSaveError(null);
       try {
         const saved = await putSearchProfile(next);
-        if (!mounted.current || id !== latest.current) return;
+        if (!mounted.current || saveId !== saveSeq.current) return;
         setFilters(saved);
+        await reloadList();
       } catch (err) {
-        if (!mounted.current || id !== latest.current) return;
-        setSaving(false);
-        setSaveError(message(err));
-        return;
-      }
-      try {
-        const page = await listMatches({ status: "open", limit: MATCHES_PAGE_SIZE, offset: 0 });
-        if (!mounted.current || id !== latest.current) return;
-        apply(page);
-        setMoreError(null);
-      } catch (err) {
-        if (!mounted.current || id !== latest.current) return;
-        setPhase({ name: "error", message: message(err) });
+        if (mounted.current && saveId === saveSeq.current) setSaveError(message(err));
       } finally {
-        if (mounted.current && id === latest.current) setSaving(false);
+        // Sempre limpa, mesmo se outra recarga da lista correu no meio do PUT.
+        if (mounted.current && saveId === saveSeq.current) setSaving(false);
       }
     },
-    [apply],
+    [reloadList],
   );
+
+  /** 409 de filtros salvos inválidos: grava os padrões e recomeça. */
+  async function restoreDefaults() {
+    setRestoring(true);
+    try {
+      await putSearchProfile(DEFAULT_FILTERS);
+      if (!mounted.current) return;
+      reboot();
+    } catch (err) {
+      if (mounted.current) setPhase({ name: "error", message: message(err), status: statusOf(err) });
+    } finally {
+      if (mounted.current) setRestoring(false);
+    }
+  }
 
   async function loadMore() {
     if (loadingMore) return;
@@ -214,8 +232,12 @@ export default function JobsPage() {
           if (!cancelled) timer = setTimeout(poll, POLL_MS);
           return;
         }
-        apply(page);
-        if (hasPending(page.items)) timer = setTimeout(poll, POLL_MS);
+        // Mantém as linhas além do limite (carregadas com "Mais vagas").
+        const seen = new Set(page.items.map((i) => i.job.id));
+        const tail = itemsRef.current.slice(limit).filter((i) => !seen.has(i.job.id));
+        const merged = [...page.items, ...tail];
+        apply({ ...page, items: merged });
+        if (hasPending(merged)) timer = setTimeout(poll, POLL_MS);
       } catch (err) {
         if (!cancelled) setPollError(message(err));
       }
@@ -267,6 +289,15 @@ export default function JobsPage() {
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
+      if (e.key === "Escape") {
+        const open = selectedRef.current;
+        if (open === null) return;
+        selectedRef.current = null;
+        setSelectedId(null);
+        setPanel({ name: "empty" });
+        document.querySelector<HTMLElement>(`[data-job-id="${open}"]`)?.focus();
+        return;
+      }
       if (e.key !== "j" && e.key !== "k") return;
       const list = itemsRef.current;
       if (list.length === 0) return;
@@ -291,7 +322,14 @@ export default function JobsPage() {
   }, [selectedId]);
 
   const hasProfile = meta !== null && meta.profile_version !== null;
-  const canEvaluate = meta !== null && meta.profile_version !== null && meta.vectorized && !refreshing;
+  // Com filtro não salvo, a avaliação usaria os filtros antigos do servidor.
+  const canEvaluate =
+    meta !== null &&
+    meta.profile_version !== null &&
+    meta.vectorized &&
+    !refreshing &&
+    !saving &&
+    !editing;
   const pendingCount = items.filter((i) => i.state === "pendente").length;
   const hasMore = meta !== null && items.length < meta.total;
 
@@ -322,12 +360,32 @@ export default function JobsPage() {
             <p>{phase.message}</p>
           </div>
           <div className="panel__foot">
-            <span>
-              Suba a API com <code>docker compose up -d api</code> e tente de novo.
-            </span>
-            <button type="button" className="button" onClick={reboot}>
-              Tentar de novo
-            </button>
+            {phase.status === null ? (
+              <span>
+                Suba a API com <code>docker compose up -d api</code> e tente de novo.
+              </span>
+            ) : phase.status === 409 ? (
+              <span>Os filtros guardados não valem mais. Restaure os padrões e ajuste de novo.</span>
+            ) : (
+              <span>
+                A API está no ar, mas recusou o pedido. Veja <code>docker compose logs api</code>.
+              </span>
+            )}
+            {phase.status === 409 ? (
+              <button
+                type="button"
+                className="button"
+                disabled={restoring}
+                aria-busy={restoring || undefined}
+                onClick={() => void restoreDefaults()}
+              >
+                Restaurar filtros padrão
+              </button>
+            ) : (
+              <button type="button" className="button" onClick={reboot}>
+                Tentar de novo
+              </button>
+            )}
           </div>
         </section>
       )}
@@ -340,6 +398,7 @@ export default function JobsPage() {
               onChange={(f) => void saveFilters(f)}
               status={saving ? "salvando…" : undefined}
               error={saveError}
+              onEditing={setEditing}
             />
           )}
 
