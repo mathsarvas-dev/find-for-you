@@ -77,8 +77,9 @@ def _basics(data: object) -> tuple[str | None, str | None]:
 def _profile(session: Session, user_id: int, current) -> ProfileOverview:
     if current is None:
         return ProfileOverview()
-    # Same notion of "vectorized" as the ranking: the current version has at
-    # least one embedded chunk for the active embedding model.
+    # `vectorized` follows usable_profile (same rule as the ranking): true as
+    # soon as the current version has ONE usable embedded chunk for the active
+    # model, not when all chunks are embedded.
     _, used = usable_profile(session, user_id, MODEL_VERSION)
     name, email = _basics(current.data)
     return ProfileOverview(
@@ -87,35 +88,29 @@ def _profile(session: Session, user_id: int, current) -> ProfileOverview:
     )
 
 
-def _interview(session: Session, user_id: int, current) -> InterviewOverview:
-    """Interview state for the journey.
+def _interview(session: Session, user_id: int) -> InterviewOverview:
+    """Interview state for the journey (mirrors api/interview.py).
 
-    - no session at all for the user              -> "none"
-    - most recent session of the CURRENT profile
-      version is in state "done" (see
-      InterviewSession: generating | working |
-      awaiting_answer | done | error)             -> "done"
-    - anything else (running, awaiting an answer,
-      errored, or sessions only on older
-      versions)                                   -> "in_progress"
+    The profile version is deliberately ignored: resolving a suggestion
+    creates profile version N+1 while the session stays on N.
+    States are generating | working | awaiting_answer | done | error.
+    - no session for the user                         -> "none"
+    - any session whose state != "done" (running,
+      awaiting an answer, or errored: it can be
+      retried)                                        -> "in_progress"
+    - sessions exist and all are "done"               -> "done"
     """
-    has_any = session.scalar(
-        select(InterviewSession.id)
-        .where(InterviewSession.user_id == user_id).limit(1)
-    )
-    if has_any is None:
+    total, active = session.execute(
+        select(
+            func.count(InterviewSession.id),
+            func.count(InterviewSession.id).filter(
+                InterviewSession.state != "done"
+            ),
+        ).where(InterviewSession.user_id == user_id)
+    ).one()
+    if total == 0:
         return InterviewOverview(state="none")
-    if current is None:
-        return InterviewOverview(state="in_progress")
-    latest = session.scalar(
-        select(InterviewSession.state)
-        .where(InterviewSession.user_id == user_id,
-               InterviewSession.profile_version == current.version)
-        .order_by(InterviewSession.id.desc()).limit(1)
-    )
-    return InterviewOverview(
-        state="done" if latest == "done" else "in_progress"
-    )
+    return InterviewOverview(state="in_progress" if active else "done")
 
 
 def _companies(session: Session, user_id: int) -> CompaniesOverview:
@@ -149,7 +144,8 @@ def _matches(session: Session, user_id: int, current) -> MatchesOverview:
         )
         .join(Job, Job.id == Match.job_id)
         .where(Match.user_id == user_id, Job.user_id == user_id,
-               Match.profile_version == current.version)
+               Match.profile_version == current.version,
+               Job.status == "open")
     ).one()
     return MatchesOverview(scored=scored, pending=pending)
 
@@ -162,7 +158,7 @@ def get_overview(
     current = get_current_profile(session, user_id)
     return OverviewOut(
         profile=_profile(session, user_id, current),
-        interview=_interview(session, user_id, current),
+        interview=_interview(session, user_id),
         companies=_companies(session, user_id),
         jobs=_jobs(session, user_id),
         matches=_matches(session, user_id, current),

@@ -198,14 +198,17 @@ def test_matches_scored_pending_current_version_only(env, as_user):
 @pytest.mark.db
 def test_interview_state_mapping(env, as_user):
     new_user, add_profile, add_session = env[0], env[3], env[5]
-    none_u, prog_u, done_u, old_done_u, reopened_u = (new_user() for _ in range(5))
-    for u in (prog_u, done_u, old_done_u, reopened_u):
+    none_u, prog_u, done_u, newer_u, mixed_u, err_u = (new_user() for _ in range(6))
+    for u in (prog_u, done_u, mixed_u, err_u):
         add_profile(u, version=2)
+    add_profile(newer_u, version=1)
+    add_profile(newer_u, version=2)  # suggestion accepted -> N+1
     add_session(prog_u, 2, "awaiting_answer")
     add_session(done_u, 2, "done")
-    add_session(old_done_u, 1, "done")        # session of an older version
-    add_session(reopened_u, 2, "done")
-    add_session(reopened_u, 2, "generating")  # most recent is not done
+    add_session(newer_u, 1, "done")   # done on N while current is N+1
+    add_session(mixed_u, 2, "done")
+    add_session(mixed_u, 2, "generating")  # one done plus one active
+    add_session(err_u, 2, "error")
 
     def state(u):
         return as_user(u).get("/overview").json()["interview"]["state"]
@@ -213,8 +216,28 @@ def test_interview_state_mapping(env, as_user):
     assert state(none_u) == "none"
     assert state(prog_u) == "in_progress"
     assert state(done_u) == "done"
-    assert state(old_done_u) == "in_progress"
-    assert state(reopened_u) == "in_progress"
+    assert state(newer_u) == "done"
+    assert state(mixed_u) == "in_progress"
+    assert state(err_u) == "in_progress"
+
+
+@pytest.mark.db
+def test_matches_only_count_open_jobs(env, as_user):
+    new_user, add_company, add_job, add_profile, add_match, _ = env
+    uid = new_user()
+    add_profile(uid, version=1)
+    c = add_company(uid)
+    jo, ho = add_job(uid, c)
+    jc, hc = add_job(uid, c, status="closed")
+    jd, hd = add_job(uid, c, status="duplicate")
+    add_match(uid, jo, 1, "ok", ho)
+    add_match(uid, jc, 1, "ok", hc)
+    add_match(uid, jd, 1, "ok", hd)
+    jc2, hc2 = add_job(uid, c, status="closed")
+    add_match(uid, jc2, 1, "pendente", hc2)
+    b = as_user(uid).get("/overview").json()
+    assert b["matches"] == {"scored": 1, "pending": 0}
+    assert b["matches"]["scored"] <= b["jobs"]["open"]
 
 
 @pytest.mark.db
