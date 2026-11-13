@@ -1,14 +1,15 @@
 import asyncio
 import logging
 import uuid
+from datetime import timedelta
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from rumo_core.db import SessionLocal
 from rumo_core.llm.base import LLMError, LLMRateLimited
 from rumo_core.matching.ai_score import MatchDraft
-from rumo_core.models import Company, Job, Match, Profile, User
+from rumo_core.models import Company, InterviewSession, Job, Match, Profile, User
 from rumo_core.profile.schema import Basics, CanonicalProfile, Experience, Skill
 from worker import match_jobs as mj
 from worker.match_jobs import score_pending_matches
@@ -38,17 +39,18 @@ def good_draft(score=78) -> MatchDraft:
 
 
 class FakeLLM:
-    def __init__(self, *results, exc=None, hook=None):
+    def __init__(self, *results, exc=None, hook=None, delay=0.0):
         self.results = list(results)
         self.exc = exc
         self.hook = hook
+        self.delay = delay
         self.calls: list[list[dict]] = []
 
     async def complete_json(self, messages, schema):
         self.calls.append(messages)
         if self.hook:
             self.hook()
-        await asyncio.sleep(0)
+        await asyncio.sleep(self.delay)
         if self.exc is not None:
             raise self.exc
         if self.results:
@@ -81,6 +83,7 @@ def make_user():
     yield new_user
     with SessionLocal() as s:
         for uid in created:
+            s.execute(delete(InterviewSession).where(InterviewSession.user_id == uid))
             s.execute(delete(Match).where(Match.user_id == uid))
             s.execute(delete(Profile).where(Profile.user_id == uid))
             s.execute(delete(Job).where(Job.user_id == uid))
@@ -324,17 +327,105 @@ async def test_no_transaction_open_during_llm_call(uid):
     assert locked == [(mid,)]
 
 
+@pytest.mark.db
+async def test_skips_while_interview_turn_pending(uid, make_user):
+    mid = _pending(uid)
+    other = make_user()  # an interview of ANY user blocks the tick
+    with SessionLocal() as s:
+        iv = InterviewSession(user_id=other, profile_version=1, state="generating")
+        s.add(iv)
+        s.commit()
+        iv_id = iv.id
+    llm = FakeLLM()
+    for state in ("generating", "working"):
+        with SessionLocal() as s:
+            s.execute(update(InterviewSession).where(InterviewSession.id == iv_id)
+                      .values(state=state))
+            s.commit()
+        assert await _run(uid, llm) == 0
+    assert llm.calls == [] and _get(mid).state == "pendente"
+    with SessionLocal() as s:  # waiting for the user's answer: no LLM needed
+        s.execute(update(InterviewSession).where(InterviewSession.id == iv_id)
+                  .values(state="awaiting_answer"))
+        s.commit()
+    assert await _run(uid, llm) == 1
+    assert _get(mid).state == "ok"
+
+
+@pytest.mark.db
+async def test_call_timeout_pauses_without_attempt(uid, caplog):
+    mid = _pending(uid)
+    now = [100.0]
+    llm = FakeLLM(delay=5.0)
+    with caplog.at_level(logging.WARNING, logger="worker.match_jobs"):
+        assert await _run(uid, llm, call_timeout=0.05, clock=lambda: now[0]) == 0
+    m = _get(mid)
+    assert m.state == "pendente" and m.attempts == 0
+    assert any("timed out" in r.message for r in caplog.records)
+    llm.delay = 0.0
+    assert await _run(uid, llm, clock=lambda: now[0] + 30) == 0  # paused
+    assert len(llm.calls) == 1
+    assert await _run(uid, llm, clock=lambda: now[0] + 61) == 1
+    assert _get(mid).state == "ok"
+
+
+def _scored_last_24h() -> int:
+    with SessionLocal() as s:
+        return s.scalar(select(func.count(Match.id)).where(
+            Match.scored_at > func.now() - timedelta(hours=24)))
+
+
+@pytest.mark.db
+async def test_daily_limit_caps_scoring_and_logs_hourly(uid, caplog):
+    a, b = _pending(uid, 0, vec=0.9), _pending(uid, 1, vec=0.8)
+    limit = _scored_last_24h() + 1
+    now = [1000.0]
+    llm = FakeLLM()
+    with caplog.at_level(logging.INFO, logger="worker.match_jobs"):
+        # one slot left: the batch is cut to it
+        assert await _run(uid, llm, daily_limit=limit, clock=lambda: now[0]) == 1
+        assert _get(a).state == "ok" and _get(b).state == "pendente"
+        assert await _run(uid, llm, daily_limit=limit, clock=lambda: now[0] + 1) == 0
+        assert await _run(uid, llm, daily_limit=limit, clock=lambda: now[0] + 60) == 0
+        assert len([r for r in caplog.records if "daily limit" in r.message]) == 1
+        assert await _run(uid, llm, daily_limit=limit, clock=lambda: now[0] + 3700) == 0
+        assert len([r for r in caplog.records if "daily limit" in r.message]) == 2
+    assert len(llm.calls) == 1 and _get(b).attempts == 0
+    # rows scored over 24 h ago do not count
+    with SessionLocal() as s:
+        s.execute(update(Match).where(Match.id == a).values(
+            scored_at=func.now() - timedelta(hours=25)))
+        s.commit()
+    assert await _run(uid, llm, daily_limit=limit, clock=lambda: now[0] + 7400) == 1
+    assert _get(b).state == "ok"
+
+
+def test_match_settings_defaults():
+    from pydantic import ValidationError
+
+    from rumo_core.config import Settings
+
+    s = Settings(_env_file=None, database_url="x")
+    assert s.match_daily_limit == 60 and s.match_call_timeout == 25
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="x", match_daily_limit=0)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, database_url="x", match_call_timeout=0)
+
+
 def test_job_registered_after_fill():
     from rumo_core.config import Settings
     from worker.main import build_registry, build_score_matches_job
 
     s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/x",
-                 match_batch=4, match_max_attempts=5)
+                 match_batch=4, match_max_attempts=5, match_daily_limit=7,
+                 match_call_timeout=12)
     sf, llm, emb = object(), object(), object()
     names = list(build_registry(s, sf, llm, emb)._jobs)
     assert names.index("score_matches") == names.index("fill_missing_job_fields") + 1
     job = build_score_matches_job(s, sf, llm)
     assert job.func is score_pending_matches and job.args == (sf, llm)
-    assert job.keywords == {"batch": 4, "max_attempts": 5}
+    assert job.keywords == {"batch": 4, "max_attempts": 5, "daily_limit": 7,
+                            "call_timeout": 12}
     reg = build_registry(s, sf, llm, emb)
     assert reg._jobs["score_matches"][1] == 60

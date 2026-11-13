@@ -3,14 +3,15 @@
 `mark_pending` creates `pendente` Match rows for the top `n` jobs by
 vec_score (same filters as the ranking) for the current profile version.
 An `ok` row whose job is unchanged (job content_hash == Match.content_hash,
-the hash at scoring time) is kept; an `ok` row whose job changed and any
-`erro` row go back to `pendente` with attempts reset and the old AI result
-cleared. `pendente` rows are left alone, so calling it again is a no-op.
+the hash at scoring time) is kept; an `ok` row whose job changed goes back to
+`pendente` with attempts reset and the old AI result cleared; an `erro` row
+does too, but only if its job changed or it failed over ERROR_COOLDOWN ago. `pendente` rows are left alone, so calling it again is a no-op.
 """
 
 from dataclasses import dataclass
+from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -18,6 +19,10 @@ from rumo_core.matching.filters import SearchFilters
 from rumo_core.matching.ranking import top_candidate_ids
 from rumo_core.models import Job, Match
 from rumo_core.profile.service import get_current_profile
+
+# an 'erro' row whose job did not change is requeued at most once per hour
+# (each requeue can cost up to max_attempts x 2 LLM calls)
+ERROR_COOLDOWN = timedelta(hours=1)
 
 
 @dataclass(frozen=True)
@@ -80,10 +85,16 @@ def mark_pending(session: Session, user_id: int, filters: SearchFilters, *,
             .execution_options(populate_existing=True)
         ).scalars()
     }
+    db_now = session.scalar(select(func.now()))
     reset = already_ok = 0
     for job_id, vec in candidates:
         m = existing[job_id]
-        if m.state == "erro" or (m.state == "ok" and m.content_hash != hashes[job_id]):
+        changed = m.content_hash != hashes[job_id]
+        # a failing row is retried at most once per cool-down unless its job changed
+        retry_error = m.state == "erro" and (
+            changed or m.updated_at <= db_now - ERROR_COOLDOWN
+        )
+        if retry_error or (m.state == "ok" and changed):
             _reset(m, vec, hashes[job_id])
             reset += 1
         elif m.state == "ok":

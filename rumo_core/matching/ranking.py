@@ -8,7 +8,7 @@ Computed entirely in SQL through a LATERAL top-3 subquery per job.
 
 from dataclasses import dataclass
 
-from sqlalchemy import Select, and_, func, select, true
+from sqlalchemy import Select, and_, func, or_, select, true
 from sqlalchemy.orm import Session, defer
 
 from rumo_core.matching.filters import SearchFilters, apply_filters
@@ -139,6 +139,21 @@ def job_vec_score(session: Session, user_id: int, job_id: int, *,
     return float(v) if v is not None else None
 
 
+def _not_stale():
+    """An 'ok' row scored on another version of the posting counts as no
+    match until it is rescored (pendente/erro rows are always attached)."""
+    return or_(Match.state != "ok", Match.content_hash == Job.content_hash)
+
+
+def current_match(match: Match | None, job_content_hash: str) -> Match | None:
+    """Python twin of `_not_stale` for a single row."""
+    if match is None:
+        return None
+    if match.state == "ok" and match.content_hash != job_content_hash:
+        return None
+    return match
+
+
 def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
               model_version: str, status: str = "open",
               limit: int = 50, offset: int = 0) -> RankPage:
@@ -162,6 +177,7 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
             Match.job_id == Job.id,
             Match.user_id == user_id,
             Match.profile_version == version,
+            _not_stale(),
         ))
         .where(Job.user_id == user_id)
         .options(defer(Job.embedding))

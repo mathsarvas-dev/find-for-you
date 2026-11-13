@@ -6,26 +6,31 @@ is written in a fresh transaction after re-reading the job and the user's
 current profile version under row lock. Never logs job text or LLM output.
 """
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import case, func, select, update
+from sqlalchemy import case, exists, func, select, update
 from sqlalchemy.orm import aliased
 
 from rumo_core.llm.base import LLMError, LLMProvider, LLMRateLimited
 from rumo_core.matching.ai_score import JobView, MatchInvalid, score_job
-from rumo_core.models import Company, Job, Match, Profile
+from rumo_core.models import Company, InterviewSession, Job, Match, Profile
 from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import get_current_profile
 
 logger = logging.getLogger("worker.match_jobs")
 
 RATE_LIMIT_PAUSE_SECONDS = 60.0
+CAP_LOG_EVERY_SECONDS = 3600.0
+# interview states in which the interview job is about to call / calling the LLM
+INTERVIEW_LLM_STATES = ("generating", "working")
 
 _warned_no_llm = False
 _pause_until = 0.0
+_cap_logged_at: float | None = None
 # match ids between selection and write in THIS process: two overlapping
 # ticks never send the same row to the LLM (across processes, SKIP LOCKED
 # covers the selection and the write re-check makes a duplicate harmless)
@@ -34,14 +39,27 @@ _in_flight: set[int] = set()
 
 def _reset_state() -> None:
     """Reset the job's in-process state (used by tests)."""
-    global _warned_no_llm, _pause_until
+    global _warned_no_llm, _pause_until, _cap_logged_at
     _warned_no_llm = False
     _pause_until = 0.0
+    _cap_logged_at = None
     _in_flight.clear()
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _interview_needs_llm(session_factory) -> bool:
+    with session_factory() as s:
+        return bool(s.scalar(select(exists().where(
+            InterviewSession.state.in_(INTERVIEW_LLM_STATES)))))
+
+
+def _scored_last_24h(session_factory) -> int:
+    with session_factory() as s:
+        return s.scalar(select(func.count(Match.id)).where(
+            Match.scored_at > func.now() - timedelta(hours=24))) or 0
 
 
 @dataclass(frozen=True)
@@ -185,17 +203,23 @@ async def score_pending_matches(
     batch: int,
     max_attempts: int,
     user_id: int | None = None,
+    daily_limit: int | None = None,
+    call_timeout: float = 25.0,
     clock=time.monotonic,
 ) -> int:
     """Score up to `batch` pending matches with the LLM; returns how many went
     through the LLM.
 
-    No LLM (no key): warns once, does nothing. Rate limit: pauses for
-    RATE_LIMIT_PAUSE_SECONDS, stops the batch, counts no attempt.
+    No LLM (no key): warns once, does nothing. While any interview session
+    (any user) waits for an LLM turn ('generating'/'working'), the tick does
+    nothing. With `daily_limit`, at most that many rows are scored in any
+    rolling 24 h (all users); at the cap the tick is skipped (logged at most
+    once per hour). Rate limit or a call longer than `call_timeout` seconds:
+    pauses for RATE_LIMIT_PAUSE_SECONDS, stops the batch, counts no attempt.
     MatchInvalid / LLM error / unexpected failure: counts an attempt; at
     `max_attempts` the row becomes 'erro' with the exception class name.
     """
-    global _warned_no_llm, _pause_until
+    global _warned_no_llm, _pause_until, _cap_logged_at
     if llm is None:
         if not _warned_no_llm:
             logger.warning("GROQ_API_KEY not set: match scoring disabled")
@@ -203,6 +227,18 @@ async def score_pending_matches(
         return 0
     if clock() < _pause_until:
         return 0
+    if _interview_needs_llm(session_factory):
+        return 0  # interview turns keep the Groq budget and the worker loop
+    if daily_limit is not None:
+        left = daily_limit - _scored_last_24h(session_factory)
+        if left <= 0:
+            now = clock()
+            if _cap_logged_at is None or now - _cap_logged_at >= CAP_LOG_EVERY_SECONDS:
+                logger.info("match scoring daily limit (%d per 24 h) reached; skipping",
+                            daily_limit)
+                _cap_logged_at = now
+            return 0
+        batch = min(batch, left)
     picked = _select_candidates(session_factory, batch, max_attempts, user_id)
     _in_flight.update(p.match_id for p in picked)
     done = 0
@@ -212,12 +248,16 @@ async def score_pending_matches(
                 work = _load(session_factory, p)
                 if work is None:
                     continue
-                result = await score_job(llm, work.profile, work.job)  # no DB tx held
+                # bounded: the provider may sleep on 429s, and the loop is sequential
+                result = await asyncio.wait_for(
+                    score_job(llm, work.profile, work.job), timeout=call_timeout
+                )  # no DB tx held
                 _write(session_factory, p.match_id, work.content_hash, result)
-            except LLMRateLimited:
+            except (LLMRateLimited, TimeoutError) as exc:
                 _pause_until = clock() + RATE_LIMIT_PAUSE_SECONDS
                 logger.warning(
-                    "LLM rate limited; pausing match scoring for %ds",
+                    "LLM %s; pausing match scoring for %ds",
+                    "call timed out" if isinstance(exc, TimeoutError) else "rate limited",
                     RATE_LIMIT_PAUSE_SECONDS,
                 )
                 return done

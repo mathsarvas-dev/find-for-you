@@ -31,6 +31,12 @@ class Settings(BaseSettings):
     match_weight_profile: float = Field(1.0, ge=0)
     match_weight_query: float = Field(0.0, ge=0)
     match_max_attempts: int = Field(3, gt=0)
+    # Max matches scored by the LLM in any rolling 24 h (all users): protects
+    # the Groq daily budget shared with the interview.
+    match_daily_limit: int = Field(60, gt=0)
+    # Seconds one scoring call may take (429 retries included) before the
+    # tick gives up and pauses: the worker loop is sequential.
+    match_call_timeout: float = Field(25, gt=0)
     # Comma-separated list of browser origins allowed to call the API.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

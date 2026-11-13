@@ -14,7 +14,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Annotated
 
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, ValidationError
 
 from rumo_core.interview.suggestions import lexicon_supported, numbers_supported
 from rumo_core.llm.base import LLMProvider
@@ -213,11 +213,59 @@ def build_messages(profile: CanonicalProfile, job: JobView) -> list[dict[str, st
     ]
 
 
+class _RawDraft(BaseModel):
+    """What the provider parses: MatchDraft without the length/count limits,
+    so one over-long item does not fail the whole answer (and cost a retry
+    call). `_bound` then applies the limits and MatchDraft stays the final
+    bound."""
+
+    score: Annotated[int, Field(ge=0, le=100, strict=True)]
+    rationale: str
+    strengths: list[str] = Field(default_factory=list)
+    gaps: list[str] = Field(default_factory=list)
+
+
+_SENTENCE_END = re.compile(r"[.!?](?=\s|$)")
+_MAX_RATIONALE = 600  # = MatchDraft limits
+_MAX_ITEM = 160
+_MAX_ITEMS = 5
+
+
+def _cut_rationale(text: str) -> str:
+    """Over-long rationale: keep the whole sentences that fit, else invalid."""
+    text = text.strip()
+    if len(text) <= _MAX_RATIONALE:
+        return text
+    ends = [m.end() for m in _SENTENCE_END.finditer(text[:_MAX_RATIONALE])]
+    if not ends:
+        raise MatchInvalid("rationale")
+    return text[: ends[-1]]
+
+
+def _items(values) -> list[str]:
+    kept = [v.strip() for v in values or [] if v.strip() and len(v.strip()) <= _MAX_ITEM]
+    return kept[:_MAX_ITEMS]
+
+
+def _bound(raw) -> MatchDraft:
+    try:
+        return MatchDraft(
+            score=raw.score,
+            rationale=_cut_rationale(raw.rationale or ""),
+            strengths=_items(raw.strengths),
+            gaps=_items(raw.gaps),
+        )
+    except ValidationError:
+        raise MatchInvalid("draft") from None
+
+
 async def score_job(llm: LLMProvider, profile: CanonicalProfile, job: JobView) -> MatchResult:
     """One LLM call; raises MatchInvalid if the answer fails validation.
-    LLM errors (LLMRateLimited included) are not caught."""
-    draft = await llm.complete_json(build_messages(profile, job), MatchDraft)
-    return validate_match(draft, profile, job=job)
+    Over-long items are dropped (and an over-long rationale cut at a sentence
+    end) before validation. LLM errors (LLMRateLimited included) are not
+    caught."""
+    raw = await llm.complete_json(build_messages(profile, job), _RawDraft)
+    return validate_match(_bound(raw), profile, job=job)
 
 
 # --------------------------------------------------------------------------

@@ -278,6 +278,26 @@ def test_match_detail_includes_rationale_for_ok(env, as_user):
 
 
 @pytest.mark.db
+def test_stale_ok_match_shown_without_ai_score(env, as_user):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, emb=e(0))
+    jid = add_job(uid, cid, e(0))
+    c = as_user(uid)
+    assert c.post("/matches/refresh").status_code == 200
+    _set_match(uid, jid, state="ok", ai_score=90, rationale="Bom encaixe.",
+               strengths=["Python"], gaps=[])
+    with SessionLocal() as s:  # the posting changed after scoring
+        s.execute(update(Job).where(Job.id == jid).values(content_hash="edited"))
+        s.commit()
+    d = c.get(f"/matches/{jid}").json()
+    assert d["ai_score"] is None and d["state"] is None
+    assert d["rationale"] is None and d["strengths"] is None and d["gaps"] is None
+    listed = c.get("/matches").json()["items"][0]
+    assert listed["ai_score"] is None and listed["state"] is None
+
+
+@pytest.mark.db
 def test_match_detail_without_match_row(env, as_user):
     new_user, add_job, add_profile = env
     uid, cid = new_user()

@@ -56,7 +56,7 @@ describe("MatchPanel", () => {
     expect(link).toHaveAttribute("target", "_blank");
   });
 
-  it("pendente: diz que está na fila; erro: mostra o motivo", () => {
+  it("pendente: diz que está na fila; erro: mensagem em português", () => {
     const { rerender } = renderPanel({
       name: "ready",
       detail: matchDetail(1, { state: "pendente", ai_score: null, rationale: null, strengths: null, gaps: null }),
@@ -67,7 +67,7 @@ describe("MatchPanel", () => {
       <MatchPanel
         state={{
           name: "ready",
-          detail: matchDetail(1, { state: "erro", ai_score: null, rationale: null, error: "Resposta sem JSON válido." }),
+          detail: matchDetail(1, { state: "erro", ai_score: null, rationale: null, error: "MatchInvalid" }),
         }}
         chunksUsed={3}
         now={NOW}
@@ -75,8 +75,10 @@ describe("MatchPanel", () => {
         onRetry={vi.fn()}
       />,
     );
-    expect(screen.getByText(/A avaliação falhou/)).toBeInTheDocument();
-    expect(screen.getByText("Resposta sem JSON válido.")).toBeInTheDocument();
+    expect(screen.getByText("Não foi possível avaliar esta vaga.")).toBeInTheDocument();
+    // never the raw exception class name, nor a hardcoded attempt count
+    expect(screen.queryByText(/MatchInvalid/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/tentativas/)).not.toBeInTheDocument();
   });
 
   it("nunca avaliada: explica como pedir a avaliação", () => {

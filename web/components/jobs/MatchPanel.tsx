@@ -111,8 +111,11 @@ export function MatchPanel({ state, chunksUsed, now, onClose, onRetry }: MatchPa
       )}
       {d.state === "erro" && (
         <div className="match-panel__state" data-state="erro">
-          <p>A avaliação falhou depois de 3 tentativas.</p>
-          {d.error && <p className="match-panel__error">{d.error}</p>}
+          {/* d.error holds an internal exception class name: never shown */}
+          <p>Não foi possível avaliar esta vaga.</p>
+          <p className="match-panel__error">
+            Tente “Avaliar melhores vagas” de novo mais tarde.
+          </p>
         </div>
       )}
       {d.state === null && (
