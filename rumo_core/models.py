@@ -175,6 +175,9 @@ class Company(UserScopedMixin, TimestampMixin, Base):
             "user_id", "source", "identifier",
             name="uq_companies_user_source_identifier",
         ),
+        CheckConstraint(
+            "origin in ('manual','auto')", name="ck_companies_origin"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -195,6 +198,10 @@ class Company(UserScopedMixin, TimestampMixin, Base):
         nullable=False, server_default="0"
     )
     open_jobs: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    # manual | auto
+    origin: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="manual"
+    )
 
 
 class Job(UserScopedMixin, TimestampMixin, Base):
@@ -330,3 +337,61 @@ class Match(UserScopedMixin, TimestampMixin, Base):
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # hash of the job content at scoring time
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class DiscoveryCandidate(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "discovery_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "source", "token",
+            name="uq_discovery_candidates_user_source_token",
+        ),
+        Index(
+            "ix_discovery_candidates_user_state_retry",
+            "user_id", "state", "retry_after",
+        ),
+        CheckConstraint(
+            "origin_kind in ('catalog','profile','target')",
+            name="ck_discovery_candidates_origin_kind",
+        ),
+        CheckConstraint(
+            "state in ('pending','valid','invalid','known','rejected')",
+            name="ck_discovery_candidates_state",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    token: Mapped[str] = mapped_column(String(64), nullable=False)
+    name_hint: Mapped[str | None] = mapped_column(String(255))
+    # catalog | profile | target
+    origin_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    # pending | valid | invalid | known | rejected
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
+    attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retry_after: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    company_id: Mapped[int | None] = mapped_column(
+        ForeignKey("companies.id", ondelete="SET NULL")
+    )
+
+
+class UserPreference(Base):
+    __tablename__ = "user_preferences"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), primary_key=True)
+    discovery_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    target_companies: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
