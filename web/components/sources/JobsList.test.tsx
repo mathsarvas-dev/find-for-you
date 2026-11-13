@@ -26,6 +26,7 @@ const companies: Company[] = [
     last_error: null,
     consecutive_failures: 0,
     open_jobs: 2,
+    origin: "manual",
   },
   {
     id: 2,
@@ -40,6 +41,7 @@ const companies: Company[] = [
     last_error: null,
     consecutive_failures: 0,
     open_jobs: 0,
+    origin: "manual",
   },
 ];
 

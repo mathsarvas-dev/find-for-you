@@ -198,7 +198,7 @@ def test_list_companies_health_fields(client, uids):
     assert [c["name"] for c in items] == ["Acme", "Zeta"]
     assert set(items[0]) == {
         "id", "source", "identifier", "name", "country", "active", "last_run_at",
-        "last_success_at", "next_run_at", "last_error", "consecutive_failures", "open_jobs"}
+        "last_success_at", "next_run_at", "last_error", "consecutive_failures", "open_jobs", "origin"}
     assert items[0]["consecutive_failures"] == 2 and items[0]["open_jobs"] == 3
     assert items[0]["last_error"] == "boom"
 

@@ -4,9 +4,10 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AddCompanyForm } from "@/components/sources/AddCompanyForm";
 import { CompanyRow } from "@/components/sources/CompanyRow";
+import { DiscoveryPanel } from "@/components/sources/DiscoveryPanel";
 import { JobsList } from "@/components/sources/JobsList";
 import { ApiError } from "@/lib/profile";
-import { isPending, listCompanies, type Company } from "@/lib/sources";
+import { isPending, listCompanies, type Company, type CompanyOrigin } from "@/lib/sources";
 
 const POLL_MS = 10_000;
 /**
@@ -18,6 +19,19 @@ const POLL_MS = 10_000;
 const SLOW_MS = 300_000;
 /** Atualiza os tempos relativos ("há 5 min") e percebe coletas que venceram. */
 const CLOCK_MS = 30_000;
+
+type OriginFilter = "all" | CompanyOrigin;
+
+const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
+  { value: "all", label: "todas" },
+  { value: "manual", label: "manuais" },
+  { value: "auto", label: "automáticas" },
+];
+
+const EMPTY_FILTERED: Record<CompanyOrigin, string> = {
+  manual: "Nenhuma empresa cadastrada à mão. Cole acima o token de um quadro do Greenhouse.",
+  auto: "Nenhuma empresa automática ainda. A descoberta abaixo adiciona as que tiverem vagas.",
+};
 
 type Phase =
   | { name: "loading" }
@@ -40,6 +54,7 @@ export default function SourcesPage() {
   const [pollError, setPollError] = useState<string | null>(null);
   const [slow, setSlow] = useState(false);
   const [jobsKey, setJobsKey] = useState(0);
+  const [origin, setOrigin] = useState<OriginFilter>("all");
   // Só lido em handlers e efeitos: Date.now() no render quebra o prerender.
   const [now, setNow] = useState(0);
   const mounted = useRef(true);
@@ -92,6 +107,12 @@ export default function SourcesPage() {
   }, [apply]);
 
   const companies = phase.name === "ready" ? phase.companies : null;
+  const countOf = (o: OriginFilter) =>
+    companies ? (o === "all" ? companies.length : companies.filter((c) => c.origin === o).length) : 0;
+  // Pausar ou reativar uma empresa automática muda o teto da descoberta: o painel relê.
+  const activeAuto = companies ? companies.filter((c) => c.origin === "auto" && c.active).length : 0;
+  const visible =
+    companies && origin !== "all" ? companies.filter((c) => c.origin === origin) : companies;
   const pendingCount = companies && now > 0 ? companies.filter((c) => isPending(c, now)).length : 0;
   const pending = pendingCount > 0;
   const polling = pending && pollError === null;
@@ -219,6 +240,27 @@ export default function SourcesPage() {
               </div>
             )}
 
+            {companies.length > 0 && (
+              <fieldset className="options origin-filter">
+                <legend className="field__label">Mostrar</legend>
+                <div className="options__list">
+                  {ORIGIN_FILTERS.map((f) => (
+                    <label key={f.value} className="option">
+                      <input
+                        type="radio"
+                        name="origem"
+                        value={f.value}
+                        checked={origin === f.value}
+                        onChange={() => setOrigin(f.value)}
+                      />
+                      {f.label}
+                      <span className="mono origin-filter__count">{countOf(f.value)}</span>
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+            )}
+
             {companies.length === 0 ? (
               <div className="sources__empty">
                 <p className="empty">
@@ -226,9 +268,13 @@ export default function SourcesPage() {
                   de uma empresa no Greenhouse; a primeira coleta começa logo depois.
                 </p>
               </div>
+            ) : visible && visible.length === 0 && origin !== "all" ? (
+              <div className="sources__empty">
+                <p className="empty">{EMPTY_FILTERED[origin]}</p>
+              </div>
             ) : (
               <ul className="company-list">
-                {companies.map((c) => (
+                {(visible ?? companies).map((c) => (
                   <CompanyRow key={c.id} company={c} now={now} onChange={replace} />
                 ))}
               </ul>
@@ -243,6 +289,10 @@ export default function SourcesPage() {
               </span>
             </div>
           </section>
+
+          <div className="sources__discovery">
+            <DiscoveryPanel refreshKey={activeAuto} onCompaniesChanged={() => void refresh()} />
+          </div>
 
           <div className="sources__jobs">
             <JobsList companies={companies} now={now} refreshKey={jobsKey} />

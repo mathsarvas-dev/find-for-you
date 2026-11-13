@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ApiError } from "@/lib/profile";
-import { addCompany, listCompanies, listJobs, type Company } from "@/lib/sources";
+import { addCompany, listCompanies, listJobs, patchCompany, type Company } from "@/lib/sources";
+import { getDiscovery, type DiscoveryState } from "@/lib/discovery";
 import SourcesPage from "./page";
 
 vi.mock("@/lib/sources", async (importOriginal) => ({
@@ -13,10 +14,28 @@ vi.mock("@/lib/sources", async (importOriginal) => ({
   patchCompany: vi.fn(),
 }));
 
+vi.mock("@/lib/discovery", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/discovery")>()),
+  getDiscovery: vi.fn(),
+  putDiscovery: vi.fn(),
+  listCandidates: vi.fn(),
+}));
+
+const discovery: DiscoveryState = {
+  enabled: true,
+  target_companies: [],
+  auto_companies: 0,
+  max_auto: 30,
+  pending: 0,
+  found: 0,
+};
+
 const m = {
+  discovery: vi.mocked(getDiscovery),
   companies: vi.mocked(listCompanies),
   jobs: vi.mocked(listJobs),
   add: vi.mocked(addCompany),
+  patch: vi.mocked(patchCompany),
 };
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -34,6 +53,7 @@ const collected: Company = {
   last_error: null,
   consecutive_failures: 0,
   open_jobs: 3,
+  origin: "manual",
 };
 
 const pending: Company = {
@@ -45,6 +65,7 @@ const pending: Company = {
   last_success_at: null,
   next_run_at: "2026-11-12T11:59:00Z",
   open_jobs: 0,
+  origin: "manual",
 };
 
 async function tick(ms: number) {
@@ -63,6 +84,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   m.jobs.mockResolvedValue({ total: 0, items: [] });
+  m.discovery.mockResolvedValue(discovery);
 });
 
 afterEach(() => {
@@ -212,5 +234,81 @@ describe("SourcesPage", () => {
     expect(screen.getByRole("option", { name: "Nubank" })).toBeInTheDocument();
     await tick(10_000);
     expect(m.companies).toHaveBeenCalledTimes(3);
+  });
+
+  it("monta o painel de descoberta automática", async () => {
+    m.companies.mockResolvedValue([collected]);
+    await renderPage();
+    expect(screen.getByRole("heading", { name: "Descoberta automática" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("switch", { name: "Descobrir empresas automaticamente" }),
+    ).toBeChecked();
+  });
+
+  it("filtro por origem: todas, manuais e automáticas", async () => {
+    const auto: Company = { ...collected, id: 3, identifier: "stone", name: "Stone", origin: "auto" };
+    m.companies.mockResolvedValue([collected, auto]);
+    await renderPage();
+    const names = () =>
+      Array.from(document.querySelectorAll(".company__name")).map((n) => n.textContent);
+    expect(screen.getByRole("radio", { name: /todas/ })).toBeChecked();
+    expect(names()).toEqual(["GitLab", "Stone"]);
+    fireEvent.click(screen.getByRole("radio", { name: /automáticas/ }));
+    expect(names()).toEqual(["Stone"]);
+    fireEvent.click(screen.getByRole("radio", { name: /manuais/ }));
+    expect(names()).toEqual(["GitLab"]);
+    // O filtro é só da lista: a API não é chamada de novo.
+    expect(m.companies).toHaveBeenCalledTimes(1);
+  });
+
+  it("filtro sem resultado explica o vazio", async () => {
+    m.companies.mockResolvedValue([collected]);
+    await renderPage();
+    fireEvent.click(screen.getByRole("radio", { name: /automáticas/ }));
+    expect(screen.getByText(/Nenhuma empresa automática ainda/)).toBeInTheDocument();
+  });
+
+  it("pausar empresa automática no teto: o painel relê e o polling volta", async () => {
+    const auto: Company = { ...collected, id: 3, identifier: "stone", name: "Stone", origin: "auto" };
+    m.companies
+      .mockResolvedValueOnce([collected, auto])
+      .mockResolvedValue([collected, { ...auto, active: false }]);
+    m.discovery
+      .mockResolvedValueOnce({ ...discovery, pending: 5, auto_companies: 1, max_auto: 1 })
+      .mockResolvedValue({ ...discovery, pending: 5, auto_companies: 0, max_auto: 1 });
+    m.patch.mockResolvedValue({ ...auto, active: false });
+    await renderPage();
+    expect(screen.getByText(/Limite de 1 empresas automáticas atingido/)).toBeInTheDocument();
+    await tick(30_000);
+    expect(m.discovery).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Pausar — Stone" }));
+    });
+    expect(m.patch).toHaveBeenCalledWith(3, { active: false });
+    expect(m.discovery).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/empresas automáticas atingido/)).toBeNull();
+    await tick(10_000);
+    expect(m.discovery).toHaveBeenCalledTimes(3);
+  });
+
+  it("pausar empresa manual não relê a descoberta", async () => {
+    m.companies.mockResolvedValue([collected]);
+    m.patch.mockResolvedValue({ ...collected, active: false });
+    await renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Pausar — GitLab" }));
+    });
+    expect(m.discovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("descoberta adicionou empresa: a lista de empresas é relida", async () => {
+    m.companies.mockResolvedValue([collected]);
+    m.discovery
+      .mockResolvedValueOnce({ ...discovery, pending: 3, auto_companies: 0 })
+      .mockResolvedValue({ ...discovery, pending: 2, auto_companies: 1, found: 1 });
+    await renderPage();
+    expect(m.companies).toHaveBeenCalledTimes(1);
+    await tick(10_000);
+    expect(m.companies).toHaveBeenCalledTimes(2);
   });
 });

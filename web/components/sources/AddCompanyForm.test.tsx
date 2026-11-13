@@ -24,6 +24,7 @@ const created: Company = {
   last_error: null,
   consecutive_failures: 0,
   open_jobs: 0,
+  origin: "manual",
 };
 
 afterEach(() => add.mockReset());

@@ -67,6 +67,24 @@ def build_collect_job(settings, session_factory):
     )
 
 
+def build_discover_job(settings, session_factory):
+    """discover_companies bound to the discovery_* settings. The pause between
+    board fetches reuses collect_delay_seconds (same Greenhouse host)."""
+    from functools import partial
+
+    from worker.discover_companies import discover_companies
+
+    return partial(
+        discover_companies,
+        session_factory,
+        batch=settings.discovery_batch,
+        max_seconds=settings.discovery_max_seconds,
+        max_auto=settings.discovery_max_auto_companies,
+        delay=settings.collect_delay_seconds,
+        max_attempts=settings.discovery_max_attempts,
+    )
+
+
 def build_embed_jobs_job(settings, session_factory, embedder):
     """embed_pending_jobs limited to ONE batch of job_embed_batch_size per
     tick: a backlog (~0.4 texts/s on CPU) never holds the sequential loop
@@ -137,6 +155,9 @@ def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
     )
     # every 60 s; per-company next_run_at governs the real collection frequency
     registry.register("collect_companies", build_collect_job(settings, session_factory), 60)
+    # right after the collection: new auto companies get next_run_at=now and
+    # are collected on the next tick
+    registry.register("discover_companies", build_discover_job(settings, session_factory), 60)
     return registry
 
 
@@ -158,8 +179,16 @@ async def retry_startup(
             await sleep(delay)
 
 
-async def main() -> None:
+def configure_logging() -> None:
+    """Root INFO logging, but never httpx/httpcore at INFO: they log every
+    request URL, which carries board tokens derived from profile company names."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    for name in ("httpx", "httpcore"):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
+async def main() -> None:
+    configure_logging()
     from rumo_core.config import get_settings
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder

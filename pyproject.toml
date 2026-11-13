@@ -27,7 +27,10 @@ dev = ["pytest", "pytest-asyncio"]
 embeddings = ["sentence-transformers"]
 
 [tool.setuptools]
-packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "rumo_core.interview", "rumo_core.sources", "api", "worker"]
+packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "rumo_core.interview", "rumo_core.sources", "rumo_core.discovery", "api", "worker"]
+
+[tool.setuptools.package-data]
+"rumo_core.discovery" = ["catalog/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
