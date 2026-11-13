@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { ApiError } from "@/lib/profile";
-import { addCompany, listCompanies, listJobs, type Company } from "@/lib/sources";
+import { addCompany, listCompanies, listJobs, patchCompany, type Company } from "@/lib/sources";
 import { getDiscovery, type DiscoveryState } from "@/lib/discovery";
 import SourcesPage from "./page";
 
@@ -35,6 +35,7 @@ const m = {
   companies: vi.mocked(listCompanies),
   jobs: vi.mocked(listJobs),
   add: vi.mocked(addCompany),
+  patch: vi.mocked(patchCompany),
 };
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -265,6 +266,39 @@ describe("SourcesPage", () => {
     await renderPage();
     fireEvent.click(screen.getByRole("radio", { name: /automáticas/ }));
     expect(screen.getByText(/Nenhuma empresa automática ainda/)).toBeInTheDocument();
+  });
+
+  it("pausar empresa automática no teto: o painel relê e o polling volta", async () => {
+    const auto: Company = { ...collected, id: 3, identifier: "stone", name: "Stone", origin: "auto" };
+    m.companies
+      .mockResolvedValueOnce([collected, auto])
+      .mockResolvedValue([collected, { ...auto, active: false }]);
+    m.discovery
+      .mockResolvedValueOnce({ ...discovery, pending: 5, auto_companies: 1, max_auto: 1 })
+      .mockResolvedValue({ ...discovery, pending: 5, auto_companies: 0, max_auto: 1 });
+    m.patch.mockResolvedValue({ ...auto, active: false });
+    await renderPage();
+    expect(screen.getByText(/Limite de 1 empresas automáticas atingido/)).toBeInTheDocument();
+    await tick(30_000);
+    expect(m.discovery).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Pausar — Stone" }));
+    });
+    expect(m.patch).toHaveBeenCalledWith(3, { active: false });
+    expect(m.discovery).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/empresas automáticas atingido/)).toBeNull();
+    await tick(10_000);
+    expect(m.discovery).toHaveBeenCalledTimes(3);
+  });
+
+  it("pausar empresa manual não relê a descoberta", async () => {
+    m.companies.mockResolvedValue([collected]);
+    m.patch.mockResolvedValue({ ...collected, active: false });
+    await renderPage();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Pausar — GitLab" }));
+    });
+    expect(m.discovery).toHaveBeenCalledTimes(1);
   });
 
   it("descoberta adicionou empresa: a lista de empresas é relida", async () => {

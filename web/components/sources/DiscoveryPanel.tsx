@@ -20,6 +20,11 @@ import { ApiError } from "@/lib/profile";
 const POLL_MS = 10_000;
 
 type DiscoveryPanelProps = {
+  /**
+   * Muda quando algo fora do painel pode ter mexido nas empresas automáticas ativas
+   * (pausar, reativar). Cada valor novo relê /discovery uma vez.
+   */
+  refreshKey?: number;
   /** O número de empresas automáticas mudou: a lista de empresas deve ser relida. */
   onCompaniesChanged?: () => void;
 };
@@ -55,7 +60,7 @@ const STATE_TONE: Record<string, "on" | "off" | "wait"> = {
   pending: "wait",
 };
 
-export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
+export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPanelProps) {
   const [phase, setPhase] = useState<Phase>({ name: "loading" });
   /** O que o interruptor mostra; difere de `data.enabled` só enquanto o PUT está em voo. */
   const [enabled, setEnabled] = useState(true);
@@ -75,6 +80,9 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
   const knownAuto = useRef<number | null>(null);
   const onChangedRef = useRef(onCompaniesChanged);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** Rascunho atual, lido quando a resposta de um Salvar chega. */
+  const draftRef = useRef("");
+  const lastKey = useRef(refreshKey);
 
   const switchHintId = useId();
   const fieldId = useId();
@@ -93,12 +101,13 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
     };
   }, []);
 
-  const apply = useCallback((next: DiscoveryState) => {
+  /** `notify`: false quando a releitura veio da própria página (ela já sabe da mudança). */
+  const apply = useCallback((next: DiscoveryState, notify = true) => {
     const before = knownAuto.current;
     knownAuto.current = next.auto_companies;
     setEnabled(next.enabled);
     setPhase({ name: "ready", data: next });
-    if (before !== null && before !== next.auto_companies) onChangedRef.current?.();
+    if (notify && before !== null && before !== next.auto_companies) onChangedRef.current?.();
   }, []);
 
   /** Primeira leitura (ou retentativa). Preenche o campo com a lista salva. Nunca rejeita. */
@@ -107,7 +116,7 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
     try {
       const next = await getDiscovery();
       if (!mounted.current || my !== seq.current) return;
-      setDraft(next.target_companies.join("\n"));
+      changeDraft(next.target_companies.join("\n"));
       apply(next);
     } catch (err) {
       if (mounted.current && my === seq.current) setPhase({ name: "load-error", message: message(err) });
@@ -118,6 +127,36 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
     // A API só é alcançável do navegador.
     void fetchInitial();
   }, [fetchInitial]);
+
+  function changeDraft(value: string) {
+    draftRef.current = value;
+    setDraft(value);
+  }
+
+  /**
+   * Relê /discovery fora do ciclo do polling (Retomar, refreshKey novo). Com uma gravação
+   * em voo não faz nada: a resposta dela já traz o estado atual.
+   */
+  const refetch = useCallback(async (notify = true) => {
+    if (inFlight.current) return;
+    const my = ++seq.current;
+    try {
+      const next = await getDiscovery();
+      if (!mounted.current || my !== seq.current) return;
+      setPollError(null);
+      apply(next, notify);
+    } catch (err) {
+      if (mounted.current && my === seq.current) setPollError(message(err));
+    }
+  }, [apply]);
+
+  useEffect(() => {
+    if (lastKey.current === refreshKey) return;
+    lastKey.current = refreshKey;
+    // Antes da primeira carga não há o que reler: a carga inicial já vem fresca.
+    if (knownAuto.current === null) return;
+    void refetch(false);
+  }, [refreshKey, refetch]);
 
   function reload() {
     setPhase({ name: "loading" });
@@ -147,7 +186,10 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
         if (my === seq.current) apply(next);
         timer = setTimeout(poll, POLL_MS);
       } catch (err) {
-        if (!cancelled && my === seq.current) setPollError(message(err));
+        if (cancelled) return;
+        // Erro de uma consulta já superada por uma gravação: segue o ciclo em vez de parar.
+        if (my === seq.current) setPollError(message(err));
+        else timer = setTimeout(poll, POLL_MS);
       }
     };
     timer = setTimeout(poll, POLL_MS);
@@ -156,18 +198,6 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
       clearTimeout(timer);
     };
   }, [polling, apply]);
-
-  async function resumePolling() {
-    const my = ++seq.current;
-    try {
-      const next = await getDiscovery();
-      if (!mounted.current || my !== seq.current) return;
-      setPollError(null);
-      apply(next);
-    } catch (err) {
-      if (mounted.current && my === seq.current) setPollError(message(err));
-    }
-  }
 
   async function toggleEnabled() {
     if (inFlight.current || !data) return;
@@ -203,14 +233,20 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
     }
     inFlight.current = true;
     const my = ++seq.current;
+    const sent = draft;
     setBusy("save");
     setSave({ name: "saving" });
     try {
       const res = await putDiscovery({ enabled: data.enabled, target_companies: parsed.names });
       if (!mounted.current) return;
       if (my === seq.current) apply(res);
-      setDraft(res.target_companies.join("\n"));
-      setSave({ name: "saved" });
+      // Só troca o campo pela lista normalizada se ninguém digitou enquanto salvava.
+      if (draftRef.current === sent) {
+        changeDraft(res.target_companies.join("\n"));
+        setSave({ name: "saved" });
+      } else {
+        setSave({ name: "idle" });
+      }
     } catch (err) {
       if (mounted.current) setSave({ name: "error", message: message(err) });
     } finally {
@@ -354,7 +390,7 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
                   aria-describedby={fieldError ? `${hintId} ${errorId}` : hintId}
                   aria-invalid={save.name === "invalid" || undefined}
                   onChange={(e) => {
-                    setDraft(e.target.value);
+                    changeDraft(e.target.value);
                     if (save.name !== "saving") setSave({ name: "idle" });
                   }}
                 />
@@ -370,7 +406,11 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
               )}
               <div className="discovery__foot">
                 <p className="muted discovery__status" role="status" aria-live="polite">
-                  {save.name === "saved" ? "Lista salva." : ""}
+                  {save.name === "saving"
+                    ? "Salvando a lista…"
+                    : save.name === "saved"
+                      ? "Lista salva."
+                      : ""}
                 </p>
                 <button
                   type="submit"
@@ -392,7 +432,8 @@ export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
                 <button
                   type="button"
                   className="button button--secondary"
-                  onClick={() => void resumePolling()}
+                  disabled={busy !== null}
+                  onClick={() => void refetch()}
                 >
                   Retomar
                 </button>

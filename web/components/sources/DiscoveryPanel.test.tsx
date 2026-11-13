@@ -275,6 +275,91 @@ describe("DiscoveryPanel", () => {
     expect(m.get).toHaveBeenCalledTimes(2);
   });
 
+  it("refreshKey novo: relê /discovery uma vez e o polling volta quando sai do teto", async () => {
+    m.get
+      .mockResolvedValueOnce({ ...base, pending: 5, auto_companies: 30, max_auto: 30 })
+      .mockResolvedValue({ ...base, pending: 5, auto_companies: 29, max_auto: 30 });
+    const onCompaniesChanged = vi.fn();
+    const view = render(<DiscoveryPanel refreshKey={30} onCompaniesChanged={onCompaniesChanged} />);
+    await tick(0);
+    expect(screen.getByText(/Limite de 30 empresas automáticas atingido/)).toBeInTheDocument();
+    await tick(30_000);
+    expect(m.get).toHaveBeenCalledTimes(1);
+    view.rerender(<DiscoveryPanel refreshKey={29} onCompaniesChanged={onCompaniesChanged} />);
+    await tick(0);
+    expect(m.get).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Limite de 30 empresas automáticas atingido/)).toBeNull();
+    await tick(10_000);
+    expect(m.get).toHaveBeenCalledTimes(3);
+  });
+
+  it("mesmo refreshKey num novo render não relê", async () => {
+    m.get.mockResolvedValue(base);
+    const view = render(<DiscoveryPanel refreshKey={1} />);
+    await tick(0);
+    view.rerender(<DiscoveryPanel refreshKey={1} />);
+    await tick(0);
+    expect(m.get).toHaveBeenCalledTimes(1);
+  });
+
+  it("consulta que falha depois de um Salvar começar não para o polling em silêncio", async () => {
+    m.get.mockResolvedValueOnce({ ...base, pending: 5 });
+    await renderPanel();
+    let rejectGet!: (e: unknown) => void;
+    m.get.mockReturnValueOnce(new Promise((_, r) => (rejectGet = r)));
+    await tick(10_000);
+    expect(m.get).toHaveBeenCalledTimes(2);
+    m.put.mockResolvedValue({ ...base, pending: 5 });
+    await act(async () => {
+      fireEvent.click(saveButton());
+    });
+    await act(async () => rejectGet(new ApiError(null, "Sem rede.")));
+    m.get.mockResolvedValue({ ...base, pending: 4 });
+    await tick(10_000);
+    expect(m.get).toHaveBeenCalledTimes(3);
+    expect(screen.getByText("12 empresas encontradas · 4 na fila")).toBeInTheDocument();
+  });
+
+  it("Retomar fica desabilitado enquanto o interruptor salva", async () => {
+    m.get
+      .mockResolvedValueOnce({ ...base, pending: 5 })
+      .mockRejectedValueOnce(new ApiError(null, "Sem rede."));
+    await renderPanel();
+    await tick(10_000);
+    const resume = screen.getByRole("button", { name: "Retomar" });
+    expect(resume).toBeEnabled();
+    let resolvePut!: (s: DiscoveryState) => void;
+    m.put.mockReturnValue(new Promise((r) => (resolvePut = r)));
+    fireEvent.click(toggle());
+    expect(resume).toBeDisabled();
+    fireEvent.click(resume);
+    expect(m.get).toHaveBeenCalledTimes(2);
+    await act(async () => resolvePut({ ...base, enabled: false, pending: 5 }));
+    expect(toggle()).not.toBeChecked();
+    expect(screen.getByRole("button", { name: "Retomar" })).toBeEnabled();
+  });
+
+  it("o que foi digitado durante o Salvar não é apagado pela resposta", async () => {
+    m.get.mockResolvedValue(base);
+    let resolve!: (s: DiscoveryState) => void;
+    m.put.mockReturnValue(new Promise((r) => (resolve = r)));
+    await renderPanel();
+    fireEvent.change(textarea(), { target: { value: "nubank" } });
+    fireEvent.click(saveButton());
+    fireEvent.change(textarea(), { target: { value: "nubank\nGitLab" } });
+    await act(async () => resolve({ ...base, target_companies: ["Nubank"] }));
+    expect(textarea().value).toBe("nubank\nGitLab");
+    expect(screen.queryByText("Lista salva.")).toBeNull();
+  });
+
+  it("a região de status fica no DOM mesmo vazia (para ser anunciada)", async () => {
+    m.get.mockResolvedValue(base);
+    await renderPanel();
+    const status = screen.getByRole("status");
+    expect(status).toHaveTextContent("");
+    expect(status).toHaveAttribute("aria-live", "polite");
+  });
+
   it("empresas automáticas mudaram: avisa a página para reler a lista", async () => {
     m.get
       .mockResolvedValueOnce({ ...base, pending: 5, auto_companies: 3 })

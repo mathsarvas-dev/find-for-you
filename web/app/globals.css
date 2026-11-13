@@ -2348,8 +2348,10 @@ select.input {
   font-size: var(--text-sm);
 }
 
+/* Vazia continua no DOM (sem display:none) para o leitor de tela anunciar o que entrar. */
 .discovery__status:empty {
-  display: none;
+  flex: 0 0 0;
+  margin: 0;
 }
 
 .discovery__candidates {

@@ -109,6 +109,8 @@ export default function SourcesPage() {
   const companies = phase.name === "ready" ? phase.companies : null;
   const countOf = (o: OriginFilter) =>
     companies ? (o === "all" ? companies.length : companies.filter((c) => c.origin === o).length) : 0;
+  // Pausar ou reativar uma empresa automática muda o teto da descoberta: o painel relê.
+  const activeAuto = companies ? companies.filter((c) => c.origin === "auto" && c.active).length : 0;
   const visible =
     companies && origin !== "all" ? companies.filter((c) => c.origin === origin) : companies;
   const pendingCount = companies && now > 0 ? companies.filter((c) => isPending(c, now)).length : 0;
@@ -289,7 +291,7 @@ export default function SourcesPage() {
           </section>
 
           <div className="sources__discovery">
-            <DiscoveryPanel onCompaniesChanged={() => void refresh()} />
+            <DiscoveryPanel refreshKey={activeAuto} onCompaniesChanged={() => void refresh()} />
           </div>
 
           <div className="sources__jobs">
