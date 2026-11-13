@@ -33,7 +33,7 @@ class Settings(BaseSettings):
     match_max_attempts: int = Field(3, gt=0)
     # Max matches scored by the LLM in any rolling 24 h (all users): protects
     # the Groq daily budget shared with the interview.
-    match_daily_limit: int = Field(60, gt=0)
+    match_daily_limit: int = Field(20, gt=0)
     # Seconds one scoring call may take (429 retries included) before the
     # tick gives up and pauses: the worker loop is sequential.
     match_call_timeout: float = Field(25, gt=0)

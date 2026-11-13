@@ -406,7 +406,7 @@ def test_match_settings_defaults():
     from rumo_core.config import Settings
 
     s = Settings(_env_file=None, database_url="x")
-    assert s.match_daily_limit == 60 and s.match_call_timeout == 25
+    assert s.match_daily_limit == 20 and s.match_call_timeout == 25
     with pytest.raises(ValidationError):
         Settings(_env_file=None, database_url="x", match_daily_limit=0)
     with pytest.raises(ValidationError):
