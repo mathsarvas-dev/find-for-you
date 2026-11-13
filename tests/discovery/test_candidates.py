@@ -164,3 +164,112 @@ def test_hostile_names_create_only_safe_tokens(session):
     for tok in toks:
         assert rule.fullmatch(tok), tok
     assert "etcpasswd" in toks
+
+
+@pytest.mark.db
+def test_reconcile_does_not_overwrite_concurrent_state_change(session, monkeypatch):
+    uid = session.info["uid"]
+    refresh_candidates(session, uid)
+    session.add(Company(user_id=uid, source="greenhouse", identifier="alpha", name="A"))
+    session.add(Company(user_id=uid, source="greenhouse", identifier="beta", name="B"))
+    session.commit()
+    real = cmod._gather
+
+    def racing(sess, u):
+        out = real(sess, u)
+        with SessionLocal() as other:  # concurrent actor moves the rows
+            for tok, st in (("alpha", "rejected"), ("beta", "valid")):
+                row = other.scalar(select(DiscoveryCandidate).where(
+                    DiscoveryCandidate.user_id == u, DiscoveryCandidate.token == tok))
+                row.state = st
+            other.commit()
+        return out
+
+    monkeypatch.setattr(cmod, "_gather", racing)
+    stats = refresh_candidates(session, uid)
+    session.expire_all()
+    c = _cands(session, uid)
+    assert c["alpha"].state == "rejected" and c["alpha"].company_id is None
+    assert c["beta"].state == "valid" and c["beta"].company_id is None
+    assert stats.known == 0
+
+
+@pytest.mark.db
+def test_second_run_pending_turns_known_and_is_counted(session):
+    uid = session.info["uid"]
+    assert refresh_candidates(session, uid).known == 0
+    session.add(Company(user_id=uid, source="greenhouse", identifier="beta", name="B"))
+    session.commit()
+    stats = refresh_candidates(session, uid)
+    assert (stats.created, stats.known) == (0, 1)
+    assert refresh_candidates(session, uid).known == 0
+
+
+@pytest.mark.db
+def test_company_identifier_case_insensitive(session):
+    uid = session.info["uid"]
+    co = Company(user_id=uid, source="greenhouse", identifier="Alpha", name="A")
+    session.add(co)
+    session.commit()
+    refresh_candidates(session, uid)
+    c = _cands(session, uid)
+    assert c["alpha"].state == "known" and c["alpha"].company_id == co.id
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("targets", [
+    {"a": "Stripe"}, "Stripe", 7, [],
+    ["Stripe", None, {"x": 1}, 3, "x" * 81, " "],
+])
+def test_odd_target_companies(session, targets):
+    uid = session.info["uid"]
+    session.add(UserPreference(user_id=uid, target_companies=targets))
+    session.commit()
+    refresh_candidates(session, uid)
+    toks = set(_cands(session, uid))
+    expected = {"alpha", "beta"}
+    if isinstance(targets, list) and "Stripe" in targets:
+        expected.add("stripe")
+    assert toks == expected
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("data", [
+    {}, {"experiences": None}, {"experiences": "x"}, ["not", "a", "dict"],
+    {"experiences": [None, 3, {"company": None}, {"company": 5},
+                     {"company": "Good Co"}]},
+])
+def test_odd_profile_data(session, data):
+    uid = session.info["uid"]
+    session.add(Profile(user_id=uid, version=1, content_hash="h", data=data))
+    session.commit()
+    refresh_candidates(session, uid)
+    toks = set(_cands(session, uid))
+    expected = {"alpha", "beta"}
+    if isinstance(data, dict) and isinstance(data.get("experiences"), list):
+        expected |= {"goodco", "good", "good-co"}
+    assert toks == expected
+
+
+@pytest.mark.db
+def test_volume_bounded_queries_and_target_cap(session):
+    from sqlalchemy import event
+    uid = session.info["uid"]
+    _profile(session, uid, [f"Firm{i} Inc" for i in range(50)])
+    session.add(UserPreference(
+        user_id=uid, target_companies=[f"Target{i}" for i in range(70)]))
+    session.commit()
+    stmts = []
+    eng = session.get_bind()
+
+    def count(conn, cursor, statement, *a):
+        stmts.append(statement)
+
+    event.listen(eng, "before_cursor_execute", count)
+    try:
+        refresh_candidates(session, uid)
+    finally:
+        event.remove(eng, "before_cursor_execute", count)
+    assert len(stmts) <= 10
+    toks = set(_cands(session, uid))
+    assert "firm49" in toks and "target49" in toks and "target50" not in toks

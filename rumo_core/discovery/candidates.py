@@ -2,19 +2,29 @@
 
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from rumo_core.discovery.catalog import load_catalog
 from rumo_core.discovery.names import token_variants
 from rumo_core.models import Company, DiscoveryCandidate, UserPreference
-from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import get_current_profile
+
+MAX_TARGETS = 50
+MAX_TARGET_LEN = 80
 
 
 @dataclass(frozen=True)
 class RefreshStats:
+    """Outcome of one refresh.
+
+    created: candidates inserted by this call.
+    known: candidates newly marked ``known`` by this call (inserted as known,
+    plus pending candidates that turned known). Known->pending moves and
+    already-known rows are not counted, so an idempotent re-run reports 0.
+    """
+
     created: int
     known: int
 
@@ -30,25 +40,30 @@ def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]
         add(entry.token, "catalog", entry.name)
 
     profile = get_current_profile(session, user_id)
-    if profile is not None:
-        try:
-            parsed = CanonicalProfile.model_validate(profile.data)
-        except Exception:
-            parsed = None
-        if parsed is not None:
-            for exp in parsed.experiences:
-                name = (exp.company or "").strip()
-                if not name:
-                    continue
-                for tok in token_variants(name):
-                    add(tok, "profile", name[:255])
+    data = profile.data if profile is not None else None
+    experiences = data.get("experiences") if isinstance(data, dict) else None
+    if isinstance(experiences, list):
+        for exp in experiences:
+            company = exp.get("company") if isinstance(exp, dict) else None
+            if not isinstance(company, str) or not company.strip():
+                continue
+            name = company.strip()
+            for tok in token_variants(name):
+                add(tok, "profile", name[:255])
 
-    pref = session.get(UserPreference, user_id)
-    if pref is not None and isinstance(pref.target_companies, list):
-        for item in pref.target_companies:
-            if not isinstance(item, str) or not item.strip():
+    pref = session.scalar(
+        select(UserPreference)
+        .where(UserPreference.user_id == user_id)
+        .execution_options(populate_existing=True)
+    )
+    targets = pref.target_companies if pref is not None else None
+    if isinstance(targets, list):
+        for item in targets[:MAX_TARGETS]:
+            if not isinstance(item, str):
                 continue
             name = item.strip()
+            if not name or len(name) > MAX_TARGET_LEN:
+                continue
             for tok in token_variants(name):
                 add(tok, "target", name[:255])
     return found
@@ -57,18 +72,23 @@ def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]
 def refresh_candidates(
     session: Session, user_id: int, *, source: str = "greenhouse"
 ) -> RefreshStats:
+    """Insert missing candidates and reconcile pending/known ones.
+
+    Candidates in state valid/invalid/rejected are never modified. Commits the
+    session (including any pending work the caller had in it).
+    """
     found = _gather(session, user_id)
-    companies = {
-        ident.lower(): cid
-        for cid, ident in session.execute(
-            select(Company.id, Company.identifier).where(
-                Company.user_id == user_id, Company.source == source
-            )
-        )
-    }
 
     created = known = 0
     if found:
+        companies = {
+            ident.lower(): cid
+            for cid, ident in session.execute(
+                select(Company.id, Company.identifier).where(
+                    Company.user_id == user_id, Company.source == source
+                )
+            )
+        }
         rows = []
         for token, (kind, hint) in found.items():
             cid = companies.get(token)
@@ -90,21 +110,40 @@ def refresh_candidates(
         created = len(states)
         known = sum(1 for s in states if s == "known")
 
-    # Reconcile pre-existing pending/known candidates with current companies.
-    existing = session.scalars(
-        select(DiscoveryCandidate).where(
-            DiscoveryCandidate.user_id == user_id,
-            DiscoveryCandidate.source == source,
-            DiscoveryCandidate.state.in_(("pending", "known")),
+    # Reconcile with set-based UPDATEs guarded by state, so a concurrent move
+    # to valid/invalid/rejected is never overwritten.
+    cand = DiscoveryCandidate
+    scope = (cand.user_id == user_id, cand.source == source)
+    match = (
+        select(Company.id)
+        .where(
+            Company.user_id == user_id,
+            Company.source == source,
+            func.lower(Company.identifier) == cand.token,
         )
+        .order_by(Company.id)
+        .limit(1)
+        .correlate(cand)
+    )
+    newly = session.execute(
+        update(cand)
+        .where(*scope, cand.state == "pending", match.exists())
+        .values(state="known", company_id=match.scalar_subquery())
+        .returning(cand.id)
     ).all()
-    for cand in existing:
-        cid = companies.get(cand.token)
-        if cid is not None:
-            if cand.state != "known":
-                known += 1
-            cand.state, cand.company_id = "known", cid
-        elif cand.state == "known":
-            cand.state, cand.company_id = "pending", None
+    known += len(newly)
+    session.execute(
+        update(cand)
+        .where(
+            *scope, cand.state == "known", match.exists(),
+            cand.company_id.is_distinct_from(match.scalar_subquery()),
+        )
+        .values(company_id=match.scalar_subquery())
+    )
+    session.execute(
+        update(cand)
+        .where(*scope, cand.state == "known", ~match.exists())
+        .values(state="pending", company_id=None)
+    )
     session.commit()
     return RefreshStats(created=created, known=known)
