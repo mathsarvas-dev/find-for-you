@@ -90,6 +90,58 @@ describe("FilterBar", () => {
     expect(screen.queryByText(/Informe a moeda/)).toBeNull();
   });
 
+  it("erro de validação é anunciado (role=alert)", async () => {
+    renderBar();
+    fireEvent.change(screen.getByLabelText("Salário mínimo por ano"), { target: { value: "90000" } });
+    await tick(300);
+    expect(screen.getByRole("alert")).toHaveTextContent("Informe a moeda do salário mínimo");
+  });
+
+  it("avisa a página enquanto há edição esperando o debounce", async () => {
+    const onEditing = vi.fn();
+    render(<FilterBar initial={DEFAULT_FILTERS} onChange={vi.fn()} onEditing={onEditing} />);
+    fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+    expect(onEditing).toHaveBeenLastCalledWith(true);
+    await tick(300);
+    expect(onEditing).toHaveBeenLastCalledWith(false);
+  });
+
+  describe("recolhível", () => {
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    it("no desktop começa aberto, com a contagem de filtros ativos", () => {
+      renderBar({ ...DEFAULT_FILTERS, work_models: ["remote"], countries: ["BR"] });
+      const toggle = screen.getByRole("button", { name: /Filtros/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(toggle).toHaveTextContent("2 ativos");
+      expect(screen.getByRole("checkbox", { name: "remoto" })).toBeVisible();
+    });
+
+    it("em tela de até 560 px começa recolhido; o botão abre e fecha", () => {
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((q: string) => ({
+          matches: q.includes("560"),
+          media: q,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        })),
+      );
+      renderBar();
+      const toggle = screen.getByRole("button", { name: /Filtros/ });
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      expect(toggle).toHaveTextContent("nenhum ativo");
+      expect(screen.queryByRole("checkbox", { name: "remoto" })).toBeNull();
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(screen.getByRole("checkbox", { name: "remoto" })).toBeInTheDocument();
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+    });
+  });
+
   it("salário negativo é recusado", async () => {
     const onChange = renderBar();
     fireEvent.change(screen.getByLabelText("Moeda"), { target: { value: "EUR" } });

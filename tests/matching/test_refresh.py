@@ -1,7 +1,8 @@
 import uuid
+from datetime import timedelta
 
 import pytest
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 
 from rumo_core.db import SessionLocal
 from rumo_core.matching.filters import SearchFilters
@@ -151,7 +152,8 @@ def test_ok_row_reset_when_job_content_changed(env):
     _set_ok(uid, changed, "old-hash")
     with SessionLocal() as s:
         s.execute(update(Match).where(Match.job_id == errored).values(
-            state="erro", error="MatchInvalid", attempts=3))
+            state="erro", error="MatchInvalid", attempts=3,
+            updated_at=func.now() - timedelta(hours=2)))
         s.commit()
     res = _mark(uid)
     assert (res.created, res.reset, res.already_ok) == (0, 2, 0)
@@ -159,6 +161,45 @@ def test_ok_row_reset_when_job_content_changed(env):
         assert m.state == "pendente" and m.attempts == 0 and m.error is None
         assert m.ai_score is None
     assert _mark(uid).reset == 0  # idempotent
+
+
+def _set_erro(job_id, age, content_hash=None):
+    values = dict(state="erro", error="MatchInvalid", attempts=3,
+                  updated_at=func.now() - age)
+    if content_hash is not None:
+        values["content_hash"] = content_hash
+    with SessionLocal() as s:
+        s.execute(update(Match).where(Match.job_id == job_id).values(**values))
+        s.commit()
+
+
+def test_recent_error_row_not_requeued(env):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, 1, e(0))
+    jid = add_job(uid, cid, e(0))
+    _mark(uid)
+    _set_erro(jid, timedelta(minutes=10))
+    res = _mark(uid)
+    assert res.reset == 0
+    [m] = _matches(uid)
+    assert m.state == "erro" and m.attempts == 3
+    # older than the 1 h cool-down: requeued
+    _set_erro(jid, timedelta(minutes=61))
+    assert _mark(uid).reset == 1
+    assert _matches(uid)[0].state == "pendente"
+
+
+def test_recent_error_row_requeued_when_job_changed(env):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, 1, e(0))
+    jid = add_job(uid, cid, e(0))
+    _mark(uid)
+    _set_erro(jid, timedelta(minutes=1), content_hash="old-hash")
+    assert _mark(uid).reset == 1
+    [m] = _matches(uid)
+    assert m.state == "pendente" and m.attempts == 0
 
 
 def test_no_profile_creates_nothing(env):

@@ -256,6 +256,110 @@ describe("JobsPage", () => {
     });
   });
 
+  describe("correções da revisão", () => {
+    it("'salvando…' some mesmo se a lista for recarregada durante o PUT", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1, { state: "pendente" })]));
+      await renderPage();
+      m.list.mockRejectedValueOnce(new ApiError(null, "Sem resposta."));
+      await tick(10_000);
+      expect(screen.getByText("Perdemos contato com a API.")).toBeInTheDocument();
+      let resolvePut!: (f: typeof DEFAULT_FILTERS) => void;
+      m.put.mockReturnValueOnce(new Promise((r) => (resolvePut = r)));
+      fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+      await tick(300);
+      expect(screen.getByText("salvando…")).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+      });
+      await act(async () => resolvePut({ ...DEFAULT_FILTERS, work_models: ["remote"] }));
+      expect(screen.queryByText("salvando…")).toBeNull();
+      // O último salvamento recarrega a lista com os filtros novos.
+      expect(m.list.mock.calls.length).toBeGreaterThanOrEqual(4);
+    });
+
+    it("Avaliar fica desativado com edição pendente ou salvamento em curso", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      const evaluate = () => screen.getByRole("button", { name: "Avaliar melhores vagas" });
+      expect(evaluate()).toBeEnabled();
+      let resolvePut!: (f: typeof DEFAULT_FILTERS) => void;
+      m.put.mockReturnValueOnce(new Promise((r) => (resolvePut = r)));
+      fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+      await tick(0);
+      expect(evaluate()).toBeDisabled();
+      await tick(300);
+      expect(evaluate()).toBeDisabled();
+      await act(async () => resolvePut({ ...DEFAULT_FILTERS, work_models: ["remote"] }));
+      expect(evaluate()).toBeEnabled();
+    });
+
+    it("409 de filtros salvos inválidos: restaura os filtros padrão", async () => {
+      m.profile.mockRejectedValueOnce(
+        new ApiError(409, "Os filtros salvos são inválidos. Salve-os novamente."),
+      );
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      expect(screen.getByRole("alert")).toHaveTextContent("Os filtros salvos são inválidos.");
+      expect(screen.queryByText(/docker compose up -d api/)).toBeNull();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Restaurar filtros padrão" }));
+      });
+      expect(m.put).toHaveBeenCalledWith(DEFAULT_FILTERS);
+      await tick(0);
+      expect(rows()).toHaveLength(1);
+    });
+
+    it("erro de rede mostra a dica do docker; HTTP 500 não", async () => {
+      m.list.mockRejectedValueOnce(new ApiError(null, "Não consegui falar com a API."));
+      const { unmount } = await renderPage();
+      expect(screen.getByText(/docker compose up -d api/)).toBeInTheDocument();
+      unmount();
+      m.list.mockRejectedValueOnce(new ApiError(500, "A API respondeu com erro (HTTP 500)."));
+      await renderPage();
+      expect(screen.getByRole("alert")).toHaveTextContent("HTTP 500");
+      expect(screen.queryByText(/docker compose up -d api/)).toBeNull();
+    });
+
+    it("polling não descarta as linhas carregadas com Mais vagas", async () => {
+      const first = Array.from({ length: 50 }, (_, i) => matchItem(i + 1, i === 0 ? { state: "pendente" } : {}));
+      const second = Array.from({ length: 50 }, (_, i) => matchItem(i + 51));
+      const third = Array.from({ length: 20 }, (_, i) => matchItem(i + 101));
+      m.list.mockResolvedValueOnce(matchPage(first, { total: 120 }));
+      await renderPage();
+      m.list.mockResolvedValueOnce(matchPage(second, { total: 120 }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Mais vagas" }));
+      });
+      m.list.mockResolvedValueOnce(matchPage(third, { total: 120 }));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Mais vagas" }));
+      });
+      expect(rows()).toHaveLength(120);
+      const polled = [...first, ...second].map((it, i) => (i === 0 ? { ...it, state: "ok", ai_score: 95 } : it));
+      m.list.mockResolvedValueOnce(matchPage(polled, { total: 120 }));
+      await tick(10_000);
+      expect(m.list).toHaveBeenLastCalledWith({ status: "open", limit: 100, offset: 0 });
+      expect(rows()).toHaveLength(120);
+      expect(screen.getByText("95")).toBeInTheDocument();
+      expect(screen.getByText("Vaga 120")).toBeInTheDocument();
+    });
+
+    it("Escape fecha o painel de detalhes", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1), matchItem(2)]));
+      await renderPage();
+      await act(async () => {
+        fireEvent.click(rows()[1]);
+      });
+      expect(screen.getByRole("heading", { name: "Vaga 2" })).toBeInTheDocument();
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "Escape" });
+      });
+      expect(screen.queryByRole("heading", { name: "Vaga 2" })).toBeNull();
+      expect(rows()[1]).not.toHaveAttribute("aria-current");
+      expect(rows()[1]).toHaveFocus();
+    });
+  });
+
   describe("Avaliar melhores vagas", () => {
     it("enfileira, recarrega e passa a consultar", async () => {
       m.list.mockResolvedValue(matchPage([matchItem(1)]));

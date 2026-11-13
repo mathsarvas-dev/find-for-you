@@ -24,7 +24,7 @@ from rumo_core.db import get_session
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
 from rumo_core.matching.filters import SearchFilters
 from rumo_core.matching.ranking import (
-    job_vec_score, rank_jobs, usable_profile,
+    current_match, job_vec_score, rank_jobs, usable_profile,
 )
 from rumo_core.matching.refresh import mark_pending
 from rumo_core.models import Company, Job, Match, SearchProfile
@@ -308,7 +308,7 @@ def match_detail(
         raise HTTPException(404, "Vaga não encontrada.")
     r = session.execute(
         select(
-            *_ITEM_COLS, Job.description, Job.salary_min, Job.salary_max,
+            *_ITEM_COLS, Job.description, Job.content_hash, Job.salary_min, Job.salary_max,
             Job.salary_currency, Job.salary_period, Job.last_seen_at, Job.closed_at,
         )
         .join(Company, Company.id == Job.company_id)
@@ -325,6 +325,7 @@ def match_detail(
                 Match.profile_version == version,
             )
         ).first()
+        m = current_match(m, r.content_hash)  # scored on an older posting: none
     return MatchDetail(
         **_item_fields(r), description=r.description,
         salary_min=_f(r.salary_min), salary_max=_f(r.salary_max),

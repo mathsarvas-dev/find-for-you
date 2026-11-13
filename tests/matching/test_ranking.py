@@ -2,7 +2,7 @@ import math
 import uuid
 
 import pytest
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 
 from rumo_core.db import SessionLocal
 from rumo_core.matching.filters import SearchFilters
@@ -218,6 +218,28 @@ def test_orders_by_ai_score_then_vec_score_then_id(env):
     assert [i.job.id for i in page.items] == [
         mid_vec_ai, lo_vec_ai, ai_low, hi_vec, tie_a, tie_b, pending,
     ]
+
+
+@db
+def test_stale_ok_match_treated_as_unscored(env):
+    s, new_user, add_job, add_profile, add_match = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV)])
+    fresh = add_job(uid, cid, embedding=e(1))       # 0.5, ai 40, hash matches
+    stale = add_job(uid, cid, embedding=e(2))       # 0.5, ai 99 but job changed
+    pending = add_job(uid, cid, embedding=e(0))     # 1.0, pendente on old hash
+    add_match(uid, fresh, 1, 40)
+    add_match(uid, stale, 1, 99)
+    add_match(uid, pending, 1, None)
+    s.execute(update(Job).where(Job.id.in_([stale, pending])).values(content_hash="new"))
+    s.commit()
+    s.expire_all()
+    page = rank_jobs(s, uid, F, model_version=MV)
+    assert [i.job.id for i in page.items] == [fresh, pending, stale]
+    by_id = {i.job.id: i for i in page.items}
+    assert by_id[stale].match is None
+    assert by_id[fresh].match.ai_score == 40
+    assert by_id[pending].match is not None and by_id[pending].match.state == "pendente"
 
 
 @db

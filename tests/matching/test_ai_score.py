@@ -1,5 +1,5 @@
 import pytest
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from rumo_core.llm.base import LLMRateLimited
 from rumo_core.matching.ai_score import (
@@ -97,7 +97,7 @@ async def test_valid_draft_becomes_result():
     assert "Python" in res.rationale
     assert len(res.strengths) == 2
     assert res.gaps == ["Não há menção a liderança de equipe"]
-    assert llm.calls[0][1] is MatchDraft
+    assert issubclass(llm.calls[0][1], BaseModel)
 
 
 @pytest.mark.parametrize("bad", [101, -1, 50.5, "80", True])
@@ -362,6 +362,56 @@ async def test_llm_errors_propagate():
     llm = FakeLLM(exc=LLMRateLimited("slow"))
     with pytest.raises(LLMRateLimited):
         await score_job(llm, make_profile(), make_job())
+
+
+class SchemaLLM:
+    """Parses a raw dict with the schema the caller passes, like the provider."""
+
+    def __init__(self, payload):
+        self.payload = payload
+        self.schemas = []
+
+    async def complete_json(self, messages, schema):
+        self.schemas.append(schema)
+        return schema.model_validate(self.payload)
+
+
+async def test_overlong_items_are_dropped_instead_of_failing_the_schema():
+    long_item = "Pipelines em Python " + "x" * 160  # > 160 chars
+    payload = dict(
+        score=70,
+        rationale="O perfil tem experiência sólida com Python e SQL.",
+        strengths=[long_item, "Pipelines em Python e Airflow na Acme"]
+        + ["Python e SQL"] * 6,
+        gaps=["g" * 400, "Não há menção a liderança de equipe"],
+    )
+    with pytest.raises(ValidationError):
+        MatchDraft.model_validate(payload)  # the final bound is unchanged
+    llm = SchemaLLM(payload)
+    res = await score_job(llm, make_profile(), make_job())
+    assert llm.schemas[0] is not MatchDraft
+    assert long_item not in res.strengths
+    assert res.strengths[0] == "Pipelines em Python e Airflow na Acme"
+    assert len(res.strengths) <= 5
+    assert res.gaps == ["Não há menção a liderança de equipe"]
+
+
+async def test_overlong_rationale_cut_at_sentence_boundary():
+    first = "O perfil tem experiência sólida com Python e SQL."
+    payload = dict(
+        score=70,
+        rationale=first + " " + "Pipelines em Python e Airflow na Acme. " * 20,
+        strengths=["Pipelines em Python e Airflow na Acme"],
+        gaps=[],
+    )
+    res = await score_job(SchemaLLM(payload), make_profile(), make_job())
+    assert res.rationale.startswith(first)
+    assert len(res.rationale) <= 600 and res.rationale.endswith(".")
+
+    # one endless sentence: nothing safe to keep
+    payload["rationale"] = "Python " * 120
+    with pytest.raises(MatchInvalid):
+        await score_job(SchemaLLM(payload), make_profile(), make_job())
 
 
 async def test_score_job_invalid_draft_raises_match_invalid():

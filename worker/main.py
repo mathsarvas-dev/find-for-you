@@ -82,7 +82,8 @@ def build_embed_jobs_job(settings, session_factory, embedder):
 
 
 def build_score_matches_job(settings, session_factory, llm):
-    """score_pending_matches bound to match_batch / match_max_attempts."""
+    """score_pending_matches bound to the match_* settings (batch, attempts,
+    rolling-24h cap, per-call timeout)."""
     from functools import partial
 
     from worker.match_jobs import score_pending_matches
@@ -90,6 +91,8 @@ def build_score_matches_job(settings, session_factory, llm):
     return partial(
         score_pending_matches, session_factory, llm,
         batch=settings.match_batch, max_attempts=settings.match_max_attempts,
+        daily_limit=settings.match_daily_limit,
+        call_timeout=settings.match_call_timeout,
     )
 
 
