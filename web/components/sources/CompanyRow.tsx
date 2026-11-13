@@ -65,6 +65,11 @@ export function CompanyRow({ company: c, now, onChange }: CompanyRowProps) {
         <p className="company__title">
           <span className="company__name">{c.name}</span>{" "}
           <span className="mono company__token">{c.identifier}</span>
+          {c.origin === "auto" && (
+            <span className="chip chip--auto" title="Adicionada pela descoberta automática">
+              automática
+            </span>
+          )}
         </p>
         <p className="company__meta">
           <span className="chip" data-state={c.active ? "on" : "off"}>

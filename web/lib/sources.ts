@@ -15,7 +15,11 @@ export type Company = {
   last_error: string | null;
   consecutive_failures: number;
   open_jobs: number;
+  /** "auto": adicionada pela descoberta automática. */
+  origin: CompanyOrigin;
 };
+
+export type CompanyOrigin = "manual" | "auto";
 
 export type NewCompany = {
   source: "greenhouse";
@@ -81,8 +85,9 @@ const json = (method: string, body: unknown): RequestInit => ({
   body: JSON.stringify(body),
 });
 
-export async function listCompanies(): Promise<Company[]> {
-  return (await request<Company[]>("/companies")).body;
+export async function listCompanies(origin?: CompanyOrigin): Promise<Company[]> {
+  const path = origin ? `/companies?${new URLSearchParams({ origin })}` : "/companies";
+  return (await request<Company[]>(path)).body;
 }
 
 /** Mensagens para quando o servidor não manda um `detail` em texto. */

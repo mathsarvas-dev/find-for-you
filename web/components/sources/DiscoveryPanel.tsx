@@ -1,0 +1,503 @@
+"use client";
+
+import { useCallback, useEffect, useId, useRef, useState } from "react";
+import {
+  CANDIDATES_PAGE_SIZE,
+  MAX_TARGET_LEN,
+  MAX_TARGETS,
+  candidateStateLabel,
+  discoveryCounters,
+  getDiscovery,
+  listCandidates,
+  originKindLabel,
+  parseTargets,
+  putDiscovery,
+  type Candidate,
+  type DiscoveryState,
+} from "@/lib/discovery";
+import { ApiError } from "@/lib/profile";
+
+const POLL_MS = 10_000;
+
+type DiscoveryPanelProps = {
+  /** O número de empresas automáticas mudou: a lista de empresas deve ser relida. */
+  onCompaniesChanged?: () => void;
+};
+
+type Phase =
+  | { name: "loading" }
+  | { name: "load-error"; message: string }
+  | { name: "ready"; data: DiscoveryState };
+
+type SaveState =
+  | { name: "idle" }
+  | { name: "saving" }
+  | { name: "saved" }
+  | { name: "invalid"; message: string }
+  | { name: "error"; message: string };
+
+type Candidates =
+  | { name: "loading" }
+  | { name: "error"; message: string }
+  | {
+      name: "ready";
+      total: number;
+      items: Candidate[];
+      more: "idle" | "loading";
+      moreError: string | null;
+    };
+
+const message = (err: unknown) =>
+  err instanceof ApiError ? err.message : "Algo deu errado ao falar com a API. Tente de novo.";
+
+const STATE_TONE: Record<string, "on" | "off" | "wait"> = {
+  valid: "on",
+  pending: "wait",
+};
+
+export function DiscoveryPanel({ onCompaniesChanged }: DiscoveryPanelProps) {
+  const [phase, setPhase] = useState<Phase>({ name: "loading" });
+  /** O que o interruptor mostra; difere de `data.enabled` só enquanto o PUT está em voo. */
+  const [enabled, setEnabled] = useState(true);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState<"toggle" | "save" | null>(null);
+  const [save, setSave] = useState<SaveState>({ name: "idle" });
+  const [toggleError, setToggleError] = useState<string | null>(null);
+  const [pollError, setPollError] = useState<string | null>(null);
+  const [open, setOpen] = useState(false);
+  const [candidates, setCandidates] = useState<Candidates>({ name: "loading" });
+
+  const mounted = useRef(true);
+  const inFlight = useRef(false);
+  /** Cada leitura ou gravação pega um número; só a mais recente pode aplicar a resposta. */
+  const seq = useRef(0);
+  const listSeq = useRef(0);
+  const knownAuto = useRef<number | null>(null);
+  const onChangedRef = useRef(onCompaniesChanged);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const switchHintId = useId();
+  const fieldId = useId();
+  const hintId = useId();
+  const errorId = useId();
+  const listId = useId();
+
+  useEffect(() => {
+    onChangedRef.current = onCompaniesChanged;
+  }, [onCompaniesChanged]);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  const apply = useCallback((next: DiscoveryState) => {
+    const before = knownAuto.current;
+    knownAuto.current = next.auto_companies;
+    setEnabled(next.enabled);
+    setPhase({ name: "ready", data: next });
+    if (before !== null && before !== next.auto_companies) onChangedRef.current?.();
+  }, []);
+
+  /** Primeira leitura (ou retentativa). Preenche o campo com a lista salva. Nunca rejeita. */
+  const fetchInitial = useCallback(async () => {
+    const my = ++seq.current;
+    try {
+      const next = await getDiscovery();
+      if (!mounted.current || my !== seq.current) return;
+      setDraft(next.target_companies.join("\n"));
+      apply(next);
+    } catch (err) {
+      if (mounted.current && my === seq.current) setPhase({ name: "load-error", message: message(err) });
+    }
+  }, [apply]);
+
+  useEffect(() => {
+    // A API só é alcançável do navegador.
+    void fetchInitial();
+  }, [fetchInitial]);
+
+  function reload() {
+    setPhase({ name: "loading" });
+    void fetchInitial();
+  }
+
+  const data = phase.name === "ready" ? phase.data : null;
+  const atCap = data !== null && data.auto_companies >= data.max_auto;
+  // Só vale consultar se a fila pode andar: ligada, com pendentes e abaixo do teto.
+  const polling =
+    data !== null && data.enabled && data.pending > 0 && !atCap && pollError === null;
+
+  useEffect(() => {
+    if (!polling) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      // Gravação em voo: a resposta dela manda; tenta de novo no próximo ciclo.
+      if (inFlight.current) {
+        timer = setTimeout(poll, POLL_MS);
+        return;
+      }
+      const my = ++seq.current;
+      try {
+        const next = await getDiscovery();
+        if (cancelled) return;
+        if (my === seq.current) apply(next);
+        timer = setTimeout(poll, POLL_MS);
+      } catch (err) {
+        if (!cancelled && my === seq.current) setPollError(message(err));
+      }
+    };
+    timer = setTimeout(poll, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [polling, apply]);
+
+  async function resumePolling() {
+    const my = ++seq.current;
+    try {
+      const next = await getDiscovery();
+      if (!mounted.current || my !== seq.current) return;
+      setPollError(null);
+      apply(next);
+    } catch (err) {
+      if (mounted.current && my === seq.current) setPollError(message(err));
+    }
+  }
+
+  async function toggleEnabled() {
+    if (inFlight.current || !data) return;
+    const previous = enabled;
+    const next = !previous;
+    inFlight.current = true;
+    const my = ++seq.current;
+    setBusy("toggle");
+    setEnabled(next);
+    setToggleError(null);
+    try {
+      // Manda a lista já salva, não o rascunho do campo.
+      const res = await putDiscovery({ enabled: next, target_companies: data.target_companies });
+      if (mounted.current && my === seq.current) apply(res);
+    } catch (err) {
+      if (mounted.current) {
+        setEnabled(previous);
+        setToggleError(message(err));
+      }
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(null);
+    }
+  }
+
+  async function saveTargets() {
+    if (inFlight.current || !data) return;
+    const parsed = parseTargets(draft);
+    if (!parsed.ok) {
+      setSave({ name: "invalid", message: parsed.error });
+      textareaRef.current?.focus();
+      return;
+    }
+    inFlight.current = true;
+    const my = ++seq.current;
+    setBusy("save");
+    setSave({ name: "saving" });
+    try {
+      const res = await putDiscovery({ enabled: data.enabled, target_companies: parsed.names });
+      if (!mounted.current) return;
+      if (my === seq.current) apply(res);
+      setDraft(res.target_companies.join("\n"));
+      setSave({ name: "saved" });
+    } catch (err) {
+      if (mounted.current) setSave({ name: "error", message: message(err) });
+    } finally {
+      inFlight.current = false;
+      if (mounted.current) setBusy(null);
+    }
+  }
+
+  async function fetchCandidates() {
+    const my = ++listSeq.current;
+    setCandidates({ name: "loading" });
+    try {
+      const page = await listCandidates({ limit: CANDIDATES_PAGE_SIZE, offset: 0 });
+      if (!mounted.current || my !== listSeq.current) return;
+      setCandidates({ name: "ready", total: page.total, items: page.items, more: "idle", moreError: null });
+    } catch (err) {
+      if (mounted.current && my === listSeq.current) setCandidates({ name: "error", message: message(err) });
+    }
+  }
+
+  async function loadMore() {
+    if (candidates.name !== "ready" || candidates.more === "loading") return;
+    const my = listSeq.current;
+    const offset = candidates.items.length;
+    setCandidates({ ...candidates, more: "loading", moreError: null });
+    try {
+      const page = await listCandidates({ limit: CANDIDATES_PAGE_SIZE, offset });
+      if (!mounted.current || my !== listSeq.current) return;
+      setCandidates((c) =>
+        c.name === "ready"
+          ? { name: "ready", total: page.total, items: [...c.items, ...page.items], more: "idle", moreError: null }
+          : c,
+      );
+    } catch (err) {
+      if (!mounted.current || my !== listSeq.current) return;
+      setCandidates((c) => (c.name === "ready" ? { ...c, more: "idle", moreError: message(err) } : c));
+    }
+  }
+
+  function toggleCandidates() {
+    if (open) {
+      // Descarta respostas em voo da lista fechada.
+      listSeq.current++;
+      setOpen(false);
+      return;
+    }
+    setOpen(true);
+    void fetchCandidates();
+  }
+
+  const fieldError = save.name === "invalid" || save.name === "error" ? save.message : null;
+
+  return (
+    <section className="panel discovery" aria-labelledby="descoberta">
+      <div className="panel__head">
+        <h2 id="descoberta">Descoberta automática</h2>
+        {data && <span className="mono">{discoveryCounters(data)}</span>}
+      </div>
+
+      {phase.name === "loading" && (
+        <div className="panel__body stack" aria-busy="true" aria-label="Carregando a descoberta automática">
+          <p className="muted">Buscando as preferências de descoberta…</p>
+          <span className="skeleton" aria-hidden="true" />
+        </div>
+      )}
+
+      {phase.name === "load-error" && (
+        <>
+          <div className="notice notice--top" role="alert">
+            <strong>Não deu para carregar a descoberta automática.</strong>
+            <p>{phase.message}</p>
+          </div>
+          <div className="panel__foot">
+            <span>As empresas cadastradas continuam sendo coletadas.</span>
+            <button type="button" className="button" onClick={reload}>
+              Tentar de novo
+            </button>
+          </div>
+        </>
+      )}
+
+      {data && (
+        <>
+          <div className="panel__body discovery__body">
+            <div className="discovery__switch">
+              <label className="switch">
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={enabled}
+                  disabled={busy !== null}
+                  aria-busy={busy === "toggle" || undefined}
+                  aria-describedby={switchHintId}
+                  onChange={() => void toggleEnabled()}
+                />
+                <span className="switch__track" aria-hidden="true" />
+                <span className="switch__label">Descobrir empresas automaticamente</span>
+              </label>
+              <p className="field__hint" id={switchHintId}>
+                {enabled
+                  ? "Procura quadros no Greenhouse a partir do seu currículo, de um catálogo e da lista abaixo. Os que têm vagas entram em Empresas vigiadas."
+                  : "Desligada: nada novo é procurado. As empresas automáticas já adicionadas continuam vigiadas."}{" "}
+                <span className="mono">
+                  {`${data.auto_companies} de ${data.max_auto} automáticas`}
+                </span>
+              </p>
+              {toggleError && (
+                <p className="field__error" role="alert">
+                  {toggleError}
+                </p>
+              )}
+              {atCap && data.enabled && data.pending > 0 && (
+                <p className="discovery__cap">
+                  Limite de {data.max_auto} empresas automáticas atingido; os candidatos na fila
+                  esperam até alguma ser removida.
+                </p>
+              )}
+            </div>
+
+            <form
+              className="discovery__targets"
+              noValidate
+              onSubmit={(e) => {
+                e.preventDefault();
+                void saveTargets();
+              }}
+            >
+              <div className="field">
+                <label className="field__label" htmlFor={fieldId}>
+                  Empresas que você quer acompanhar
+                </label>
+                <textarea
+                  ref={textareaRef}
+                  id={fieldId}
+                  className="input discovery__textarea"
+                  rows={5}
+                  spellCheck={false}
+                  autoComplete="off"
+                  placeholder={"Nubank\nGitLab"}
+                  value={draft}
+                  aria-describedby={fieldError ? `${hintId} ${errorId}` : hintId}
+                  aria-invalid={save.name === "invalid" || undefined}
+                  onChange={(e) => {
+                    setDraft(e.target.value);
+                    if (save.name !== "saving") setSave({ name: "idle" });
+                  }}
+                />
+                <p className="field__hint" id={hintId}>
+                  Uma por linha, até {MAX_TARGETS} nomes de {MAX_TARGET_LEN} caracteres. Repetidos
+                  são ignorados.
+                </p>
+              </div>
+              {fieldError && (
+                <p className="field__error discovery__msg" id={errorId} role="alert">
+                  {fieldError}
+                </p>
+              )}
+              <div className="discovery__foot">
+                <p className="muted discovery__status" role="status" aria-live="polite">
+                  {save.name === "saved" ? "Lista salva." : ""}
+                </p>
+                <button
+                  type="submit"
+                  className="button"
+                  disabled={busy !== null}
+                  aria-busy={busy === "save" || undefined}
+                >
+                  {busy === "save" ? "Salvando…" : "Salvar"}
+                </button>
+              </div>
+            </form>
+          </div>
+
+          {pollError && (
+            <div className="notice sources__notice" role="alert">
+              <strong>Parei de acompanhar a fila.</strong>
+              <p>{pollError}</p>
+              <div className="actions">
+                <button
+                  type="button"
+                  className="button button--secondary"
+                  onClick={() => void resumePolling()}
+                >
+                  Retomar
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="discovery__candidates">
+            <button
+              type="button"
+              className="link-button"
+              aria-expanded={open}
+              aria-controls={listId}
+              onClick={toggleCandidates}
+            >
+              {open ? "Esconder candidatos" : "Ver candidatos"}
+            </button>
+            {polling && (
+              <span className="muted discovery__polling">
+                A fila anda sozinha; a página confere a cada 10 segundos.
+              </span>
+            )}
+          </div>
+
+          {open && (
+            <div id={listId} className="discovery__list">
+              {candidates.name === "loading" && (
+                <p className="muted discovery__list-msg" aria-busy="true">
+                  Buscando candidatos…
+                </p>
+              )}
+              {candidates.name === "error" && (
+                <div className="notice sources__notice" role="alert">
+                  <strong>Não deu para listar os candidatos.</strong>
+                  <p>{candidates.message}</p>
+                  <div className="actions">
+                    <button
+                      type="button"
+                      className="button button--secondary"
+                      onClick={() => void fetchCandidates()}
+                    >
+                      Tentar de novo
+                    </button>
+                  </div>
+                </div>
+              )}
+              {candidates.name === "ready" &&
+                (candidates.items.length === 0 ? (
+                  <p className="muted discovery__list-msg">
+                    Nenhum candidato ainda. A primeira busca sai do seu currículo e do catálogo
+                    alguns minutos depois de ligar a descoberta.
+                  </p>
+                ) : (
+                  <>
+                    <ul className="candidate-list" aria-label="Candidatos">
+                      {candidates.items.map((c, i) => (
+                        <CandidateRow key={`${c.token}-${i}`} candidate={c} />
+                      ))}
+                    </ul>
+                    <div className="discovery__list-foot">
+                      <span className="mono" aria-live="polite">
+                        {`${candidates.items.length} de ${candidates.total}`}
+                      </span>
+                      {candidates.moreError && (
+                        <span className="field__error" role="alert">
+                          {candidates.moreError}
+                        </span>
+                      )}
+                      {candidates.items.length < candidates.total && (
+                        <button
+                          type="button"
+                          className="button button--secondary"
+                          disabled={candidates.more === "loading"}
+                          aria-busy={candidates.more === "loading" || undefined}
+                          onClick={() => void loadMore()}
+                        >
+                          {candidates.more === "loading" ? "Carregando…" : "Carregar mais"}
+                        </button>
+                      )}
+                    </div>
+                  </>
+                ))}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+function CandidateRow({ candidate: c }: { candidate: Candidate }) {
+  const tone = STATE_TONE[c.state] ?? "off";
+  return (
+    <li className="candidate">
+      <p className="candidate__title">
+        {c.name_hint && <span className="candidate__name">{c.name_hint}</span>}
+        <span className="mono candidate__token">{c.token}</span>
+      </p>
+      <p className="candidate__meta">
+        <span className="chip" data-state={tone}>
+          {candidateStateLabel(c.state)}
+        </span>
+        <span>{`origem: ${originKindLabel(c.origin_kind)}`}</span>
+      </p>
+      {c.last_error && <p className="candidate__error">{c.last_error}</p>}
+    </li>
+  );
+}

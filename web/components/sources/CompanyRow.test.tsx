@@ -33,6 +33,7 @@ const healthy: Company = {
   last_error: null,
   consecutive_failures: 0,
   open_jobs: 42,
+  origin: "manual",
 };
 
 function renderRow(company: Company, onChange = vi.fn(), now = NOW) {
@@ -54,6 +55,21 @@ describe("CompanyRow", () => {
     expect(screen.getByText("42 vagas abertas")).toBeInTheDocument();
     expect(screen.getByText("última coleta: há 5 min")).toBeInTheDocument();
     expect(screen.queryByText(/Falha na coleta/)).toBeNull();
+  });
+
+  it("empresa manual não tem o selo 'automática'", () => {
+    renderRow(healthy);
+    expect(screen.queryByText("automática")).toBeNull();
+  });
+
+  it("empresa da descoberta automática mostra o selo 'automática'", () => {
+    renderRow({ ...healthy, origin: "auto" });
+    expect(screen.getByText("automática")).toBeInTheDocument();
+  });
+
+  it("origem desconhecida não ganha selo", () => {
+    renderRow({ ...healthy, origin: "outra" as never });
+    expect(screen.queryByText("automática")).toBeNull();
   });
 
   it("1 vaga no singular; nunca coletada e pendente", () => {

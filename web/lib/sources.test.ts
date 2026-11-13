@@ -44,6 +44,7 @@ const company: Company = {
   last_error: null,
   consecutive_failures: 0,
   open_jobs: 0,
+  origin: "manual",
 };
 
 describe("listCompanies", () => {
@@ -51,6 +52,12 @@ describe("listCompanies", () => {
     const fetchMock = mockFetch(async () => jsonResponse(200, [company]));
     await expect(listCompanies()).resolves.toEqual([company]);
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/companies");
+  });
+
+  it("filtra por origem na query string", async () => {
+    const fetchMock = mockFetch(async () => jsonResponse(200, []));
+    await listCompanies("auto");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/companies?origin=auto");
   });
 });
 
