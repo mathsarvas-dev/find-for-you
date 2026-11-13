@@ -32,6 +32,15 @@ export default function StatusPage() {
           Abrir fontes
         </Link>
       </section>
+      <section className="next-step next-step--follow" aria-labelledby="vagas">
+        <p>
+          <strong id="vagas">Vagas</strong>: veja as vagas coletadas ordenadas pela nota contra o seu
+          perfil, filtre e leia a avaliação da IA.
+        </p>
+        <Link className="button button--secondary" href="/jobs">
+          Abrir vagas
+        </Link>
+      </section>
     </main>
   );
 }

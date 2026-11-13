@@ -4,8 +4,8 @@ from pgvector.sqlalchemy import Vector
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Index, Numeric, String, Text,
-    UniqueConstraint, func,
+    Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Numeric,
+    String, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -268,3 +268,65 @@ class Job(UserScopedMixin, TimestampMixin, Base):
     fill_attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
     model_version: Mapped[str | None] = mapped_column(String(128))
+
+
+class SearchProfile(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "search_profiles"
+    __table_args__ = (
+        UniqueConstraint("user_id", "name", name="uq_search_profiles_user_name"),
+        Index(
+            "uq_search_profiles_one_default", "user_id", unique=True,
+            postgresql_where=text("is_default"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    filters: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    query_text: Mapped[str | None] = mapped_column(Text)
+    query_embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+
+
+class Match(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "matches"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "job_id", "profile_version",
+            name="uq_matches_user_job_version",
+        ),
+        Index(
+            "ix_matches_user_version_score",
+            "user_id", "profile_version", text("ai_score DESC"),
+        ),
+        CheckConstraint(
+            "state in ('pendente','ok','erro')", name="ck_matches_state"
+        ),
+        CheckConstraint(
+            "ai_score between 0 and 100", name="ck_matches_ai_score"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_version: Mapped[int] = mapped_column(nullable=False)
+    vec_score: Mapped[float] = mapped_column(Float, nullable=False)
+    ai_score: Mapped[int | None] = mapped_column()
+    rationale: Mapped[str | None] = mapped_column(Text)
+    strengths: Mapped[list | None] = mapped_column(JSONB)
+    gaps: Mapped[list | None] = mapped_column(JSONB)
+    # pendente | ok | erro
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pendente"
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # hash of the job content at scoring time
+    content_hash: Mapped[str] = mapped_column(String(64), nullable=False)

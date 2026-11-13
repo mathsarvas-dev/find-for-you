@@ -81,6 +81,62 @@ def build_embed_jobs_job(settings, session_factory, embedder):
     )
 
 
+def build_score_matches_job(settings, session_factory, llm):
+    """score_pending_matches bound to match_batch / match_max_attempts."""
+    from functools import partial
+
+    from worker.match_jobs import score_pending_matches
+
+    return partial(
+        score_pending_matches, session_factory, llm,
+        batch=settings.match_batch, max_attempts=settings.match_max_attempts,
+    )
+
+
+def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
+    """All worker jobs, in priority order (run_due runs them in this order)."""
+    from functools import partial
+
+    from worker.collect_jobs import fill_missing_job_fields
+    from worker.interview_jobs import process_interview_turns
+    from worker.jobs import embed_pending_chunks, process_pending_imports
+
+    registry = JobRegistry()
+    registry.register("heartbeat", heartbeat, 10)
+    registry.register(
+        "extract_imports",
+        partial(process_pending_imports, session_factory, llm, settings.extract_max_chars),
+        3,
+    )
+    registry.register(
+        "interview_turns", partial(process_interview_turns, session_factory, llm), 3
+    )
+    # every 60 s with a small batch: the Groq rate limiter is shared with the
+    # interview, whose turns keep priority (registered after interview_turns)
+    registry.register(
+        "fill_missing_job_fields",
+        partial(fill_missing_job_fields, session_factory, llm, batch=settings.llm_fill_batch),
+        60,
+    )
+    # same limiter, after the field fill (filters use the filled fields)
+    registry.register(
+        "score_matches", build_score_matches_job(settings, session_factory, llm), 60
+    )
+    registry.register(
+        "embed_chunks",
+        partial(embed_pending_chunks, session_factory, embedder, settings.embed_batch_size),
+        5,
+    )
+    # after embed_chunks (profile first); one small batch per tick so a long
+    # backlog (~0.4 texts/s on CPU) never starves the other jobs
+    registry.register(
+        "embed_jobs", build_embed_jobs_job(settings, session_factory, embedder), 5
+    )
+    # every 60 s; per-company next_run_at governs the real collection frequency
+    registry.register("collect_companies", build_collect_job(settings, session_factory), 60)
+    return registry
+
+
 async def retry_startup(
     fn: Callable[[], object],
     attempts: int = 10,
@@ -101,15 +157,12 @@ async def retry_startup(
 
 async def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
-    from functools import partial
-
     from rumo_core.config import get_settings
     from rumo_core.db import SessionLocal
     from rumo_core.embeddings.bge_m3 import BgeM3Embedder
     from rumo_core.sources import aclose_sources
-    from worker.collect_jobs import fill_missing_job_fields
-    from worker.interview_jobs import process_interview_turns, reset_working_sessions
-    from worker.jobs import embed_pending_chunks, process_pending_imports, reset_stuck_imports
+    from worker.interview_jobs import reset_working_sessions
+    from worker.jobs import reset_stuck_imports
 
     settings = get_settings()
     reset = await retry_startup(lambda: reset_stuck_imports(SessionLocal))
@@ -120,33 +173,7 @@ async def main() -> None:
         logger.info("reset %d working interview sessions to generating", reset_iv)
     llm = build_llm(settings)
     embedder = BgeM3Embedder()  # model loads lazily, only when chunks are pending
-    registry = JobRegistry()
-    registry.register("heartbeat", heartbeat, 10)
-    registry.register(
-        "extract_imports",
-        partial(process_pending_imports, SessionLocal, llm, settings.extract_max_chars),
-        3,
-    )
-    registry.register(
-        "interview_turns", partial(process_interview_turns, SessionLocal, llm), 3
-    )
-    # every 60 s with a small batch: the Groq rate limiter is shared with the
-    # interview, whose turns keep priority (registered after interview_turns)
-    registry.register(
-        "fill_missing_job_fields",
-        partial(fill_missing_job_fields, SessionLocal, llm, batch=settings.llm_fill_batch),
-        60,
-    )
-    registry.register(
-        "embed_chunks",
-        partial(embed_pending_chunks, SessionLocal, embedder, settings.embed_batch_size),
-        5,
-    )
-    # after embed_chunks (profile first); one small batch per tick so a long
-    # backlog (~0.4 texts/s on CPU) never starves the other jobs
-    registry.register("embed_jobs", build_embed_jobs_job(settings, SessionLocal, embedder), 5)
-    # every 60 s; per-company next_run_at governs the real collection frequency
-    registry.register("collect_companies", build_collect_job(settings, SessionLocal), 60)
+    registry = build_registry(settings, SessionLocal, llm, embedder)
     logger.info("worker started")
     try:
         while True:
