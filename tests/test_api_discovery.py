@@ -116,6 +116,11 @@ def test_put_rejects_bad_names_and_too_many(env, as_user):
     for body in bad:
         r = c.put("/discovery", json=body)
         assert r.status_code == 422, body
+    for raw in ('"a\\ud800b"', '"a\\u200bb"', '"a\\u202eb"', '"a\\u2028b"'):
+        r = c.put("/discovery", content=(
+            '{"enabled": true, "target_companies": [' + raw + ']}'
+        ), headers={"content-type": "application/json"})
+        assert r.status_code == 422, raw
     # boundaries are accepted
     r = c.put("/discovery", json={**ok, "target_companies": ["x" * 80]})
     assert r.status_code == 200
@@ -124,6 +129,19 @@ def test_put_rejects_bad_names_and_too_many(env, as_user):
     # the cap applies to the submitted list, before deduplication
     assert c.put("/discovery", json={
         **ok, "target_companies": ["a"] * 51}).status_code == 422
+
+
+@pytest.mark.db
+def test_put_normalizes_nfc_before_dedupe_and_length(env, as_user):
+    new_user, _, _ = env
+    c = as_user(new_user())
+    nfd = "Café"
+    r = c.put("/discovery", json={"enabled": True, "target_companies": [nfd, "Café"]})
+    assert r.status_code == 200, r.text
+    assert r.json()["target_companies"] == ["Café"]
+    # 80 NFC chars written decomposed (160 code points) still fit
+    r = c.put("/discovery", json={"enabled": True, "target_companies": ["é" * 80]})
+    assert r.status_code == 200, r.text
 
 
 @pytest.mark.db
@@ -165,7 +183,7 @@ def test_candidates_list_filters_state_and_paginates(env, as_user):
     assert j["total"] == 2 and [i["token"] for i in j["items"]] == ["t1", "t3"]
     j = c.get("/discovery/candidates", params={"limit": 2, "offset": 1}).json()
     assert j["total"] == 4 and [i["token"] for i in j["items"]] == ["t2", "t3"]
-    for params in ({"state": "bogus"}, {"limit": 0}, {"limit": 101}, {"offset": -1}):
+    for params in ({"state": "bogus"}, {"limit": 0}, {"limit": 101}, {"offset": -1}, {"offset": 1_000_001}):
         assert c.get("/discovery/candidates", params=params).status_code == 422
 
 

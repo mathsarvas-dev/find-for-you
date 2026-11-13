@@ -40,6 +40,8 @@ def _json_safe(value):
     """Replace non-finite floats (not valid JSON) with their string form."""
     if isinstance(value, float) and not math.isfinite(value):
         return str(value)
+    if isinstance(value, str):  # lone surrogates cannot be encoded as UTF-8
+        return value.encode("utf-8", "replace").decode("utf-8")
     if isinstance(value, dict):
         return {k: _json_safe(v) for k, v in value.items()}
     if isinstance(value, (list, tuple)):

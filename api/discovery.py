@@ -17,12 +17,15 @@ from sqlalchemy.orm import Session
 from api.deps import current_user_id
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
+from rumo_core.discovery.candidates import MAX_TARGET_LEN, MAX_TARGETS
 from rumo_core.models import Company, DiscoveryCandidate, UserPreference
 
 router = APIRouter(tags=["discovery"])
 
-MAX_TARGETS = 50
-MAX_NAME_LEN = 80
+MAX_NAME_LEN = MAX_TARGET_LEN
+
+# control, format/bidi and lone-surrogate characters
+_FORBIDDEN_CATEGORIES = {"Cc", "Cf", "Cs"}
 
 CandidateState = Literal["pending", "valid", "invalid", "known", "rejected"]
 
@@ -39,14 +42,18 @@ class DiscoveryIn(BaseModel):
         out: list[str] = []
         seen: set[str] = set()
         for raw in v:
-            name = raw.strip()
+            name = unicodedata.normalize("NFC", raw).strip()
             if not name:
                 raise ValueError("Nome de empresa não pode ser vazio.")
             if len(name) > MAX_NAME_LEN:
                 raise ValueError(
                     f"Nome de empresa deve ter no máximo {MAX_NAME_LEN} caracteres."
                 )
-            if any(unicodedata.category(ch) == "Cc" for ch in name):
+            if any(
+                unicodedata.category(ch) in _FORBIDDEN_CATEGORIES
+                or ch in "  "
+                for ch in name
+            ):
                 raise ValueError("Nome de empresa contém caracteres inválidos.")
             key = name.casefold()
             if key in seen:
@@ -142,7 +149,7 @@ def put_discovery(
 def list_candidates(
     state: CandidateState | None = None,
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0),
+    offset: int = Query(0, ge=0, le=1_000_000),
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
 ):
