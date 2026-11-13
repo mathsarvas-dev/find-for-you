@@ -1,0 +1,662 @@
+[
+ {
+  "token": "gitlab",
+  "name": "GitLab"
+ },
+ {
+  "token": "anthropic",
+  "name": "Anthropic"
+ },
+ {
+  "token": "airbnb",
+  "name": "Airbnb"
+ },
+ {
+  "token": "stripe",
+  "name": "Stripe"
+ },
+ {
+  "token": "figma",
+  "name": "Figma"
+ },
+ {
+  "token": "discord",
+  "name": "Discord"
+ },
+ {
+  "token": "dropbox",
+  "name": "Dropbox"
+ },
+ {
+  "token": "pinterest",
+  "name": "Pinterest"
+ },
+ {
+  "token": "reddit",
+  "name": "Reddit"
+ },
+ {
+  "token": "lyft",
+  "name": "Lyft"
+ },
+ {
+  "token": "doordash",
+  "name": "DoorDash"
+ },
+ {
+  "token": "instacart",
+  "name": "Instacart"
+ },
+ {
+  "token": "robinhood",
+  "name": "Robinhood"
+ },
+ {
+  "token": "coinbase",
+  "name": "Coinbase"
+ },
+ {
+  "token": "brex",
+  "name": "Brex"
+ },
+ {
+  "token": "plaid",
+  "name": "Plaid"
+ },
+ {
+  "token": "asana",
+  "name": "Asana"
+ },
+ {
+  "token": "twilio",
+  "name": "Twilio"
+ },
+ {
+  "token": "datadog",
+  "name": "Datadog"
+ },
+ {
+  "token": "cloudflare",
+  "name": "Cloudflare"
+ },
+ {
+  "token": "mongodb",
+  "name": "MongoDB"
+ },
+ {
+  "token": "elastic",
+  "name": "Elastic"
+ },
+ {
+  "token": "hashicorp",
+  "name": "HashiCorp"
+ },
+ {
+  "token": "okta",
+  "name": "Okta"
+ },
+ {
+  "token": "samsara",
+  "name": "Samsara"
+ },
+ {
+  "token": "toast",
+  "name": "Toast"
+ },
+ {
+  "token": "squarespace",
+  "name": "Squarespace"
+ },
+ {
+  "token": "webflow",
+  "name": "Webflow"
+ },
+ {
+  "token": "vercel",
+  "name": "Vercel"
+ },
+ {
+  "token": "netlify",
+  "name": "Netlify"
+ },
+ {
+  "token": "gusto",
+  "name": "Gusto"
+ },
+ {
+  "token": "rippling",
+  "name": "Rippling"
+ },
+ {
+  "token": "carta",
+  "name": "Carta"
+ },
+ {
+  "token": "affirm",
+  "name": "Affirm"
+ },
+ {
+  "token": "chime",
+  "name": "Chime"
+ },
+ {
+  "token": "sofi",
+  "name": "SoFi"
+ },
+ {
+  "token": "block",
+  "name": "Block"
+ },
+ {
+  "token": "airtable",
+  "name": "Airtable"
+ },
+ {
+  "token": "notion",
+  "name": "Notion"
+ },
+ {
+  "token": "canva",
+  "name": "Canva"
+ },
+ {
+  "token": "duolingo",
+  "name": "Duolingo"
+ },
+ {
+  "token": "peloton",
+  "name": "Peloton"
+ },
+ {
+  "token": "strava",
+  "name": "Strava"
+ },
+ {
+  "token": "spotify",
+  "name": "Spotify"
+ },
+ {
+  "token": "twitch",
+  "name": "Twitch"
+ },
+ {
+  "token": "roblox",
+  "name": "Roblox"
+ },
+ {
+  "token": "unity3d",
+  "name": "Unity"
+ },
+ {
+  "token": "epicgames",
+  "name": "Epic Games"
+ },
+ {
+  "token": "riotgames",
+  "name": "Riot Games"
+ },
+ {
+  "token": "scopely",
+  "name": "Scopely"
+ },
+ {
+  "token": "zynga",
+  "name": "Zynga"
+ },
+ {
+  "token": "niantic",
+  "name": "Niantic"
+ },
+ {
+  "token": "fastly",
+  "name": "Fastly"
+ },
+ {
+  "token": "pagerduty",
+  "name": "PagerDuty"
+ },
+ {
+  "token": "newrelic",
+  "name": "New Relic"
+ },
+ {
+  "token": "sumologic",
+  "name": "Sumo Logic"
+ },
+ {
+  "token": "splunk",
+  "name": "Splunk"
+ },
+ {
+  "token": "snowflake",
+  "name": "Snowflake"
+ },
+ {
+  "token": "databricks",
+  "name": "Databricks"
+ },
+ {
+  "token": "confluent",
+  "name": "Confluent"
+ },
+ {
+  "token": "cockroachlabs",
+  "name": "Cockroach Labs"
+ },
+ {
+  "token": "planetscale",
+  "name": "PlanetScale"
+ },
+ {
+  "token": "supabase",
+  "name": "Supabase"
+ },
+ {
+  "token": "retool",
+  "name": "Retool"
+ },
+ {
+  "token": "postman",
+  "name": "Postman"
+ },
+ {
+  "token": "gitpod",
+  "name": "Gitpod"
+ },
+ {
+  "token": "circleci",
+  "name": "CircleCI"
+ },
+ {
+  "token": "launchdarkly",
+  "name": "LaunchDarkly"
+ },
+ {
+  "token": "amplitude",
+  "name": "Amplitude"
+ },
+ {
+  "token": "mixpanel",
+  "name": "Mixpanel"
+ },
+ {
+  "token": "segment",
+  "name": "Segment"
+ },
+ {
+  "token": "fivetran",
+  "name": "Fivetran"
+ },
+ {
+  "token": "dbtlabs",
+  "name": "dbt Labs"
+ },
+ {
+  "token": "hightouch",
+  "name": "Hightouch"
+ },
+ {
+  "token": "grammarly",
+  "name": "Grammarly"
+ },
+ {
+  "token": "zapier",
+  "name": "Zapier"
+ },
+ {
+  "token": "hubspot",
+  "name": "HubSpot"
+ },
+ {
+  "token": "mailchimp",
+  "name": "Mailchimp"
+ },
+ {
+  "token": "sendgrid",
+  "name": "SendGrid"
+ },
+ {
+  "token": "intercom",
+  "name": "Intercom"
+ },
+ {
+  "token": "zendesk",
+  "name": "Zendesk"
+ },
+ {
+  "token": "benchling",
+  "name": "Benchling"
+ },
+ {
+  "token": "flexport",
+  "name": "Flexport"
+ },
+ {
+  "token": "faire",
+  "name": "Faire"
+ },
+ {
+  "token": "opendoor",
+  "name": "Opendoor"
+ },
+ {
+  "token": "zillow",
+  "name": "Zillow"
+ },
+ {
+  "token": "redfin",
+  "name": "Redfin"
+ },
+ {
+  "token": "compass",
+  "name": "Compass"
+ },
+ {
+  "token": "nextdoor",
+  "name": "Nextdoor"
+ },
+ {
+  "token": "thumbtack",
+  "name": "Thumbtack"
+ },
+ {
+  "token": "yelp",
+  "name": "Yelp"
+ },
+ {
+  "token": "etsy",
+  "name": "Etsy"
+ },
+ {
+  "token": "wayfair",
+  "name": "Wayfair"
+ },
+ {
+  "token": "warbyparker",
+  "name": "Warby Parker"
+ },
+ {
+  "token": "allbirds",
+  "name": "Allbirds"
+ },
+ {
+  "token": "glossier",
+  "name": "Glossier"
+ },
+ {
+  "token": "stitchfix",
+  "name": "Stitch Fix"
+ },
+ {
+  "token": "hims",
+  "name": "Hims and Hers"
+ },
+ {
+  "token": "oscar",
+  "name": "Oscar Health"
+ },
+ {
+  "token": "clover",
+  "name": "Clover Health"
+ },
+ {
+  "token": "tempus",
+  "name": "Tempus"
+ },
+ {
+  "token": "cerebral",
+  "name": "Cerebral"
+ },
+ {
+  "token": "included-health",
+  "name": "Included Health"
+ },
+ {
+  "token": "sonder",
+  "name": "Sonder"
+ },
+ {
+  "token": "vimeo",
+  "name": "Vimeo"
+ },
+ {
+  "token": "medium",
+  "name": "Medium"
+ },
+ {
+  "token": "quora",
+  "name": "Quora"
+ },
+ {
+  "token": "squareup",
+  "name": "Square"
+ },
+ {
+  "token": "toptal",
+  "name": "Toptal"
+ },
+ {
+  "token": "upwork",
+  "name": "Upwork"
+ },
+ {
+  "token": "fiverr",
+  "name": "Fiverr"
+ },
+ {
+  "token": "coursera",
+  "name": "Coursera"
+ },
+ {
+  "token": "udemy",
+  "name": "Udemy"
+ },
+ {
+  "token": "khanacademy",
+  "name": "Khan Academy"
+ },
+ {
+  "token": "chegg",
+  "name": "Chegg"
+ },
+ {
+  "token": "quizlet",
+  "name": "Quizlet"
+ },
+ {
+  "token": "masterclass",
+  "name": "MasterClass"
+ },
+ {
+  "token": "lattice",
+  "name": "Lattice"
+ },
+ {
+  "token": "culture-amp",
+  "name": "Culture Amp"
+ },
+ {
+  "token": "gong",
+  "name": "Gong"
+ },
+ {
+  "token": "outreach",
+  "name": "Outreach"
+ },
+ {
+  "token": "seismic",
+  "name": "Seismic"
+ },
+ {
+  "token": "highspot",
+  "name": "Highspot"
+ },
+ {
+  "token": "docusign",
+  "name": "DocuSign"
+ },
+ {
+  "token": "box",
+  "name": "Box"
+ },
+ {
+  "token": "smartsheet",
+  "name": "Smartsheet"
+ },
+ {
+  "token": "mural",
+  "name": "Mural"
+ },
+ {
+  "token": "miro",
+  "name": "Miro"
+ },
+ {
+  "token": "loom",
+  "name": "Loom"
+ },
+ {
+  "token": "calendly",
+  "name": "Calendly"
+ },
+ {
+  "token": "typeform",
+  "name": "Typeform"
+ },
+ {
+  "token": "wiz",
+  "name": "Wiz"
+ },
+ {
+  "token": "snyk",
+  "name": "Snyk"
+ },
+ {
+  "token": "crowdstrike",
+  "name": "CrowdStrike"
+ },
+ {
+  "token": "sentinelone",
+  "name": "SentinelOne"
+ },
+ {
+  "token": "tanium",
+  "name": "Tanium"
+ },
+ {
+  "token": "lacework",
+  "name": "Lacework"
+ },
+ {
+  "token": "1password",
+  "name": "1Password"
+ },
+ {
+  "token": "lastpass",
+  "name": "LastPass"
+ },
+ {
+  "token": "abnormalsecurity",
+  "name": "Abnormal Security"
+ },
+ {
+  "token": "cohesity",
+  "name": "Cohesity"
+ },
+ {
+  "token": "rubrik",
+  "name": "Rubrik"
+ },
+ {
+  "token": "pure-storage",
+  "name": "Pure Storage"
+ },
+ {
+  "token": "nutanix",
+  "name": "Nutanix"
+ },
+ {
+  "token": "scaleai",
+  "name": "Scale AI"
+ },
+ {
+  "token": "openai",
+  "name": "OpenAI"
+ },
+ {
+  "token": "cohere",
+  "name": "Cohere"
+ },
+ {
+  "token": "huggingface",
+  "name": "Hugging Face"
+ },
+ {
+  "token": "anyscale",
+  "name": "Anyscale"
+ },
+ {
+  "token": "weightsandbiases",
+  "name": "Weights and Biases"
+ },
+ {
+  "token": "runwayml",
+  "name": "Runway"
+ },
+ {
+  "token": "stabilityai",
+  "name": "Stability AI"
+ },
+ {
+  "token": "mistral",
+  "name": "Mistral AI"
+ },
+ {
+  "token": "perplexityai",
+  "name": "Perplexity"
+ },
+ {
+  "token": "jasper",
+  "name": "Jasper"
+ },
+ {
+  "token": "cruise",
+  "name": "Cruise"
+ },
+ {
+  "token": "waymo",
+  "name": "Waymo"
+ },
+ {
+  "token": "aurora",
+  "name": "Aurora"
+ },
+ {
+  "token": "nuro",
+  "name": "Nuro"
+ },
+ {
+  "token": "rivian",
+  "name": "Rivian"
+ },
+ {
+  "token": "lucidmotors",
+  "name": "Lucid Motors"
+ },
+ {
+  "token": "relativity",
+  "name": "Relativity Space"
+ },
+ {
+  "token": "anduril",
+  "name": "Anduril"
+ },
+ {
+  "token": "planet",
+  "name": "Planet Labs"
+ },
+ {
+  "token": "joby",
+  "name": "Joby Aviation"
+ }
+]
