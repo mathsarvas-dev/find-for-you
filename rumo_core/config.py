@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     database_url: str
     groq_api_key: str = ""
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-120b"
     groq_max_per_minute: int = Field(25, gt=0)
     default_user_id: int = 1
     upload_max_bytes: int = Field(5_000_000, gt=0)
