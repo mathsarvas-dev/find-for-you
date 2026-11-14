@@ -151,6 +151,57 @@ describe("QualityPage", () => {
     expect(screen.getByRole("link", { name: "Ir para o perfil" })).toHaveAttribute("href", "/onboarding");
   });
 
+  it("409 de perfil ainda não vetorizado explica e oferece Tentar de novo, sem link para o perfil", async () => {
+    m.sample.mockRejectedValueOnce(
+      new ApiError(409, "Seu perfil ainda está sendo processado. Tente novamente em instantes."),
+    );
+    render(<QualityPage />);
+    expect(await screen.findByText(/ainda está sendo vetorizado/)).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Ir para o perfil" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
+    expect(await screen.findByText(/[0-9]+ de [0-9]+ rotuladas/)).toBeInTheDocument();
+  });
+
+  it("409 no relatório (perfil sem vetor) troca o relatório velho pelo aviso, sem link para o perfil", async () => {
+    m.report
+      .mockResolvedValueOnce(qualityReport())
+      .mockRejectedValueOnce(
+        new ApiError(409, "Seu perfil ainda está sendo processado. Tente novamente em instantes."),
+      );
+    await renderPage();
+    await screen.findByRole("button", { name: "Nova amostra" });
+    fireEvent.click(screen.getByRole("button", { name: "Boa" }));
+    expect(await screen.findByText(/sendo processado/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nova amostra" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Ir para o perfil" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeInTheDocument();
+  });
+
+  it("gravação no ar: Nova amostra espera e o cartão novo não é pulado", async () => {
+    m.report.mockResolvedValue(qualityReport());
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    let resolvePut!: () => void;
+    m.put.mockImplementation(
+      (job_id, label) => new Promise((r) => (resolvePut = () => r({ job_id, label }))),
+    );
+    m.fresh.mockResolvedValue({
+      items: [sampleItem({ job_id: 9, title: "Vaga nova" }), sampleItem({ job_id: 10, title: "Outra" })],
+      labeled_total: 0,
+    });
+    await renderPage();
+    const renew = await screen.findByRole("button", { name: "Nova amostra" });
+    fireEvent.click(screen.getByRole("button", { name: "Boa" }));
+    expect(renew).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Pular" })).toBeDisabled();
+    fireEvent.click(renew);
+    expect(m.fresh).not.toHaveBeenCalled();
+    await act(async () => resolvePut());
+    await screen.findByRole("heading", { name: "Vaga 2" });
+    fireEvent.click(await screen.findByRole("button", { name: "Nova amostra" }));
+    expect(await screen.findByRole("heading", { name: "Vaga nova" })).toBeInTheDocument();
+    expect(m.fresh).toHaveBeenCalledTimes(1);
+  });
+
   it("erro de rede oferece Tentar de novo", async () => {
     m.sample.mockRejectedValueOnce(new ApiError(null, "Não consegui falar com a API."));
     render(<QualityPage />);

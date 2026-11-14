@@ -47,8 +47,11 @@ type Props = {
   queryText: string | null;
   queryPending: boolean;
   onRemove: (chip: Chip) => void;
-  /** Texto novo da consulta; null remove. */
-  onEditQuery: (text: string | null) => void;
+  /**
+   * Texto novo da consulta; null remove. Se devolver uma promessa que resolve false (o salvamento
+   * falhou), o editor reabre com o texto digitado.
+   */
+  onEditQuery: (text: string | null) => void | Promise<boolean>;
   /** O último chip foi removido: a página leva o foco para outro lugar (ex.: o campo do chat). */
   onEmptied?: () => void;
 };
@@ -123,7 +126,7 @@ function QueryChip({
 }: {
   chip: Chip;
   onRemove: (chip: Chip) => void;
-  onEdit: (text: string | null) => void;
+  onEdit: (text: string | null) => void | Promise<boolean>;
 }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(chip.value);
@@ -131,9 +134,23 @@ function QueryChip({
   const editRef = useRef<HTMLButtonElement>(null);
   /** true: a edição está fechando por Enter/Escape; o foco volta ao chip (e o blur não salva de novo). */
   const refocus = useRef(false);
+  /** O editor reabriu depois de uma falha disparada pelo blur: não rouba o foco de quem saiu. */
+  const quietReopen = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (editing) {
+      if (quietReopen.current) {
+        quietReopen.current = false;
+        return;
+      }
       inputRef.current?.focus();
       inputRef.current?.select();
     } else if (refocus.current) {
@@ -158,7 +175,17 @@ function QueryChip({
     if (returnFocus) close();
     else setEditing(false);
     if (next === chip.value.trim()) return;
-    onEdit(next === "" ? null : next);
+    const result = onEdit(next === "" ? null : next);
+    if (result && typeof result.then === "function") {
+      void result.then((ok) => {
+        if (ok || !mounted.current) return;
+        // Falhou: mantém o editor aberto com o que a pessoa digitou (a página mostra o motivo).
+        quietReopen.current = !returnFocus;
+        refocus.current = false;
+        setText(next);
+        setEditing(true);
+      });
+    }
   }
 
   return (

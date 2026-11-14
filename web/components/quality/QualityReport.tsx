@@ -7,6 +7,8 @@ type Props = {
   report: Report;
   /** Pede outra amostra; rejeitar mantém o relatório e a página mostra o erro. */
   onNewSample: () => Promise<void> | void;
+  /** Há uma gravação em andamento na página: "Nova amostra" espera. */
+  busy?: boolean;
 };
 
 const fmt = (n: number | null) => (n === null ? "—" : n.toFixed(2).replace(".", ","));
@@ -16,7 +18,7 @@ const REASON = {
   bad: "ruim entre as 10 primeiras",
 } as const;
 
-export function QualityReport({ report, onNewSample }: Props) {
+export function QualityReport({ report, onNewSample, busy = false }: Props) {
   const [asking, setAsking] = useState(false);
 
   async function newSample() {
@@ -89,7 +91,7 @@ export function QualityReport({ report, onNewSample }: Props) {
         <button
           type="button"
           className="button button--secondary"
-          disabled={asking}
+          disabled={asking || busy}
           aria-busy={asking || undefined}
           onClick={() => void newSample()}
         >

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import type { SearchFilters } from "@/lib/matching";
 import { filters } from "./fixtures";
 import { FilterChips } from "./FilterChips";
@@ -63,6 +63,47 @@ describe("FilterChips", () => {
     fireEvent.change(input, { target: { value: "  produto " } });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onEditQuery).toHaveBeenCalledWith("produto");
+    expect(screen.queryByRole("textbox", { name: "Editar consulta" })).toBeNull();
+  });
+
+  it("editar a consulta: se o salvamento falha, o editor reabre com o texto digitado", async () => {
+    const onEditQuery = vi.fn(async () => false);
+    render(
+      <FilterChips
+        filters={filters()}
+        queryText="dados"
+        queryPending={false}
+        onRemove={vi.fn()}
+        onEditQuery={onEditQuery}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+    const input = screen.getByRole("textbox", { name: "Editar consulta" });
+    fireEvent.change(input, { target: { value: "foco no cliente" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+    expect(onEditQuery).toHaveBeenCalledWith("foco no cliente");
+    expect(screen.getByRole("textbox", { name: "Editar consulta" })).toHaveValue("foco no cliente");
+  });
+
+  it("editar a consulta: se o salvamento dá certo, o editor continua fechado", async () => {
+    const onEditQuery = vi.fn(async () => true);
+    render(
+      <FilterChips
+        filters={filters()}
+        queryText="dados"
+        queryPending={false}
+        onRemove={vi.fn()}
+        onEditQuery={onEditQuery}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+    const input = screen.getByRole("textbox", { name: "Editar consulta" });
+    fireEvent.change(input, { target: { value: "produto" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
     expect(screen.queryByRole("textbox", { name: "Editar consulta" })).toBeNull();
   });
 

@@ -281,10 +281,10 @@ export default function JobsPage() {
     void saveFilters(next.filters, next.queryText, true);
   }
 
-  function editQuery(text: string | null) {
+  function editQuery(text: string | null): Promise<boolean> {
     const base = intended.current;
-    if (!base) return;
-    void saveFilters(base.filters, text, true);
+    if (!base) return Promise.resolve(true);
+    return saveFilters(base.filters, text, true);
   }
 
   const focusChat = useCallback(() => chatInputRef.current?.focus(), []);
@@ -508,7 +508,7 @@ export default function JobsPage() {
     <main className="page page--wide">
       <PageHeader
         title="Vagas"
-        description="Ordenadas pela nota contra o seu perfil confirmado. A IA avalia as 30 melhores; as outras mostram a pré-seleção vetorial, em cinza."
+        description="Ordenadas pela nota contra o seu perfil confirmado e, quando houver, pelo seu gosto. A IA avalia as 30 melhores; as outras mostram a pré-seleção vetorial, em cinza."
         actions={
           ready && (
             <>

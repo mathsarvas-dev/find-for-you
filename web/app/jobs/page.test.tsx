@@ -625,6 +625,23 @@ describe("JobsPage", () => {
       expect(screen.getByText("gosto: produto")).toBeInTheDocument();
     });
 
+    it("consulta rejeitada pelo servidor: mostra o motivo e mantém o editor aberto com o texto", async () => {
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: false });
+      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      m.put.mockRejectedValueOnce(
+        new ApiError(422, "A consulta de gosto não pode ter negações; use os filtros de exclusão."),
+      );
+      await renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+      const input = screen.getByRole("textbox", { name: "Editar consulta" });
+      fireEvent.change(input, { target: { value: "foco no cliente" } });
+      await act(async () => {
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("não pode ter negações");
+      expect(screen.getByRole("textbox", { name: "Editar consulta" })).toHaveValue("foco no cliente");
+    });
+
     it("falha do parseFilters não salva nada e mantém os chips", async () => {
       m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
       m.list.mockResolvedValue(matchPage([matchItem(1)]));

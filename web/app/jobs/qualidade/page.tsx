@@ -25,6 +25,10 @@ type Phase =
 const message = (err: unknown) =>
   err instanceof ApiError ? err.message : "Algo deu errado ao falar com a API. Tente de novo.";
 
+/** 409 com perfil existente, mas ainda sem vetor (o worker está processando). */
+const isNotVectorized = (status: number | null, text: string) =>
+  status === 409 && text.includes("sendo processado");
+
 const firstUnlabeled = (items: SampleItem[]) => {
   const i = items.findIndex((it) => it.label === null);
   return i === -1 ? 0 : i;
@@ -42,6 +46,8 @@ export default function QualityPage() {
   /** Trava síncrona: dois cliques seguidos não mandam dois pedidos. */
   const busyRef = useRef(false);
   const reportSeq = useRef(0);
+  /** Identidade da amostra na tela: sobe a cada amostra nova; gravações antigas não mexem na nova. */
+  const sampleSeq = useRef(0);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -60,6 +66,8 @@ export default function QualityPage() {
       setReportError(null);
     } catch (err) {
       if (!mounted.current || id !== reportSeq.current) return;
+      // 409: o perfil perdeu o vetor (ou sumiu); o relatório antigo não vale mais.
+      if (err instanceof ApiError && err.status === 409) setReport(null);
       setReportError(message(err));
     }
   }, []);
@@ -69,6 +77,7 @@ export default function QualityPage() {
     getSample().then(
       (sample) => {
         if (cancelled) return;
+        sampleSeq.current++;
         setItems(sample.items);
         setIndex(firstUnlabeled(sample.items));
         setPhase({ name: "ready" });
@@ -114,9 +123,12 @@ export default function QualityPage() {
     if (!current) return;
     const { job_id: id } = current;
     const at = index;
+    const seq = sampleSeq.current;
     void guarded(async () => {
       await putLabel(id, value);
       if (!mounted.current) return;
+      // A amostra trocou durante a gravação: o índice e a lista novos não são desta vaga.
+      if (seq !== sampleSeq.current) return;
       setLabel(id, value);
       setIndex(Math.min(at + 1, items.length - 1));
       void loadReport();
@@ -126,24 +138,26 @@ export default function QualityPage() {
   function clear() {
     if (!current) return;
     const { job_id: id } = current;
+    const seq = sampleSeq.current;
     void guarded(async () => {
       await deleteLabel(id);
       if (!mounted.current) return;
+      if (seq !== sampleSeq.current) return;
       setLabel(id, null);
       void loadReport();
     });
   }
 
-  async function renewSample() {
-    try {
+  /** Pela mesma trava das gravações: nenhuma gravação fica no ar enquanto a amostra troca. */
+  function renewSample() {
+    return guarded(async () => {
       const sample = await newSample();
-      setActionError(null);
+      if (!mounted.current) return;
+      sampleSeq.current++;
       setItems(sample.items);
       setIndex(firstUnlabeled(sample.items));
       await loadReport();
-    } catch (err) {
-      setActionError(message(err));
-    }
+    });
   }
 
   const labeled = items.filter((it) => it.label !== null).length;
@@ -174,9 +188,12 @@ export default function QualityPage() {
           <div className="notice notice--top" role="alert">
             <strong>Não deu para carregar a amostra.</strong>
             <p>{phase.message}</p>
+            {isNotVectorized(phase.status, phase.message) && (
+              <p>Seu perfil ainda está sendo vetorizado; isso leva só alguns instantes.</p>
+            )}
           </div>
           <div className="panel__foot">
-            {phase.status === 409 ? (
+            {phase.status === 409 && !isNotVectorized(phase.status, phase.message) ? (
               <Link className="button" href="/onboarding">
                 Ir para o perfil
               </Link>
@@ -236,7 +253,7 @@ export default function QualityPage() {
             </section>
           )}
 
-          {report && <QualityReport report={report} onNewSample={renewSample} />}
+          {report && <QualityReport report={report} onNewSample={renewSample} busy={busy} />}
           {!report && reportError && (
             <div className="notice" role="alert">
               <strong>Não deu para carregar o relatório.</strong>
