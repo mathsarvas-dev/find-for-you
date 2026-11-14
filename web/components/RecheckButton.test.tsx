@@ -3,6 +3,7 @@ import { lazy, Suspense, useState } from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useRouter } from "next/navigation";
 import { RecheckButton } from "./RecheckButton";
+import { OverviewContext } from "@/components/shell/OverviewContext";
 
 vi.mock("next/navigation", () => ({ useRouter: vi.fn() }));
 
@@ -13,7 +14,7 @@ afterEach(() => vi.clearAllMocks());
  * novo payload chegar (`promise`). Dentro de uma transição, a tela antiga fica e o botão
  * mostra o estado pendente.
  */
-function setup() {
+function setup(overviewRefresh: () => Promise<void> = async () => {}) {
   let resolve!: () => void;
   const promise = new Promise<void>((r) => (resolve = r));
   const refresh = vi.fn();
@@ -32,7 +33,11 @@ function setup() {
     );
   }
 
-  render(<Harness />);
+  render(
+    <OverviewContext.Provider value={{ overview: null, status: "down", refresh: overviewRefresh }}>
+      <Harness />
+    </OverviewContext.Provider>,
+  );
   return { refresh, resolve };
 }
 
@@ -69,5 +74,13 @@ describe("RecheckButton", () => {
     fireEvent.click(button());
     fireEvent.click(button());
     expect(refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("clique também atualiza o overview da casca (uma vez)", () => {
+    const overviewRefresh = vi.fn(async () => {});
+    setup(overviewRefresh);
+    fireEvent.click(button());
+    fireEvent.click(button());
+    expect(overviewRefresh).toHaveBeenCalledTimes(1);
   });
 });

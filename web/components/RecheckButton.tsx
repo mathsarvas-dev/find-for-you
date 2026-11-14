@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useTransition } from "react";
+import { useRefreshOverview } from "@/components/shell/OverviewContext";
 
 /**
  * "Verificar de novo" do painel de saúde: router.refresh() pede ao servidor um novo
@@ -11,6 +12,7 @@ import { useTransition } from "react";
  */
 export function RecheckButton() {
   const router = useRouter();
+  const refreshOverview = useRefreshOverview();
   const [pending, startTransition] = useTransition();
 
   return (
@@ -25,6 +27,8 @@ export function RecheckButton() {
         aria-busy={pending || undefined}
         onClick={() => {
           if (pending) return;
+          // A casca também lê /overview: sem isso a lateral e a conta continuariam mostrando a falha.
+          refreshOverview();
           startTransition(() => router.refresh());
         }}
       >
