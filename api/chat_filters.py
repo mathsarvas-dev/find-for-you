@@ -12,6 +12,7 @@ from collections import deque
 from functools import lru_cache
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -25,7 +26,7 @@ from rumo_core.matching.chat_filters import (
     MAX_TEXT,
     ParsedQuery,
     ParseInvalid,
-    _check_chars,
+    check_chars,
     allowed_values,
     parse_query,
 )
@@ -41,7 +42,7 @@ MSG_NO_LLM = "A interpretação por frase não está configurada. Use os filtros
 MSG_PARSE_LIMIT = (
     "Você usou as 20 interpretações desta hora. Use os filtros manuais ou tente mais tarde."
 )
-MSG_BAD_TEXT = "O texto contém caracteres inválidos ou é longo demais."
+MSG_BAD_TEXT = "O texto contém caracteres inválidos."
 
 PARSE_TIMEOUT_SECONDS = 25
 MAX_TRACKED_USERS = 10_000
@@ -136,23 +137,23 @@ async def parse_filters(
     llm: LLMProvider | None = Depends(get_filters_llm),
     limiter: HourlyLimiter = Depends(get_parse_limiter),
 ):
-    current = _filters_or_409(session, user_id)
+    current = await run_in_threadpool(_filters_or_409, session, user_id)
     text = body.text.strip()
     if not text:  # no LLM, no limit
         return ParsedQuery(notes=[EMPTY_NOTE])
     try:
-        _check_chars(text)
+        check_chars(text)
     except ValueError:
         raise HTTPException(422, MSG_BAD_TEXT) from None
     if llm is None:
         raise HTTPException(503, MSG_NO_LLM)
-    allowed = allowed_values(session, user_id)
     if not limiter.acquire(user_id):
         raise HTTPException(
             429, MSG_PARSE_LIMIT,
-            headers={"Retry-After": str(limiter.retry_after(user_id))},
+            headers={"Retry-After": str(max(1, limiter.retry_after(user_id)))},
         )
     try:
+        allowed = await run_in_threadpool(allowed_values, session, user_id)
         return await asyncio.wait_for(
             parse_query(llm, text, current, allowed), PARSE_TIMEOUT_SECONDS
         )

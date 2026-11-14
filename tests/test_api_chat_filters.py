@@ -210,3 +210,39 @@ def test_limiter_bounded_memory():
     clock.t += 11
     assert lim.acquire(10**6)
     assert len(lim._stamps) == 1
+
+
+@pytest.mark.db
+def test_parse_timeout_503(env, setup, monkeypatch):
+    import asyncio
+
+    class SlowLLM:
+        async def complete_json(self, messages, schema):
+            await asyncio.sleep(5)
+
+    monkeypatch.setattr(cf, "PARSE_TIMEOUT_SECONDS", 0.05)
+    r = post(setup[0](env(), SlowLLM()))
+    assert r.status_code == 503 and r.json()["detail"] == cf.MSG_LLM_BUSY
+
+
+@pytest.mark.db
+def test_parse_without_llm_does_not_consume_limit(env, setup):
+    as_user, _ = setup
+    uid = env()
+    for _ in range(25):
+        assert post(as_user(uid, None)).status_code == 503
+    c = as_user(uid, FakeLLM([GOOD]))
+    for _ in range(20):
+        assert post(c).status_code == 200
+
+
+@pytest.mark.db
+def test_parse_phrase_not_logged_on_errors(env, setup, caplog):
+    as_user, _ = setup
+    uid = env()
+    caplog.set_level("DEBUG")
+    phrase = "frasesecretaxyz"
+    assert post(as_user(uid, FakeLLM(exc=LLMError(phrase))), phrase).status_code == 503
+    assert post(as_user(uid, FakeLLM([LLMInvalidResponse(phrase)])), phrase).status_code == 422
+    assert post(as_user(uid, FakeLLM([GOOD])), phrase + "‮").status_code == 422
+    assert phrase not in caplog.text
