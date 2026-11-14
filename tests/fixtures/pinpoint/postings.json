@@ -1,0 +1,47 @@
+{
+  "data": [
+    {
+      "id": "617514",
+      "benefits": "<ul><li><!--block-->Access to our employee stock options plan</li><li><!--block-->Covered medical, dental, and vision coverage&nbsp;</li><li><!--block-->401(k), with an annual match of up to $3000 (1-year vesting)</li><li><!--block-->Short and long-term disability</li><li><!--block-->$600 annual education stipend&nbsp;</li><li><!--block-->Remote Work Flexible</li><li><!--block-->Remote work allowance</li><li><!--block-->Growth prospects at a truly welcoming multicultural and multilingual company with a supportive, team-work-oriented work environment</li><li><!--block-->A big vision: to help the world use location-based data to make better decisions. We believe that openness and sustainability are baked into this vision, and we’re sharing it with the world.</li></ul><div><!--block--><br></div>",
+      "benefits_header": "Benefits",
+      "compensation": null,
+      "compensation_minimum": null,
+      "compensation_maximum": null,
+      "compensation_currency": null,
+      "compensation_frequency": null,
+      "compensation_visible": false,
+      "deadline_at": null,
+      "description": "<div><!--block-->Everything happens somewhere — which is why spatial analytics is fundamental to companies trying to understand the \"where\" and the \"why\" of their business. CARTO is the world's leading cloud-native spatial analysis platform, trusted by data scientists, analysts, and developers from global brands to run scalable spatial analysis directly on their cloud ecosystems.</div><div><!--block--><br></div><div><!--block-->At CARTO, our mission is to democratize spatial analysis. We are the leading Agentic GIS platform. Unlike other GIS systems, CARTO removes data fragmentation and technical bottlenecks by letting teams leverage AI for geospatial processes and interactive maps.&nbsp;</div><div><!--block--><br></div><div><!--block-->Our Solutions Engineers are technical and creative and enjoy solving new and complex problems. This is a key hire for our largest market. Across the US, organizations are moving off decades-old desktop and server GIS onto the cloud and AI stack they already own, and they need a technical partner who can show them what that looks like with their own data.<br><br></div><div><!--block-->The position is fully remote, based in the United States, with a preference for the East Coast for overlap with our teams in New York and Madrid. This is a hands-on, customer-facing role, so expect to travel one to two times a month for customer on-sites, workshops, and industry events, with occasional trips to Europe for company and team gatherings.</div>",
+      "employment_type": "full_time",
+      "employment_type_text": "Full Time",
+      "key_responsibilities": "<div><!--block-->As a Solutions Engineer, you won’t just be demonstrating features; you’ll be a true partner, guiding prospects and clients to understand their real challenges and goals. Following the Great Demo! framework, you will:</div><ul><li><!--block-->Work closely with our Sales team, helping them to not only understand what a customer wants to achieve, but more importantly, to uncover the underlying “why.”</li><li><!--block-->Build a vision for a solution that solves a business problem, guiding the account team and organizing internal resources to deliver a winning proposal.</li><li><!--block-->Own the technical narrative on enterprise deals end to end: architecture discussions with cloud and data teams, security and governance reviews, and readouts to executive buyers.</li><li><!--block-->Communicate clearly in both technical and business conversations, with audiences that range from GIS and data practitioners to the executives who sign.</li><li><!--block-->Turn requirements into a functional scope and commercial proposal for our platform and professional services, always keeping the client’s strategic “why” in mind.</li><li><!--block-->Build proofs of concept that show the platform working on the customer’s data: CARTO Workflows, AI Agents inside Builder maps, and vibecoded applications.</li><li><!--block-->Get in the room with customers: run discovery sessions and hands-on workshops onsite, and represent CARTO at conferences, industry events, and partner events across the territory.</li><li><!--block-->Help customers weigh a move away from traditional GIS, mapping what they run today against what CARTO does inside their warehouse, and being straight about where the work actually sits.</li><li><!--block-->Position CARTO in competitive procurements and RFPs, showing why running analysis where the data already lives, under the customer’s own governance and approved models, changes the result.</li><li><!--block-->Bring what you learn in the field back to Product, and share it with the rest of the Solutions Engineering team.</li><li><!--block-->Take part in business development to help grow the territory.</li></ul>",
+      "key_responsibilities_header": "What You’ll Do",
+      "reporting_to": "",
+      "skills_knowledge_expertise": "<ul><li><!--block--><strong>Communication skills:</strong> You explain complex ideas clearly and listen well enough to find what a client actually needs, not just what they asked for.</li><li><!--block--><strong>Geospatial experience:</strong> 5 or more years in a customer-facing technical role, presales, GIS consultancy, or spatial data science, including a track record on enterprise deals.</li><li><!--block--><strong>Cloud knowledge:</strong> Hands-on experience with at least one major cloud data warehouse (BigQuery, Snowflake, Databricks, AWS Redshift, Oracle), and comfort discussing how they are secured, governed, and billed.</li><li><!--block--><strong>Development skills:</strong> SQL and Python in your daily work, plus enough JavaScript to put a working front end in front of a customer. Familiarity with PostGIS, REST APIs, and spatial indexes such as H3 is a plus.</li><li><!--block--><strong>AI fluency:</strong> You use AI chat and coding agents in your own work and can speak credibly about where LLM-based agents help, where they need guardrails, and why auditability matters to an enterprise. Curiosity counts for more here than a formal background.</li><li><!--block--><strong>Traditional GIS context:</strong> Familiarity with Esri, ArcGIS, or similar platforms, so you can translate between how a team works today and how they would work on CARTO.</li><li><!--block--><strong>US market knowledge:</strong> Experience supporting US enterprise or public sector buyers, and how they evaluate, procure, and secure new technology.</li><li><!--block--><strong>Willingness to travel:</strong> You would rather be in the room than on a call, and you are happy travelling regularly across the US, plus the occasional trip to Europe.</li><li><!--block--><strong>Collaborative spirit:</strong> A collaborative style that works well with autonomy in a flexible, fast-moving environment.</li><li><!--block--><strong>Optimistic and eager:</strong> Most of all, you are optimistic, curious, smart, and keen to learn.</li></ul><div><!--block--><br></div>",
+      "skills_knowledge_expertise_header": "What You’ll Bring",
+      "title": "Solutions Engineer",
+      "url": "https://carto.pinpointhq.com/en/postings/0f0c36c8-0aaf-4060-9765-4ef8a538c2e9",
+      "path": "/en/postings/0f0c36c8-0aaf-4060-9765-4ef8a538c2e9",
+      "workplace_type": "remote",
+      "workplace_type_text": "Fully remote",
+      "job": {
+        "id": "615596",
+        "requisition_id": "",
+        "department": {
+          "id": "60231",
+          "name": "Sales"
+        },
+        "division": null,
+        "structure_custom_group_one": null
+      },
+      "location": {
+        "id": "55945",
+        "city": "New York",
+        "name": "USA",
+        "postal_code": "NW9 6BX",
+        "province": "New York",
+        "street_address": "307 Fifth Avenue Floor 9, "
+      }
+    }
+  ]
+}
