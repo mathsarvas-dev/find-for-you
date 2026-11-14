@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from sqlalchemy import delete, select
 
 from rumo_core.db import SessionLocal
-from rumo_core.matching.filters import SearchFilters, apply_filters
+from rumo_core.matching.filters import SearchFilters, apply_filters, fold_term
 from rumo_core.models import Company, Job, User
 
 
@@ -53,6 +53,45 @@ def test_countries_normalized():
     assert SearchFilters(countries=[" pt ", "de"]).countries == ["PT", "DE"]
 
 
+def test_old_saved_filters_without_new_keys_still_valid():
+    f = SearchFilters.model_validate({"countries": ["br"], "include_unknown": False})
+    assert f.exclude_countries == []
+    assert f.title_exclude == []
+
+
+def test_exclusions_accept_valid_and_reject_unknown_values():
+    assert SearchFilters(exclude_work_models=["onsite"]).exclude_work_models == ["onsite"]
+    with pytest.raises(ValidationError):
+        SearchFilters(exclude_work_models=["unknown"])
+    with pytest.raises(ValidationError):
+        SearchFilters(exclude_languages=["fr"])
+    assert SearchFilters(exclude_countries=["pt"]).exclude_countries == ["PT"]
+
+
+def test_include_and_exclude_same_value_is_error():
+    with pytest.raises(ValidationError):
+        SearchFilters(work_models=["remote"], exclude_work_models=["remote"])
+    with pytest.raises(ValidationError):
+        SearchFilters(departments=["Data"], exclude_departments=[" data "])
+
+
+def test_title_exclude_limits():
+    with pytest.raises(ValidationError):
+        SearchFilters(title_exclude=[f"t{i}" for i in range(11)])
+    with pytest.raises(ValidationError):
+        SearchFilters(title_exclude=["  "])
+    with pytest.raises(ValidationError):
+        SearchFilters(title_exclude=["x" * 61])
+    assert SearchFilters(title_exclude=["Plantão", "100%"]).title_exclude == [
+        "Plantão", "100%"
+    ]
+
+
+def test_fold_term_escapes_wildcards():
+    assert fold_term("Plantão") == "plantao"
+    assert fold_term("100%_x\\") == r"100\%\_x\\"
+
+
 @pytest.fixture
 def env():
     with SessionLocal() as s:
@@ -66,9 +105,10 @@ def env():
 
         def add(**kw):
             n = next(counter)
+            kw.setdefault("title", f"t{n}")
             j = Job(
                 user_id=user.id, company_id=c.id, external_id=str(n),
-                url="https://example.test/j", title=f"t{n}", description="d",
+                url="https://example.test/j", description="d",
                 raw={}, content_hash="h", fingerprint=f"f{n}", **kw,
             )
             s.add(j)
@@ -186,3 +226,70 @@ def test_empty_filters_change_nothing(env):
         add(salary_known=True, salary_min=1, salary_currency="EUR", salary_period="hour"),
     }
     assert run(SearchFilters()) == ids
+
+
+@db
+def test_exclusion_keeps_unknown_regardless_of_include_unknown(env):
+    add, run = env
+    onsite = add(work_model="onsite")
+    remote = add(work_model="remote")
+    unk = add()
+    for inc in (True, False):
+        f = SearchFilters(exclude_work_models=["onsite"], include_unknown=inc)
+        assert run(f) == {remote, unk}
+        assert onsite not in run(f)
+    de = add(country="DE")
+    null_country = add()
+    ids = run(SearchFilters(exclude_countries=["DE"], include_unknown=False))
+    assert de not in ids and null_country in ids
+    sales = add(department="Sales")
+    null_dep = add(work_model="remote")
+    for inc in (True, False):
+        ids = run(SearchFilters(exclude_departments=["SALES"], include_unknown=inc))
+        assert sales not in ids and null_dep in ids
+        ids = run(SearchFilters(exclude_departments=["Sales"], include_unknown=inc))
+        assert sales not in ids
+
+
+@db
+def test_title_exclude_ignores_accent_and_case(env):
+    add, run = env
+    add(title="Engenheiro de Dados (PLANTÃO)")
+    keep = add(title="Data Engineer")
+    assert run(SearchFilters(title_exclude=["plantao"])) == {keep}
+    assert run(SearchFilters(title_exclude=["PLANTÃO"])) == {keep}
+
+
+@db
+def test_title_exclude_wildcards_are_literal(env):
+    add, run = env
+    pct = add(title="Bonus 100% remoto")
+    thousand = add(title="Bonus 1000 remoto")
+    us = add(title="a_b dev")
+    axb = add(title="axb dev")
+    assert run(SearchFilters(title_exclude=["100%"])) == {thousand, us, axb}
+    assert run(SearchFilters(title_exclude=["a_b"])) == {pct, thousand, axb}
+
+
+@db
+def test_exclusions_combined_with_inclusions(env):
+    add, run = env
+    br = add(country="BR", seniority="senior")
+    pt = add(country="PT", seniority="mid")
+    add(country="PT", seniority="intern")
+    add(country="DE", seniority="senior")
+    add()
+    f = SearchFilters(
+        countries=["BR", "PT"], exclude_seniorities=["intern"], include_unknown=False
+    )
+    assert run(f) == {br, pt}
+
+
+@db
+def test_title_exclude_folds_like_postgres_unaccent(env):
+    add, run = env
+    add(title="Auxiliar Außendienst")
+    keep = add(title="Data Engineer")
+    assert run(SearchFilters(title_exclude=["Außendienst"])) == {keep}
+    assert run(SearchFilters(title_exclude=["aussendienst"])) == {keep}
+    assert run(SearchFilters(title_exclude=["AUSSENDIENST"])) == {keep}

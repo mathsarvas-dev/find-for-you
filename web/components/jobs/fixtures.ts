@@ -1,6 +1,34 @@
-import type { MatchDetail, MatchItem, MatchJob, MatchPage } from "@/lib/matching";
+import type { ParsedQuery } from "@/lib/chatFilters";
+import {
+  defaultFilters,
+  type MatchDetail,
+  type MatchItem,
+  type MatchJob,
+  type MatchPage,
+  type SearchFilters,
+  type SearchProfile,
+} from "@/lib/matching";
 
 /** Dados de teste compartilhados pelos testes da tela de vagas. */
+
+/** Filtros padrão com as mudanças pedidas (arrays novos, nunca os congelados). */
+export function filters(extra: Partial<SearchFilters> = {}): SearchFilters {
+  return { ...defaultFilters(), ...extra };
+}
+
+export function searchProfile(
+  f: Partial<SearchFilters> = {},
+  extra: Partial<Omit<SearchProfile, "filters">> = {},
+): SearchProfile {
+  return { filters: filters(f), query_text: null, query_pending: false, ...extra };
+}
+
+export function parsedQuery(
+  f: Partial<SearchFilters> = {},
+  extra: Partial<Omit<ParsedQuery, "filters">> = {},
+): ParsedQuery {
+  return { filters: filters(f), query_text: null, notes: [], ...extra };
+}
 
 export function matchJob(id: number, extra: Partial<MatchJob> = {}): MatchJob {
   return {
@@ -50,6 +78,7 @@ export function matchPage(items: MatchItem[], extra: Partial<MatchPage> = {}): M
     vectorized: true,
     missing_embeddings: 0,
     chunks_used: 3,
+    query_used: false,
     items,
     ...extra,
   };

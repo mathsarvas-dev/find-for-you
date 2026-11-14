@@ -62,3 +62,17 @@ def test_cors_origin_list_parsing():
     s = Settings(database_url="x", cors_origins=" http://a.test ,, http://b.test ", _env_file=None)
     assert s.cors_origin_list == ["http://a.test", "http://b.test"]
     assert Settings(database_url="x", cors_origins="", _env_file=None).cors_origin_list == []
+
+
+def test_cors_preflight_allows_delete():
+    from api.main import app
+
+    r = TestClient(app).options(
+        "/quality/labels/1",
+        headers={
+            "Origin": "http://localhost:3000",
+            "Access-Control-Request-Method": "DELETE",
+        },
+    )
+    assert r.status_code == 200
+    assert "DELETE" in r.headers["access-control-allow-methods"]

@@ -13,6 +13,13 @@ export type SearchFilters = {
   seniorities: Seniority[];
   languages: JobLanguage[];
   departments: string[];
+  exclude_countries: string[];
+  exclude_work_models: WorkModelFilter[];
+  exclude_seniorities: Seniority[];
+  exclude_languages: JobLanguage[];
+  exclude_departments: string[];
+  /** Termos que eliminam a vaga quando aparecem no título (máx. 10). */
+  title_exclude: string[];
   /** Salário mínimo anualizado, na moeda `salary_currency`. */
   salary_min: number | null;
   salary_currency: string | null;
@@ -20,17 +27,34 @@ export type SearchFilters = {
   accept_no_salary: boolean;
 };
 
-export const DEFAULT_FILTERS: SearchFilters = {
+/** Filtros padrão novos (arrays não compartilhados). */
+export function defaultFilters(): SearchFilters {
+  return {
   countries: [],
   work_models: [],
   seniorities: [],
   languages: [],
   departments: [],
+  exclude_countries: [],
+  exclude_work_models: [],
+  exclude_seniorities: [],
+  exclude_languages: [],
+  exclude_departments: [],
+  title_exclude: [],
   salary_min: null,
   salary_currency: null,
   include_unknown: true,
   accept_no_salary: true,
-};
+  };
+}
+
+function deepFreeze<T extends object>(o: T): T {
+  for (const v of Object.values(o)) if (v && typeof v === "object") deepFreeze(v);
+  return Object.freeze(o);
+}
+
+/** Constante congelada para leitura/comparação; para editar, use defaultFilters(). */
+export const DEFAULT_FILTERS: SearchFilters = deepFreeze(defaultFilters());
 
 export type UnknownField = "salary" | "work_model" | "country" | "seniority" | "language";
 
@@ -63,6 +87,8 @@ export type MatchPage = {
   /** Vagas sob os filtros que ainda não têm vetor e ficam fora do ranking. */
   missing_embeddings: number;
   chunks_used: number;
+  /** true quando a consulta de gosto (query_text) entrou no ranking. */
+  query_used: boolean;
   items: MatchItem[];
 };
 
@@ -112,16 +138,26 @@ async function withFallback<T>(call: Promise<T>, fallback: Record<number, string
   }
 }
 
-export async function getSearchProfile(): Promise<SearchFilters> {
-  return (await request<{ filters: SearchFilters }>("/search-profile")).body.filters;
+export type SearchProfile = {
+  filters: SearchFilters;
+  query_text: string | null;
+  query_pending: boolean;
+};
+
+export async function getSearchProfile(): Promise<SearchProfile> {
+  return (await request<SearchProfile>("/search-profile")).body;
 }
 
-export async function putSearchProfile(filters: SearchFilters): Promise<SearchFilters> {
-  const res = await withFallback(
-    request<{ filters: SearchFilters }>("/search-profile", json("PUT", filters)),
-    { 422: "Confira os filtros: países como BR ou PT, e moeda junto com o salário mínimo." },
-  );
-  return res.body.filters;
+/** `query_text` só vai no corpo quando passado (null apaga a consulta; omitido a preserva). */
+export async function putSearchProfile(
+  filters: SearchFilters,
+  queryText?: string | null,
+): Promise<SearchProfile> {
+  const body = queryText === undefined ? filters : { ...filters, query_text: queryText };
+  const res = await withFallback(request<SearchProfile>("/search-profile", json("PUT", body)), {
+    422: "Confira os filtros: países como BR ou PT, e moeda junto com o salário mínimo.",
+  });
+  return res.body;
 }
 
 export async function listMatches(query: MatchQuery): Promise<MatchPage> {
@@ -196,6 +232,12 @@ export function isDefaultFilters(f: SearchFilters): boolean {
     f.seniorities.length === 0 &&
     f.languages.length === 0 &&
     f.departments.length === 0 &&
+    f.exclude_countries.length === 0 &&
+    f.exclude_work_models.length === 0 &&
+    f.exclude_seniorities.length === 0 &&
+    f.exclude_languages.length === 0 &&
+    f.exclude_departments.length === 0 &&
+    f.title_exclude.length === 0 &&
     f.salary_min === null
   );
 }

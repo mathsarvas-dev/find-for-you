@@ -4,15 +4,23 @@ vec_score = mean of the 3 largest normalized cosine similarities
 (1 - cosine_distance / 2, in [0, 1]) between the job embedding and the
 embedded chunks of the user's current profile version for `model_version`.
 Computed entirely in SQL through a LATERAL top-3 subquery per job.
+
+With a usable query embedding the score becomes
+(wp * s_profile + wq * s_query) / (wp + wq), s_query being the same
+normalized cosine between the job embedding and the query. Without a usable
+query (None, zero vector, wq == 0, wp + wq == 0) it is exactly s_profile.
 """
 
+import math
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from sqlalchemy import Select, and_, func, or_, select, true
 from sqlalchemy.orm import Session, defer
 
+from rumo_core.config import get_settings
 from rumo_core.matching.filters import SearchFilters, apply_filters
-from rumo_core.models import Job, Match, ProfileChunk
+from rumo_core.models import Job, Match, ProfileChunk, SearchProfile
 from rumo_core.profile.service import get_current_profile
 
 STATUSES = {"open", "closed", "all"}
@@ -34,6 +42,7 @@ class RankPage:
     vectorized: bool
     missing_embeddings: int
     chunks_used: int
+    query_used: bool = False
 
 
 def _check_page(limit: int, offset: int) -> None:
@@ -71,13 +80,52 @@ def _job_embedded(model_version: str):
     )
 
 
-def _base_jobs(user_id: int, filters: SearchFilters, status: str, stmt: Select) -> Select:
+def _base_jobs(user_id: int, filters: SearchFilters, status: str, stmt: Select,
+               only_ids: Collection[int] | None = None) -> Select:
     stmt = stmt.where(Job.user_id == user_id, _status_cond(status))
+    if only_ids is not None:
+        stmt = stmt.where(Job.id.in_(list(only_ids)))
     return apply_filters(stmt, filters)
 
 
+def _norm(vec) -> float:
+    return math.sqrt(sum(float(x) * float(x) for x in vec))
+
+
+def usable_query_embedding(session: Session, user_id: int,
+                           model_version: str) -> list[float] | None:
+    """Query embedding of the default search profile, or None when absent,
+    stale (other model version), without text, or a zero vector."""
+    sp = session.scalar(
+        select(SearchProfile).where(
+            SearchProfile.user_id == user_id, SearchProfile.is_default.is_(True)
+        )
+    )
+    if (sp is None or sp.query_text is None or sp.query_embedding is None
+            or sp.query_model_version != model_version):
+        return None
+    vec = [float(x) for x in sp.query_embedding]
+    return vec if _norm(vec) > 0 else None
+
+
+def _effective_query(query_embedding, weights):
+    """(query, wp, wq) when the query takes part in the score, else None."""
+    if query_embedding is None or _norm(query_embedding) == 0:
+        return None
+    if weights is None:
+        st = get_settings()
+        weights = (st.match_weight_profile, st.match_weight_query)
+    wp, wq = weights
+    if wq <= 0 or wp + wq <= 0:
+        return None
+    return list(query_embedding), float(wp), float(wq)
+
+
 def _scores(user_id: int, version: int, filters: SearchFilters, *,
-            model_version: str, status: str):
+            model_version: str, status: str,
+            query_embedding: list[float] | None = None,
+            weights: tuple[float, float] | None = None,
+            only_ids: Collection[int] | None = None):
     """Subquery (job_id, vec_score) for the filtered, embedded jobs."""
     dist = ProfileChunk.embedding.cosine_distance(Job.embedding)
     top = (
@@ -88,22 +136,32 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
         .limit(TOP_K)
         .lateral("top_chunks")
     )
+    s_profile = func.avg(top.c.sim)
+    eff = _effective_query(query_embedding, weights)
+    if eff is None:
+        vec_score = s_profile
+    else:
+        q, wp, wq = eff
+        s_query = func.greatest(
+            0.0, func.least(1.0, 1 - Job.embedding.cosine_distance(q) / 2))
+        vec_score = (wp * s_profile + wq * s_query) / (wp + wq)
     stmt = (
-        select(Job.id.label("job_id"), func.avg(top.c.sim).label("vec_score"))
+        select(Job.id.label("job_id"), vec_score.label("vec_score"))
         .select_from(Job)
         .join(top, true())
         .where(_job_embedded(model_version))
         .group_by(Job.id)
     )
-    return _base_jobs(user_id, filters, status, stmt).subquery("scores")
+    return _base_jobs(user_id, filters, status, stmt, only_ids).subquery("scores")
 
 
 def _missing(session: Session, user_id: int, filters: SearchFilters, *,
-             model_version: str, status: str) -> int:
+             model_version: str, status: str,
+             only_ids: Collection[int] | None = None) -> int:
     stmt = select(func.count(Job.id)).where(
         func.coalesce(_job_embedded(model_version), False).is_(False)
     )
-    return session.scalar(_base_jobs(user_id, filters, status, stmt)) or 0
+    return session.scalar(_base_jobs(user_id, filters, status, stmt, only_ids)) or 0
 
 
 def _usable(session: Session, user_id: int, model_version: str):
@@ -125,14 +183,17 @@ def usable_profile(session: Session, user_id: int,
 
 
 def job_vec_score(session: Session, user_id: int, job_id: int, *,
-                  model_version: str) -> float | None:
+                  model_version: str,
+                  query_embedding: list[float] | None = None,
+                  weights: tuple[float, float] | None = None) -> float | None:
     """vec_score of one of the user's jobs (no filters, any status but
     duplicate); None when the job or the profile has no usable embedding."""
     version, used = _usable(session, user_id, model_version)
     if version is None or used == 0:
         return None
     scores = _scores(user_id, version, SearchFilters(),
-                     model_version=model_version, status="all")
+                     model_version=model_version, status="all",
+                     query_embedding=query_embedding, weights=weights)
     v = session.scalar(
         select(scores.c.vec_score).where(scores.c.job_id == job_id)
     )
@@ -156,19 +217,26 @@ def current_match(match: Match | None, job_content_hash: str) -> Match | None:
 
 def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
               model_version: str, status: str = "open",
-              limit: int = 50, offset: int = 0) -> RankPage:
+              limit: int = 50, offset: int = 0,
+              query_embedding: list[float] | None = None,
+              weights: tuple[float, float] | None = None,
+              only_ids: Collection[int] | None = None) -> RankPage:
     _status_cond(status)
     _check_page(limit, offset)
     missing = _missing(session, user_id, filters,
-                       model_version=model_version, status=status)
+                       model_version=model_version, status=status,
+                       only_ids=only_ids)
     version, used = _usable(session, user_id, model_version)
     if version is None or used == 0:
         return RankPage(total=0, items=[], profile_version=version,
                         vectorized=False, missing_embeddings=missing,
                         chunks_used=used)
 
+    query_used = _effective_query(query_embedding, weights) is not None
     scores = _scores(user_id, version, filters,
-                     model_version=model_version, status=status)
+                     model_version=model_version, status=status,
+                     query_embedding=query_embedding, weights=weights,
+                     only_ids=only_ids)
     total = session.scalar(select(func.count()).select_from(scores)) or 0
     rows = session.execute(
         select(Job, scores.c.vec_score, Match)
@@ -192,12 +260,15 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
     items = [RankedJob(job=j, vec_score=float(v), match=m) for j, v, m in rows]
     return RankPage(total=total, items=items, profile_version=version,
                     vectorized=True, missing_embeddings=missing,
-                    chunks_used=used)
+                    chunks_used=used, query_used=query_used)
 
 
 def top_candidate_ids(session: Session, user_id: int, filters: SearchFilters, *,
                       model_version: str, n: int,
-                      status: str = "open") -> list[tuple[int, float]]:
+                      status: str = "open",
+                      query_embedding: list[float] | None = None,
+                      weights: tuple[float, float] | None = None,
+                      ) -> list[tuple[int, float]]:
     """The `n` best (job_id, vec_score) by vec_score only, same filters."""
     _status_cond(status)
     if n < 1:
@@ -206,7 +277,8 @@ def top_candidate_ids(session: Session, user_id: int, filters: SearchFilters, *,
     if version is None or used == 0:
         return []
     scores = _scores(user_id, version, filters,
-                     model_version=model_version, status=status)
+                     model_version=model_version, status=status,
+                     query_embedding=query_embedding, weights=weights)
     rows = session.execute(
         select(scores.c.job_id, scores.c.vec_score)
         .order_by(scores.c.vec_score.desc(), scores.c.job_id.asc())

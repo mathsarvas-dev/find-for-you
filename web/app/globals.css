@@ -10,11 +10,9 @@
  *     horários). Algarismos claros e largos, distingue 0/O e 1/l, e conversa
  *     com a Instrument Sans pelo mesmo desenho racional.
  *
- * Acento: azul-petróleo (#1f5f78 no claro, #7dbbd4 no escuro).
- *   "Rumo" é direção, curso de navegação: o petróleo vem da tinta das cartas
- *   náuticas. É frio o bastante para conviver com os cinzas quentes da base,
- *   fica longe do verde de "ok", do âmbar de aviso e do vermelho de erro, e
- *   não é roxo/índigo. Usado só em ações primárias, links e foco.
+ * Acento: verde-esmeralda (#0f7a55 no claro, #4cc795 no escuro), sobre cinzas
+ *   neutros. Fica longe do âmbar de aviso e do vermelho de erro, e não é
+ *   roxo/índigo. Usado só em ações primárias, links e foco.
  *
  * Regras: bordas de 1px, raio pequeno (4 px campos, 6 px cartões), sem sombras
  * grandes, sem gradientes, contraste AA nos dois temas.
@@ -2231,6 +2229,12 @@ select.input {
   gap: 0 var(--space-2);
 }
 
+/* Segunda linha (exclusões): mesmas colunas da primeira; os @media de .filters__fields valem aqui */
+.filters__fields--exclude {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) calc(16.5rem + var(--space-2));
+  padding-top: 0;
+}
+
 .filters__error {
   grid-column: 1 / -1;
   margin: var(--space-1) 0 0;
@@ -3253,5 +3257,324 @@ select.input {
 
   .stepper-wrap--horizontal .stepper__cta {
     margin-top: 0;
+  }
+}
+
+/* Vagas: barra de chat (frase → proposta) e chips dos filtros salvos */
+
+.chat {
+  margin-bottom: var(--space-4);
+}
+
+.chat__form {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+}
+
+.chat__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chat__row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat__row .button {
+  flex: none;
+}
+
+.chat__notice {
+  overflow-wrap: anywhere;
+}
+
+.chat__notice .actions {
+  margin-top: var(--space-3);
+  justify-content: flex-start;
+}
+
+.chat__proposal {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.chat__proposal-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.chat__notes {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.chat__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.filter-chips__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-field);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.filter-chip__icon {
+  flex: none;
+}
+
+.filter-chip__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Inclusão: neutro com check em --accent; exclusão: --danger com "sem …"; consulta: borda --accent */
+.chip--include {
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.chip--include .filter-chip__icon {
+  color: var(--accent);
+}
+
+.chip--exclude {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.chip--query {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.chip--query .filter-chip__icon {
+  color: var(--accent);
+}
+
+.filter-chip__remove,
+.filter-chip__edit {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-field);
+}
+
+.filter-chip__remove {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -2px -6px -2px 0;
+  padding: 0;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.filter-chip__remove:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.filter-chip__edit {
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.filter-chip__remove:focus-visible,
+.filter-chip__edit:focus-visible,
+.filter-chip__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filter-chip__input {
+  width: min(20rem, 60vw);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-field);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.filter-chips__pending {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px dashed currentColor;
+  border-radius: var(--radius-field);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--warn);
+}
+
+/* Celular: alvos de toque com pelo menos 40 px */
+@media (max-width: 560px) {
+  .filter-chip {
+    min-height: 40px;
+  }
+
+  .filter-chip__remove {
+    width: 40px;
+    height: 40px;
+    margin: -4px -8px -4px 0;
+  }
+
+  .filter-chip__edit {
+    min-height: 40px;
+  }
+
+  .filter-chip__input {
+    min-height: 40px;
+  }
+}
+
+/* Teste de qualidade: rotular vagas e relatório */
+.quality > .notice {
+  margin: 0;
+}
+
+.label-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.label-card__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.label-card__title a {
+  color: var(--accent);
+}
+
+.label-card__meta,
+.label-card__current {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.label-card__snippet {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.label-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.label-card__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.quality-verdict {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.quality-verdict--dentro_da_meta {
+  color: var(--ok);
+}
+
+.quality-verdict--abaixo_da_meta {
+  color: var(--warn);
+}
+
+.quality-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.quality-stats dt {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.quality-stats dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.quality-subhead {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.quality-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .label-card__actions .button {
+    flex: 1 1 40%;
+    justify-content: center;
   }
 }

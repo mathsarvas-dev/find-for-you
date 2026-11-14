@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./profile";
 import {
   DEFAULT_FILTERS,
+  defaultFilters,
   formatSalary,
   getMatch,
   getSearchProfile,
@@ -63,17 +64,54 @@ function item(extra: Partial<MatchItem> = {}): MatchItem {
   };
 }
 
+describe("exclusões e consulta", () => {
+  it("DEFAULT_FILTERS traz as exclusões vazias e isDefaultFilters as considera", () => {
+    for (const k of [
+      "exclude_countries",
+      "exclude_work_models",
+      "exclude_seniorities",
+      "exclude_languages",
+      "exclude_departments",
+      "title_exclude",
+    ] as const) {
+      expect(DEFAULT_FILTERS[k]).toEqual([]);
+      expect(isDefaultFilters({ ...DEFAULT_FILTERS, [k]: ["x"] })).toBe(false);
+    }
+  });
+
+  it("defaultFilters devolve arrays novos e DEFAULT_FILTERS é congelado", () => {
+    const a = defaultFilters();
+    a.countries.push("BR");
+    expect(defaultFilters().countries).toEqual([]);
+    expect(Object.isFrozen(DEFAULT_FILTERS)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_FILTERS.countries)).toBe(true);
+  });
+
+  it("PUT só envia query_text quando o argumento é passado", async () => {
+    const body = { filters: DEFAULT_FILTERS, query_text: null, query_pending: false };
+    const fn = mockFetch(async () => jsonResponse(200, body));
+    await putSearchProfile(DEFAULT_FILTERS);
+    expect("query_text" in JSON.parse(String(fn.mock.calls[0][1]?.body))).toBe(false);
+    await putSearchProfile(DEFAULT_FILTERS, null);
+    expect(JSON.parse(String(fn.mock.calls[1][1]?.body)).query_text).toBeNull();
+    await putSearchProfile(DEFAULT_FILTERS, "dados");
+    expect(JSON.parse(String(fn.mock.calls[2][1]?.body)).query_text).toBe("dados");
+  });
+});
+
 describe("search profile", () => {
-  it("GET /search-profile devolve os filtros", async () => {
-    const fetchMock = mockFetch(async () => jsonResponse(200, { filters: DEFAULT_FILTERS }));
-    await expect(getSearchProfile()).resolves.toEqual(DEFAULT_FILTERS);
+  it("GET /search-profile devolve o perfil completo", async () => {
+    const profile = { filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true };
+    const fetchMock = mockFetch(async () => jsonResponse(200, profile));
+    await expect(getSearchProfile()).resolves.toEqual(profile);
     expect(fetchMock.mock.calls[0][0]).toBe("http://localhost:8000/search-profile");
   });
 
   it("PUT /search-profile manda os filtros como corpo", async () => {
     const filters = { ...DEFAULT_FILTERS, countries: ["BR"], salary_min: 100000, salary_currency: "BRL" };
-    const fetchMock = mockFetch(async () => jsonResponse(200, { filters }));
-    await expect(putSearchProfile(filters)).resolves.toEqual(filters);
+    const profile = { filters, query_text: null, query_pending: false };
+    const fetchMock = mockFetch(async () => jsonResponse(200, profile));
+    await expect(putSearchProfile(filters)).resolves.toEqual(profile);
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe("http://localhost:8000/search-profile");
     expect(init?.method).toBe("PUT");

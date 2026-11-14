@@ -1,0 +1,227 @@
+"use client";
+
+import { useEffect, useRef, useState } from "react";
+import { filterChips, type Chip } from "@/lib/chatFilters";
+import type { SearchFilters } from "@/lib/matching";
+
+/** Mesmo limite da API para a consulta semântica. */
+export const QUERY_MAX = 300;
+
+const CHIP_CLASS: Record<Chip["kind"], string> = {
+  include: "chip--include",
+  exclude: "chip--exclude",
+  query: "chip--query",
+  salary: "chip--include",
+};
+
+/** Ícone por tipo: o estado nunca fica só na cor (a exclusão também diz "sem …"). */
+export function ChipIcon({ kind }: { kind: Chip["kind"] }) {
+  return (
+    <svg className="filter-chip__icon" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true">
+      {kind === "exclude" ? (
+        <>
+          <circle cx="6" cy="6" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+          <path d="M2.8 9.2 9.2 2.8" stroke="currentColor" strokeWidth="1.5" />
+        </>
+      ) : kind === "query" ? (
+        <path d="M6 1.5 7.2 4.8 10.5 6 7.2 7.2 6 10.5 4.8 7.2 1.5 6 4.8 4.8Z" fill="currentColor" />
+      ) : (
+        <path d="M2.5 6.2 5 8.7 9.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      )}
+    </svg>
+  );
+}
+
+/** Chip só para leitura (a proposta do chat usa o mesmo visual). */
+export function ChipView({ chip }: { chip: Chip }) {
+  return (
+    <li className={`filter-chip ${CHIP_CLASS[chip.kind]}`}>
+      <ChipIcon kind={chip.kind} />
+      <span className="filter-chip__label">{chip.label}</span>
+    </li>
+  );
+}
+
+type Props = {
+  filters: SearchFilters;
+  queryText: string | null;
+  queryPending: boolean;
+  onRemove: (chip: Chip) => void;
+  /**
+   * Texto novo da consulta; null remove. Se devolver uma promessa que resolve false (o salvamento
+   * falhou), o editor reabre com o texto digitado.
+   */
+  onEditQuery: (text: string | null) => void | Promise<boolean>;
+  /** O último chip foi removido: a página leva o foco para outro lugar (ex.: o campo do chat). */
+  onEmptied?: () => void;
+};
+
+/** Um chip por valor dos filtros salvos; "×" remove, o da consulta se edita no lugar. */
+export function FilterChips({ filters, queryText, queryPending, onRemove, onEditQuery, onEmptied }: Props) {
+  const chips = filterChips(filters, queryText);
+  const listRef = useRef<HTMLUListElement>(null);
+  /** Posição do "×" clicado: depois da remoção o foco vai para o "×" que ocupa esse lugar. */
+  const focusAt = useRef<number | null>(null);
+  const keys = chips.map((c) => c.key).join("|");
+
+  useEffect(() => {
+    const at = focusAt.current;
+    if (at === null) return;
+    focusAt.current = null;
+    const buttons = listRef.current?.querySelectorAll<HTMLButtonElement>(".filter-chip__remove") ?? [];
+    if (buttons.length > 0) buttons[Math.min(at, buttons.length - 1)].focus();
+    else onEmptied?.();
+  }, [keys, onEmptied]);
+
+  if (chips.length === 0 && !queryPending) return null;
+
+  const remove = (chip: Chip, index: number) => {
+    focusAt.current = index;
+    onRemove(chip);
+  };
+
+  return (
+    <div className="filter-chips">
+      {chips.length > 0 && (
+        <ul ref={listRef} className="filter-chips__list" aria-label="Filtros ativos">
+          {chips.map((chip, i) =>
+            chip.kind === "query" ? (
+              <QueryChip key={chip.key} chip={chip} onRemove={(c) => remove(c, i)} onEdit={onEditQuery} />
+            ) : (
+              <li key={chip.key} className={`filter-chip ${CHIP_CLASS[chip.kind]}`}>
+                <ChipIcon kind={chip.kind} />
+                <span className="filter-chip__label">{chip.label}</span>
+                <RemoveButton chip={chip} onRemove={(c) => remove(c, i)} />
+              </li>
+            ),
+          )}
+        </ul>
+      )}
+      {queryPending && (
+        <span className="filter-chips__pending" role="status">
+          consulta semântica pendente
+        </span>
+      )}
+    </div>
+  );
+}
+
+function RemoveButton({ chip, onRemove }: { chip: Chip; onRemove: (chip: Chip) => void }) {
+  return (
+    <button
+      type="button"
+      className="filter-chip__remove"
+      aria-label={`Remover filtro ${chip.label}`}
+      onClick={() => onRemove(chip)}
+    >
+      <span aria-hidden="true">×</span>
+    </button>
+  );
+}
+
+function QueryChip({
+  chip,
+  onRemove,
+  onEdit,
+}: {
+  chip: Chip;
+  onRemove: (chip: Chip) => void;
+  onEdit: (text: string | null) => void | Promise<boolean>;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [text, setText] = useState(chip.value);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLButtonElement>(null);
+  /** true: a edição está fechando por Enter/Escape; o foco volta ao chip (e o blur não salva de novo). */
+  const refocus = useRef(false);
+  /** O editor reabriu depois de uma falha disparada pelo blur: não rouba o foco de quem saiu. */
+  const quietReopen = useRef(false);
+  const mounted = useRef(true);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (editing) {
+      if (quietReopen.current) {
+        quietReopen.current = false;
+        return;
+      }
+      inputRef.current?.focus();
+      inputRef.current?.select();
+    } else if (refocus.current) {
+      refocus.current = false;
+      editRef.current?.focus();
+    }
+  }, [editing]);
+
+  function open() {
+    setText(chip.value);
+    setEditing(true);
+  }
+
+  function close() {
+    refocus.current = true;
+    setEditing(false);
+  }
+
+  /** Enter salva e devolve o foco ao chip; sair do campo (blur) também salva, sem mexer no foco. */
+  function save(returnFocus: boolean) {
+    const next = text.trim();
+    if (returnFocus) close();
+    else setEditing(false);
+    if (next === chip.value.trim()) return;
+    const result = onEdit(next === "" ? null : next);
+    if (result && typeof result.then === "function") {
+      void result.then((ok) => {
+        if (ok || !mounted.current) return;
+        // Falhou: mantém o editor aberto com o que a pessoa digitou (a página mostra o motivo).
+        quietReopen.current = !returnFocus;
+        refocus.current = false;
+        setText(next);
+        setEditing(true);
+      });
+    }
+  }
+
+  return (
+    <li className={`filter-chip ${CHIP_CLASS.query}`}>
+      <ChipIcon kind="query" />
+      {editing ? (
+        <input
+          ref={inputRef}
+          className="filter-chip__input"
+          type="text"
+          aria-label="Editar consulta"
+          autoComplete="off"
+          maxLength={QUERY_MAX}
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              save(true);
+            } else if (e.key === "Escape") {
+              e.preventDefault();
+              e.stopPropagation();
+              close();
+            }
+          }}
+          onBlur={() => {
+            if (!refocus.current) save(false);
+          }}
+        />
+      ) : (
+        <button ref={editRef} type="button" className="filter-chip__edit" onClick={open}>
+          <span className="filter-chip__label">{chip.label}</span>
+          <span className="sr-only"> (editar)</span>
+        </button>
+      )}
+      <RemoveButton chip={chip} onRemove={onRemove} />
+    </li>
+  );
+}

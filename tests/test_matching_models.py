@@ -120,5 +120,5 @@ def test_settings_defaults():
     assert s.match_batch == 3
     assert s.match_top_n == 30
     assert s.match_weight_profile == 1.0
-    assert s.match_weight_query == 0.0
+    assert s.match_weight_query == 0.5
     assert s.match_max_attempts == 3

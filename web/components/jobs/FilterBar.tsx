@@ -11,8 +11,10 @@ import {
 } from "@/lib/matching";
 
 export const FILTER_DEBOUNCE_MS = 300;
-/** Mesmo limite da API (listas de até 20 itens). */
+/** Mesmos limites da API: listas de até 20 itens; até 10 termos de até 60 caracteres no título. */
 const MAX_ITEMS = 20;
+const MAX_TITLE_TERMS = 10;
+const MAX_TITLE_TERM_LEN = 60;
 
 const WORK_MODELS: [WorkModelFilter, string][] = [
   ["remote", "remoto"],
@@ -32,7 +34,17 @@ type Draft = {
   currency: string;
   include_unknown: boolean;
   accept_no_salary: boolean;
+  /** Exclusões editáveis aqui (texto separado por vírgula). */
+  exclude_countries: string;
+  title_exclude: string;
+  /** Exclusões que só mudam por chip ou frase: o painel as preserva intactas. */
+  exclusions: Exclusions;
 };
+
+type Exclusions = Pick<
+  SearchFilters,
+  "exclude_work_models" | "exclude_seniorities" | "exclude_languages" | "exclude_departments"
+>;
 
 function toDraft(f: SearchFilters): Draft {
   return {
@@ -45,22 +57,48 @@ function toDraft(f: SearchFilters): Draft {
     currency: f.salary_currency ?? "",
     include_unknown: f.include_unknown,
     accept_no_salary: f.accept_no_salary,
+    exclude_countries: f.exclude_countries.join(", "),
+    title_exclude: f.title_exclude.join(", "),
+    exclusions: {
+      exclude_work_models: f.exclude_work_models,
+      exclude_seniorities: f.exclude_seniorities,
+      exclude_languages: f.exclude_languages,
+      exclude_departments: f.exclude_departments,
+    },
   };
 }
 
-function splitList(raw: string, upperCodes = false): string[] {
+const same = (v: string) => v;
+const lower = (v: string) => v.toLowerCase();
+const upper = (v: string) => v.toUpperCase();
+
+/** Lista separada por vírgula, sem repetidos (pela chave `norm`). Os limites são validados em `parse`. */
+function splitList(raw: string, { upperCodes = false, norm = same } = {}): string[] {
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const part of raw.split(",")) {
     let v = part.trim();
     if (!v) continue;
     if (upperCodes && v.length === 2) v = v.toUpperCase();
-    if (!out.includes(v)) out.push(v);
+    const k = norm(v);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
   }
-  return out.slice(0, MAX_ITEMS);
+  return out;
+}
+
+/** Tira da exclusão o que também está na inclusão (a inclusão vence). */
+function minus<T extends string>(exclude: T[], include: T[], norm: (v: string) => string = same): T[] {
+  const inc = new Set(include.map(norm));
+  return exclude.filter((v) => !inc.has(norm(v)));
 }
 
 type Parsed = { filters: SearchFilters; error: null } | { filters: null; error: Problem };
-type Problem = { field: "salary" | "currency"; message: string };
+type ProblemField = "salary" | "currency" | "countries" | "departments" | "exclude_countries" | "title_exclude";
+type Problem = { field: ProblemField; message: string };
+
+const problem = (field: ProblemField, message: string): Parsed => ({ filters: null, error: { field, message } });
 
 function parse(d: Draft): Parsed {
   const currency = d.currency.trim().toUpperCase() || null;
@@ -77,14 +115,33 @@ function parse(d: Draft): Parsed {
       };
     }
   }
+  const countries = splitList(d.countries, { upperCodes: true });
+  const departments = splitList(d.departments);
+  const excludeCountries = splitList(d.exclude_countries, { upperCodes: true });
+  const titleExclude = splitList(d.title_exclude, { norm: lower });
+  // Limites da API com mensagem própria (em vez de cortar em silêncio ou de um 422 genérico).
+  if (countries.length > MAX_ITEMS) return problem("countries", `Use até ${MAX_ITEMS} países.`);
+  if (departments.length > MAX_ITEMS) return problem("departments", `Use até ${MAX_ITEMS} departamentos.`);
+  if (excludeCountries.length > MAX_ITEMS) return problem("exclude_countries", `Use até ${MAX_ITEMS} países.`);
+  if (titleExclude.length > MAX_TITLE_TERMS) return problem("title_exclude", `Use até ${MAX_TITLE_TERMS} termos.`);
+  if (titleExclude.some((t) => t.length > MAX_TITLE_TERM_LEN)) {
+    return problem("title_exclude", `Cada termo pode ter até ${MAX_TITLE_TERM_LEN} caracteres.`);
+  }
+  const ex = d.exclusions;
   return {
     error: null,
     filters: {
-      countries: splitList(d.countries, true),
+      countries,
       work_models: d.work_models,
       seniorities: d.seniorities,
       languages: d.languages,
-      departments: splitList(d.departments),
+      departments,
+      exclude_countries: minus(excludeCountries, countries, upper),
+      exclude_work_models: minus(ex.exclude_work_models, d.work_models),
+      exclude_seniorities: minus(ex.exclude_seniorities, d.seniorities),
+      exclude_languages: minus(ex.exclude_languages, d.languages),
+      exclude_departments: minus(ex.exclude_departments, departments, lower),
+      title_exclude: titleExclude,
       salary_min: salary,
       salary_currency: currency,
       include_unknown: d.include_unknown,
@@ -123,6 +180,9 @@ function activeCount(d: Draft): number {
     d.seniorities.length > 0,
     d.languages.length > 0,
     d.salary.trim() !== "",
+    d.exclude_countries.trim() !== "",
+    d.title_exclude.trim() !== "",
+    ...Object.values(d.exclusions).map((list) => list.length > 0),
   ].filter(Boolean).length;
 }
 
@@ -130,8 +190,13 @@ const activeText = (n: number) =>
   n === 0 ? "nenhum ativo" : `${n} ${n === 1 ? "ativo" : "ativos"}`;
 
 type FilterBarProps = {
-  /** Filtros salvos; lidos só ao montar. */
+  /** Filtros salvos; lidos ao montar e quando `revision` muda. */
   initial: SearchFilters;
+  /**
+   * Muda quando os filtros salvos mudam por fora do painel (chat, chips): o painel redesenha
+   * a partir de `initial` e descarta o rascunho, para não salvar exclusões velhas depois.
+   */
+  revision: number;
   /** Chamado 300 ms depois da última mudança, só com filtros válidos. */
   onChange: (filters: SearchFilters) => void;
   /** Texto curto de estado ("salvando…"). */
@@ -143,10 +208,19 @@ type FilterBarProps = {
 };
 
 /** Filtros manuais. Cada mudança, depois do debounce, vira um PUT do perfil de busca (na página). */
-export function FilterBar({ initial, onChange, status, error, onEditing }: FilterBarProps) {
+export function FilterBar({ initial, revision, onChange, status, error, onEditing }: FilterBarProps) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial));
+  /** true: há edição da pessoa esperando o debounce. */
   const [dirty, setDirty] = useState(false);
-  const [problem, setProblem] = useState<Problem | null>(null);
+  const [issue, setIssue] = useState<Problem | null>(null);
+  const [seenRevision, setSeenRevision] = useState(revision);
+  if (revision !== seenRevision) {
+    // Ajuste durante o render (padrão do React para estado derivado de prop).
+    setSeenRevision(revision);
+    setDraft(toDraft(initial));
+    setDirty(false);
+    setIssue(null);
+  }
   /** null: segue a largura da tela; depois do primeiro clique, vale a escolha da pessoa. */
   const [chosenOpen, setChosenOpen] = useState<boolean | null>(null);
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, serverNarrow);
@@ -165,11 +239,30 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
     const timer = setTimeout(() => {
       const parsed = parse(draft);
       onEditingRef.current?.(false);
-      setProblem(parsed.error);
-      if (parsed.filters) onChangeRef.current(parsed.filters);
+      setIssue(parsed.error);
+      if (!parsed.filters) return;
+      setDirty(false);
+      // O campo mostra o que foi salvo (sem o país que passou a ser incluído).
+      const shown = parsed.filters.exclude_countries.join(", ");
+      if (splitList(draft.exclude_countries, { upperCodes: true }).join(", ") !== shown) {
+        setDraft((d) => ({ ...d, exclude_countries: shown }));
+      }
+      onChangeRef.current(parsed.filters);
     }, FILTER_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [draft, dirty]);
+
+  /** Marcar uma inclusão tira o mesmo valor da exclusão correspondente. */
+  function include(field: "work_models" | "seniorities" | "languages", value: string, on: boolean) {
+    const exKey = `exclude_${field}` as const;
+    const list = draft[field] as string[];
+    const patch: Record<string, unknown> = { [field]: toggle(list, value, on) };
+    if (on) {
+      const excluded = draft.exclusions[exKey] as string[];
+      patch.exclusions = { ...draft.exclusions, [exKey]: excluded.filter((v) => v !== value) };
+    }
+    update(patch as Partial<Draft>);
+  }
 
   function update(patch: Partial<Draft>) {
     setDraft((d) => ({ ...d, ...patch }));
@@ -177,8 +270,9 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
     onEditingRef.current?.(true);
   }
 
-  const salaryErr = problem?.field === "salary" ? problem.message : null;
-  const currencyErr = problem?.field === "currency" ? problem.message : null;
+  const salaryErr = issue?.field === "salary" ? issue.message : null;
+  const currencyErr = issue?.field === "currency" ? issue.message : null;
+  const errorOf = (field: ProblemField) => (issue?.field === field ? issue.message : null);
 
   return (
     <section className="panel filters" aria-labelledby={`${id}-title`}>
@@ -202,34 +296,22 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
 
       <div id={`${id}-body`} className="filters__body" hidden={!open}>
         <div className="filters__fields">
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-countries`}>
-              Países
-            </label>
-            <input
-              id={`${id}-countries`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="BR, PT, DE"
-              value={draft.countries}
-              onChange={(e) => update({ countries: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-departments`}>
-              Departamentos
-            </label>
-            <input
-              id={`${id}-departments`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="Engineering, Data"
-              value={draft.departments}
-              onChange={(e) => update({ departments: e.target.value })}
-            />
-          </div>
+          <TextField
+            id={`${id}-countries`}
+            label="Países"
+            placeholder="BR, PT, DE"
+            value={draft.countries}
+            error={errorOf("countries")}
+            onChange={(v) => update({ countries: v })}
+          />
+          <TextField
+            id={`${id}-departments`}
+            label="Departamentos"
+            placeholder="Engineering, Data"
+            value={draft.departments}
+            error={errorOf("departments")}
+            onChange={(v) => update({ departments: v })}
+          />
           <div className="filters__salary">
             <div className="field">
               <label className="field__label" htmlFor={`${id}-salary`}>
@@ -273,25 +355,43 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
             )}
           </div>
         </div>
+        <div className="filters__fields filters__fields--exclude">
+          <TextField
+            id={`${id}-exclude-countries`}
+            label="Excluir países"
+            placeholder="US, CN"
+            value={draft.exclude_countries}
+            error={errorOf("exclude_countries")}
+            onChange={(v) => update({ exclude_countries: v })}
+          />
+          <TextField
+            id={`${id}-title-exclude`}
+            label="Evitar no título"
+            placeholder="plantão, estágio"
+            value={draft.title_exclude}
+            error={errorOf("title_exclude")}
+            onChange={(v) => update({ title_exclude: v })}
+          />
+        </div>
 
         <div className="filters__groups">
           <OptionGroup
             legend="Modelo"
             options={WORK_MODELS}
             selected={draft.work_models}
-            onToggle={(v, on) => update({ work_models: toggle(draft.work_models, v, on) })}
+            onToggle={(v, on) => include("work_models", v, on)}
           />
           <OptionGroup
             legend="Idioma da vaga"
             options={LANGUAGES}
             selected={draft.languages}
-            onToggle={(v, on) => update({ languages: toggle(draft.languages, v, on) })}
+            onToggle={(v, on) => include("languages", v, on)}
           />
           <OptionGroup
             legend="Senioridade"
             options={SENIORITIES}
             selected={draft.seniorities}
-            onToggle={(v, on) => update({ seniorities: toggle(draft.seniorities, v, on) })}
+            onToggle={(v, on) => include("seniorities", v, on)}
           />
         </div>
 
@@ -325,6 +425,46 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
         </div>
       )}
     </section>
+  );
+}
+
+function TextField({
+  id,
+  label,
+  placeholder,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  error: string | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label className="field__label" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        className="input"
+        type="text"
+        autoComplete="off"
+        placeholder={placeholder}
+        value={value}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-err` : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && (
+        <p id={`${id}-err`} className="field__error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

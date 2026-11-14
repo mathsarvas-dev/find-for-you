@@ -382,3 +382,107 @@ def test_page_items_defer_job_embedding(env):
     s.expunge_all()
     page = rank_jobs(s, uid, F, model_version=MV)
     assert "embedding" not in page.items[0].job.__dict__
+
+
+def _setup_ab(env):
+    s, new_user, add_job, add_profile, _ = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV)])
+    a = add_job(uid, cid, embedding=e(0))
+    b = add_job(uid, cid, embedding=e(1))
+    return s, uid, a, b
+
+
+@db
+def test_query_combination_known_values(env):
+    s, uid, a, b = _setup_ab(env)
+    page = rank_jobs(s, uid, F, model_version=MV, query_embedding=e(1),
+                     weights=(1.0, 0.5))
+    got = {i.job.id: i.vec_score for i in page.items}
+    assert got[a] == pytest.approx((1 + 0.5 * 0.5) / 1.5, abs=1e-6)
+    assert got[b] == pytest.approx((0.5 + 0.5 * 1) / 1.5, abs=1e-6)
+    assert page.query_used is True
+
+
+@db
+def test_query_weight_reorders(env):
+    s, uid, a, b = _setup_ab(env)
+    page = rank_jobs(s, uid, F, model_version=MV, query_embedding=e(1),
+                     weights=(1.0, 3.0))
+    assert [i.job.id for i in page.items] == [b, a]
+    assert page.items[0].vec_score == pytest.approx(0.875, abs=1e-6)
+    assert page.items[1].vec_score == pytest.approx(0.625, abs=1e-6)
+
+
+@db
+def test_without_query_equals_4a(env):
+    s, uid, a, b = _setup_ab(env)
+    p1 = rank_jobs(s, uid, F, model_version=MV, query_embedding=None,
+                   weights=(1.0, 0.5))
+    p2 = rank_jobs(s, uid, F, model_version=MV, weights=(1.0, 0.0))
+    assert {i.job.id: i.vec_score for i in p1.items} == \
+        {i.job.id: i.vec_score for i in p2.items}
+    assert p1.query_used is False
+
+
+@db
+def test_zero_query_vector_ignored(env):
+    s, uid, a, b = _setup_ab(env)
+    p1 = rank_jobs(s, uid, F, model_version=MV, query_embedding=[0.0] * DIM,
+                   weights=(1.0, 0.5))
+    p2 = rank_jobs(s, uid, F, model_version=MV, weights=(1.0, 0.0))
+    got = {i.job.id: i.vec_score for i in p1.items}
+    assert not any(math.isnan(v) for v in got.values())
+    assert got == {i.job.id: i.vec_score for i in p2.items}
+    assert p1.query_used is False
+
+
+@db
+def test_query_score_bounds(env):
+    s, new_user, add_job, add_profile, _ = env
+    uid, cid = new_user()
+    add_profile(uid, 1, [(e(0), MV)])
+    a = add_job(uid, cid, embedding=e(0))
+    page = rank_jobs(s, uid, F, model_version=MV, query_embedding=e(0, -1.0),
+                     weights=(1.0, 1.0))
+    # s_perfil = 1, s_consulta = 0
+    assert page.items[0].vec_score == pytest.approx(0.5, abs=1e-6)
+    assert 0.0 <= page.items[0].vec_score <= 1.0
+    page0 = rank_jobs(s, uid, F, model_version=MV, query_embedding=e(0, -1.0),
+                      weights=(0.0, 0.0))
+    assert page0.items[0].vec_score == pytest.approx(1.0, abs=1e-6)
+    assert page0.query_used is False
+    assert page.items[0].job.id == a
+
+
+@db
+def test_only_ids_restricts_ranking(env):
+    s, uid, a, b = _setup_ab(env)
+    page = rank_jobs(s, uid, F, model_version=MV, only_ids=[a])
+    assert page.total == 1
+    assert [i.job.id for i in page.items] == [a]
+
+
+@db
+def test_usable_query_embedding_rules(env):
+    from rumo_core.matching.ranking import usable_query_embedding
+    from rumo_core.models import SearchProfile
+    s, new_user, *_ = env
+    uid, _cid = new_user()
+    assert usable_query_embedding(s, uid, MV) is None
+    sp = SearchProfile(user_id=uid, name="default", is_default=True,
+                       query_text="q", query_embedding=e(1),
+                       query_model_version="other")
+    s.add(sp)
+    s.commit()
+    assert usable_query_embedding(s, uid, MV) is None
+    sp.query_model_version = MV
+    sp.query_text = None
+    s.commit()
+    assert usable_query_embedding(s, uid, MV) is None
+    sp.query_text = "q"
+    s.commit()
+    got = usable_query_embedding(s, uid, MV)
+    assert got is not None and list(got) == e(1)
+    s.delete(sp)
+    s.commit()

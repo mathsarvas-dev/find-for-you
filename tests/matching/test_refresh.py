@@ -239,3 +239,22 @@ def test_only_current_profile_version(env):
     assert res.profile_version == 2 and res.created == 1
     versions = sorted(m.profile_version for m in _matches(uid) if m.job_id == jid)
     assert versions == [1, 2]
+
+
+def test_mark_pending_uses_query(env, monkeypatch):
+    from rumo_core.config import Settings
+    from rumo_core.matching import ranking
+    from rumo_core.config import get_settings
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, 1, e(0))
+    add_job(uid, cid, e(0))
+    b = add_job(uid, cid, e(1))
+    monkeypatch.setattr(
+        ranking, "get_settings",
+        lambda: Settings(_env_file=None, database_url=get_settings().database_url,
+                         match_weight_query=3.0),
+    )
+    with SessionLocal() as s:
+        mark_pending(s, uid, F, model_version=MV, n=1, query_embedding=e(1))
+    assert [m.job_id for m in _matches(uid)] == [b]

@@ -9,15 +9,24 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from api.chat_filters import router as chat_filters_router
 from api.deps import current_user_id
 from api.discovery import router as discovery_router
 from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
 from api.profile import router as profile_router
+from api.quality import router as quality_router
 from api.sources import router as sources_router
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
+from rumo_core.matching.chat_filters import (
+    INVALID_CHARS_MESSAGE,
+    NEGATION_MESSAGE,
+    QUERY_TOO_LONG_MESSAGE,
+)
+
+_QUERY_MESSAGES = {NEGATION_MESSAGE, QUERY_TOO_LONG_MESSAGE, INVALID_CHARS_MESSAGE}
 
 __all__ = ["app", "current_user_id"]
 
@@ -26,7 +35,7 @@ app = FastAPI(title="Rumo")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origin_list,
-    allow_methods=["GET", "POST", "PATCH", "PUT"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -36,6 +45,8 @@ app.include_router(sources_router)
 app.include_router(matching_router)
 app.include_router(discovery_router)
 app.include_router(overview_router)
+app.include_router(chat_filters_router)
+app.include_router(quality_router)
 
 
 def _json_safe(value):
@@ -51,13 +62,33 @@ def _json_safe(value):
     return value
 
 
+def _query_text_message(errors) -> str | None:
+    """Specific PT-BR string for a rejected taste text (never echoes the input)."""
+    for err in errors:
+        loc = err.get("loc", ())
+        if not loc or loc[0] != "body" or loc[-1] != "query_text":
+            continue
+        if err.get("type") == "string_too_long":
+            return QUERY_TOO_LONG_MESSAGE
+        if err.get("type") == "value_error":
+            msg = str(err.get("msg", "")).removeprefix("Value error, ")
+            if msg in _QUERY_MESSAGES:
+                return msg
+            return INVALID_CHARS_MESSAGE
+    return None
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
     # Same body as FastAPI's default handler, but an echoed Infinity/NaN input
     # would make the 422 itself fail to serialise (500).
+    errors = exc.errors()
+    message = _query_text_message(errors)
+    if message is not None:
+        return JSONResponse(status_code=422, content={"detail": message})
     return JSONResponse(
         status_code=422,
-        content={"detail": _json_safe(jsonable_encoder(exc.errors()))},
+        content={"detail": _json_safe(jsonable_encoder(errors))},
     )
 
 

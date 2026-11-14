@@ -9,7 +9,7 @@ def test_settings_read_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "x")
     get_settings.cache_clear()
     s = get_settings()
-    assert s.groq_model == "llama-3.3-70b-versatile"
+    assert s.groq_model == "openai/gpt-oss-120b"
     assert s.groq_max_per_minute == 25
     assert s.default_user_id == 1
     get_settings.cache_clear()
@@ -55,3 +55,8 @@ def test_collection_settings_constraints(monkeypatch, var, value):
 def test_collect_delay_may_be_zero(monkeypatch):
     monkeypatch.setenv("COLLECT_DELAY_SECONDS", "0")
     assert Settings(database_url="x", _env_file=None).collect_delay_seconds == 0
+
+
+def test_match_weight_query_default():
+    s = Settings(_env_file=None, database_url="x")
+    assert s.match_weight_query == 0.5
