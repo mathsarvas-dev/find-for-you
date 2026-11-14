@@ -36,10 +36,6 @@
   --danger: #b42318;
   --danger-bg: #fdf1ef;
   --danger-border: #f1c9c3;
-  /* Chips de filtro de inclusão (azul); a exclusão usa as cores de --danger */
-  --info: #1d4f91;
-  --info-bg: #eef4fb;
-  --info-border: #c3d6ee;
 
   --radius-field: 4px;
   --radius-card: 6px;
@@ -84,9 +80,6 @@
     --danger: #f28b7f;
     --danger-bg: #2a1a18;
     --danger-border: #5a2c26;
-    --info: #8db8f0;
-    --info-bg: #16202c;
-    --info-border: #2c4766;
     color-scheme: dark;
   }
 }
@@ -106,9 +99,6 @@
   --danger: #f28b7f;
   --danger-bg: #2a1a18;
   --danger-border: #5a2c26;
-  --info: #8db8f0;
-  --info-bg: #16202c;
-  --info-border: #2c4766;
   color-scheme: dark;
 }
 
@@ -3375,10 +3365,15 @@ select.input {
   overflow-wrap: anywhere;
 }
 
+/* Inclusão: neutro com check em --accent; exclusão: --danger com "sem …"; consulta: borda --accent */
 .chip--include {
-  color: var(--info);
-  background: var(--info-bg);
-  border-color: var(--info-border);
+  color: var(--text);
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+.chip--include .filter-chip__icon {
+  color: var(--accent);
 }
 
 .chip--exclude {
@@ -3480,6 +3475,6 @@ select.input {
   }
 
   .filter-chip__input {
-    min-height: 36px;
+    min-height: 40px;
   }
 }

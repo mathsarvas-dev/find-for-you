@@ -200,12 +200,39 @@ describe("FilterBar", () => {
       });
     });
 
-    it("'Evitar no título' guarda no máximo 10 termos", async () => {
+    it("mais de 10 termos em 'Evitar no título': erro no campo e nada é salvo", async () => {
       const onChange = renderBar();
-      const terms = Array.from({ length: 12 }, (_, i) => `t${i}`);
-      fireEvent.change(screen.getByLabelText("Evitar no título"), { target: { value: terms.join(", ") } });
+      const field = screen.getByLabelText("Evitar no título");
+      const terms = Array.from({ length: 11 }, (_, i) => `t${i}`);
+      fireEvent.change(field, { target: { value: terms.join(", ") } });
       await tick(300);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("Use até 10 termos.");
+      expect(field).toHaveAttribute("aria-invalid", "true");
+      fireEvent.change(field, { target: { value: terms.slice(0, 10).join(", ") } });
+      await tick(300);
+      expect(onChange).toHaveBeenCalledTimes(1);
       expect(onChange.mock.calls[0][0].title_exclude).toEqual(terms.slice(0, 10));
+      expect(field).not.toHaveAttribute("aria-invalid");
+    });
+
+    it("termo com mais de 60 caracteres: erro no campo", async () => {
+      const onChange = renderBar();
+      fireEvent.change(screen.getByLabelText("Evitar no título"), { target: { value: `ok, ${"x".repeat(61)}` } });
+      await tick(300);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole("alert")).toHaveTextContent("Cada termo pode ter até 60 caracteres.");
+    });
+
+    it("mais de 20 países (incluídos ou excluídos): erro no campo certo", async () => {
+      const onChange = renderBar();
+      const codes = Array.from({ length: 21 }, (_, i) => `C${String.fromCharCode(65 + i)}`).join(", ");
+      fireEvent.change(screen.getByLabelText("Excluir países"), { target: { value: codes } });
+      await tick(300);
+      expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByLabelText("Excluir países")).toHaveAttribute("aria-invalid", "true");
+      expect(screen.getByLabelText("Países")).not.toHaveAttribute("aria-invalid");
+      expect(screen.getByRole("alert")).toHaveTextContent("Use até 20 países.");
     });
 
     it("marcar uma inclusão tira o mesmo valor da exclusão", async () => {

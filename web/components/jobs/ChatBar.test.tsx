@@ -177,4 +177,39 @@ describe("ChatBar", () => {
     expect(within(r).getByText(`gosto: ${hostile}`)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
+
+  it("anuncia a proposta nova e devolve o foco ao campo depois de aplicar", async () => {
+    parse.mockResolvedValue(parsedQuery({ countries: ["PT"], work_models: ["remote"] }));
+    renderBar();
+    await ask("Portugal remoto");
+    expect(screen.getByRole("status")).toHaveTextContent("Proposta com 2 filtros.");
+    await act(async () => {
+      fireEvent.click(within(region()!).getByRole("button", { name: "Aplicar" }));
+    });
+    expect(input()).toHaveFocus();
+    expect(screen.getByRole("status")).toHaveTextContent("");
+  });
+
+  it("Descartar devolve o foco ao campo", async () => {
+    parse.mockResolvedValue(parsedQuery({ countries: ["PT"] }));
+    renderBar();
+    await ask("Portugal");
+    fireEvent.click(within(region()!).getByRole("button", { name: "Descartar" }));
+    expect(input()).toHaveFocus();
+  });
+
+  it("enquanto aplica a proposta, não envia outra frase", async () => {
+    parse.mockResolvedValue(parsedQuery({ countries: ["PT"] }));
+    let finish!: () => void;
+    const onApply = vi.fn(() => new Promise<void>((r) => (finish = r)));
+    renderBar(onApply);
+    await ask("Portugal");
+    fireEvent.click(within(region()!).getByRole("button", { name: "Aplicar" }));
+    fireEvent.change(input(), { target: { value: "outra frase" } });
+    const submit = screen.getAllByRole("button", { name: "Aplicar" })[0];
+    expect(submit).toBeDisabled();
+    fireEvent.submit(input().closest("form")!);
+    expect(parse).toHaveBeenCalledTimes(1);
+    await act(async () => finish());
+  });
 });

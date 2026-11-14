@@ -109,4 +109,41 @@ describe("FilterChips", () => {
     expect(screen.getByText(`gosto: ${hostile}`)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
   });
+
+  it("sair do campo da consulta (blur) salva a edição", () => {
+    const { onEditQuery } = renderChips(filters(), { queryText: "dados" });
+    fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+    const input = screen.getByRole("textbox", { name: "Editar consulta" });
+    fireEvent.change(input, { target: { value: "produto" } });
+    fireEvent.blur(input);
+    expect(onEditQuery).toHaveBeenCalledTimes(1);
+    expect(onEditQuery).toHaveBeenCalledWith("produto");
+    expect(screen.queryByRole("textbox", { name: "Editar consulta" })).toBeNull();
+  });
+
+  it("Enter não salva duas vezes (o blur ao fechar não repete)", () => {
+    const { onEditQuery } = renderChips(filters(), { queryText: "dados" });
+    fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+    const input = screen.getByRole("textbox", { name: "Editar consulta" });
+    fireEvent.change(input, { target: { value: "produto" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    fireEvent.blur(input);
+    expect(onEditQuery).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois de remover, o foco vai para o × que ocupa o lugar; sem chips, chama onEmptied", () => {
+    const onRemove = vi.fn();
+    const onEmptied = vi.fn();
+    const props = { queryText: null, queryPending: false, onRemove, onEditQuery: vi.fn(), onEmptied };
+    const { rerender } = render(<FilterChips filters={filters({ countries: ["BR", "PT", "DE"] })} {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Remover filtro PT" }));
+    rerender(<FilterChips filters={filters({ countries: ["BR", "DE"] })} {...props} />);
+    expect(screen.getByRole("button", { name: "Remover filtro DE" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Remover filtro DE" }));
+    rerender(<FilterChips filters={filters({ countries: ["BR"] })} {...props} />);
+    expect(screen.getByRole("button", { name: "Remover filtro BR" })).toHaveFocus();
+    fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+    rerender(<FilterChips filters={filters()} {...props} />);
+    expect(onEmptied).toHaveBeenCalledTimes(1);
+  });
 });

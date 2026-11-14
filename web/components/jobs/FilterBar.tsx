@@ -11,9 +11,10 @@ import {
 } from "@/lib/matching";
 
 export const FILTER_DEBOUNCE_MS = 300;
-/** Mesmos limites da API: listas de até 20 itens; até 10 termos a evitar no título. */
+/** Mesmos limites da API: listas de até 20 itens; até 10 termos de até 60 caracteres no título. */
 const MAX_ITEMS = 20;
 const MAX_TITLE_TERMS = 10;
+const MAX_TITLE_TERM_LEN = 60;
 
 const WORK_MODELS: [WorkModelFilter, string][] = [
   ["remote", "remoto"],
@@ -71,8 +72,8 @@ const same = (v: string) => v;
 const lower = (v: string) => v.toLowerCase();
 const upper = (v: string) => v.toUpperCase();
 
-/** Lista separada por vírgula, sem repetidos (pela chave `norm`), até `max` itens. */
-function splitList(raw: string, { upperCodes = false, norm = same, max = MAX_ITEMS } = {}): string[] {
+/** Lista separada por vírgula, sem repetidos (pela chave `norm`). Os limites são validados em `parse`. */
+function splitList(raw: string, { upperCodes = false, norm = same } = {}): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const part of raw.split(",")) {
@@ -84,7 +85,7 @@ function splitList(raw: string, { upperCodes = false, norm = same, max = MAX_ITE
     seen.add(k);
     out.push(v);
   }
-  return out.slice(0, max);
+  return out;
 }
 
 /** Tira da exclusão o que também está na inclusão (a inclusão vence). */
@@ -94,7 +95,10 @@ function minus<T extends string>(exclude: T[], include: T[], norm: (v: string) =
 }
 
 type Parsed = { filters: SearchFilters; error: null } | { filters: null; error: Problem };
-type Problem = { field: "salary" | "currency"; message: string };
+type ProblemField = "salary" | "currency" | "countries" | "departments" | "exclude_countries" | "title_exclude";
+type Problem = { field: ProblemField; message: string };
+
+const problem = (field: ProblemField, message: string): Parsed => ({ filters: null, error: { field, message } });
 
 function parse(d: Draft): Parsed {
   const currency = d.currency.trim().toUpperCase() || null;
@@ -113,6 +117,16 @@ function parse(d: Draft): Parsed {
   }
   const countries = splitList(d.countries, { upperCodes: true });
   const departments = splitList(d.departments);
+  const excludeCountries = splitList(d.exclude_countries, { upperCodes: true });
+  const titleExclude = splitList(d.title_exclude, { norm: lower });
+  // Limites da API com mensagem própria (em vez de cortar em silêncio ou de um 422 genérico).
+  if (countries.length > MAX_ITEMS) return problem("countries", `Use até ${MAX_ITEMS} países.`);
+  if (departments.length > MAX_ITEMS) return problem("departments", `Use até ${MAX_ITEMS} departamentos.`);
+  if (excludeCountries.length > MAX_ITEMS) return problem("exclude_countries", `Use até ${MAX_ITEMS} países.`);
+  if (titleExclude.length > MAX_TITLE_TERMS) return problem("title_exclude", `Use até ${MAX_TITLE_TERMS} termos.`);
+  if (titleExclude.some((t) => t.length > MAX_TITLE_TERM_LEN)) {
+    return problem("title_exclude", `Cada termo pode ter até ${MAX_TITLE_TERM_LEN} caracteres.`);
+  }
   const ex = d.exclusions;
   return {
     error: null,
@@ -122,12 +136,12 @@ function parse(d: Draft): Parsed {
       seniorities: d.seniorities,
       languages: d.languages,
       departments,
-      exclude_countries: minus(splitList(d.exclude_countries, { upperCodes: true }), countries, upper),
+      exclude_countries: minus(excludeCountries, countries, upper),
       exclude_work_models: minus(ex.exclude_work_models, d.work_models),
       exclude_seniorities: minus(ex.exclude_seniorities, d.seniorities),
       exclude_languages: minus(ex.exclude_languages, d.languages),
       exclude_departments: minus(ex.exclude_departments, departments, lower),
-      title_exclude: splitList(d.title_exclude, { norm: lower, max: MAX_TITLE_TERMS }),
+      title_exclude: titleExclude,
       salary_min: salary,
       salary_currency: currency,
       include_unknown: d.include_unknown,
@@ -198,14 +212,14 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial));
   /** true: há edição da pessoa esperando o debounce. */
   const [dirty, setDirty] = useState(false);
-  const [problem, setProblem] = useState<Problem | null>(null);
+  const [issue, setIssue] = useState<Problem | null>(null);
   const [seenRevision, setSeenRevision] = useState(revision);
   if (revision !== seenRevision) {
     // Ajuste durante o render (padrão do React para estado derivado de prop).
     setSeenRevision(revision);
     setDraft(toDraft(initial));
     setDirty(false);
-    setProblem(null);
+    setIssue(null);
   }
   /** null: segue a largura da tela; depois do primeiro clique, vale a escolha da pessoa. */
   const [chosenOpen, setChosenOpen] = useState<boolean | null>(null);
@@ -225,7 +239,7 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
     const timer = setTimeout(() => {
       const parsed = parse(draft);
       onEditingRef.current?.(false);
-      setProblem(parsed.error);
+      setIssue(parsed.error);
       if (!parsed.filters) return;
       setDirty(false);
       // O campo mostra o que foi salvo (sem o país que passou a ser incluído).
@@ -256,8 +270,9 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
     onEditingRef.current?.(true);
   }
 
-  const salaryErr = problem?.field === "salary" ? problem.message : null;
-  const currencyErr = problem?.field === "currency" ? problem.message : null;
+  const salaryErr = issue?.field === "salary" ? issue.message : null;
+  const currencyErr = issue?.field === "currency" ? issue.message : null;
+  const errorOf = (field: ProblemField) => (issue?.field === field ? issue.message : null);
 
   return (
     <section className="panel filters" aria-labelledby={`${id}-title`}>
@@ -281,34 +296,22 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
 
       <div id={`${id}-body`} className="filters__body" hidden={!open}>
         <div className="filters__fields">
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-countries`}>
-              Países
-            </label>
-            <input
-              id={`${id}-countries`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="BR, PT, DE"
-              value={draft.countries}
-              onChange={(e) => update({ countries: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-departments`}>
-              Departamentos
-            </label>
-            <input
-              id={`${id}-departments`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="Engineering, Data"
-              value={draft.departments}
-              onChange={(e) => update({ departments: e.target.value })}
-            />
-          </div>
+          <TextField
+            id={`${id}-countries`}
+            label="Países"
+            placeholder="BR, PT, DE"
+            value={draft.countries}
+            error={errorOf("countries")}
+            onChange={(v) => update({ countries: v })}
+          />
+          <TextField
+            id={`${id}-departments`}
+            label="Departamentos"
+            placeholder="Engineering, Data"
+            value={draft.departments}
+            error={errorOf("departments")}
+            onChange={(v) => update({ departments: v })}
+          />
           <div className="filters__salary">
             <div className="field">
               <label className="field__label" htmlFor={`${id}-salary`}>
@@ -353,34 +356,22 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
           </div>
         </div>
         <div className="filters__fields filters__fields--exclude">
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-exclude-countries`}>
-              Excluir países
-            </label>
-            <input
-              id={`${id}-exclude-countries`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="US, CN"
-              value={draft.exclude_countries}
-              onChange={(e) => update({ exclude_countries: e.target.value })}
-            />
-          </div>
-          <div className="field">
-            <label className="field__label" htmlFor={`${id}-title-exclude`}>
-              Evitar no título
-            </label>
-            <input
-              id={`${id}-title-exclude`}
-              className="input"
-              type="text"
-              autoComplete="off"
-              placeholder="plantão, estágio"
-              value={draft.title_exclude}
-              onChange={(e) => update({ title_exclude: e.target.value })}
-            />
-          </div>
+          <TextField
+            id={`${id}-exclude-countries`}
+            label="Excluir países"
+            placeholder="US, CN"
+            value={draft.exclude_countries}
+            error={errorOf("exclude_countries")}
+            onChange={(v) => update({ exclude_countries: v })}
+          />
+          <TextField
+            id={`${id}-title-exclude`}
+            label="Evitar no título"
+            placeholder="plantão, estágio"
+            value={draft.title_exclude}
+            error={errorOf("title_exclude")}
+            onChange={(v) => update({ title_exclude: v })}
+          />
         </div>
 
         <div className="filters__groups">
@@ -434,6 +425,46 @@ export function FilterBar({ initial, revision, onChange, status, error, onEditin
         </div>
       )}
     </section>
+  );
+}
+
+function TextField({
+  id,
+  label,
+  placeholder,
+  value,
+  error,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  placeholder: string;
+  value: string;
+  error: string | null;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="field">
+      <label className="field__label" htmlFor={id}>
+        {label}
+      </label>
+      <input
+        id={id}
+        className="input"
+        type="text"
+        autoComplete="off"
+        placeholder={placeholder}
+        value={value}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={error ? `${id}-err` : undefined}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      {error && (
+        <p id={`${id}-err`} className="field__error" role="alert">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }
 

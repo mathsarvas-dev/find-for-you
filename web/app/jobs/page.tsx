@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChatBar } from "@/components/jobs/ChatBar";
 import { FilterBar } from "@/components/jobs/FilterBar";
 import { FilterChips } from "@/components/jobs/FilterChips";
@@ -55,6 +55,18 @@ function refreshText(r: RefreshResult): string {
   return r.already_ok > 0 ? `${head}; ${r.already_ok} já tinham nota.` : `${head}.`;
 }
 
+/** Filtros e consulta como a página os quer (pedidos) ou como o servidor confirmou. */
+type Intent = { filters: SearchFilters; queryText: string | null };
+
+/** Aba visível: o polling pausa com a aba oculta e volta quando ela reaparece. */
+function subscribeVisibility(onChange: () => void) {
+  if (typeof document === "undefined") return () => {};
+  document.addEventListener("visibilitychange", onChange);
+  return () => document.removeEventListener("visibilitychange", onChange);
+}
+const isVisible = () => typeof document === "undefined" || document.visibilityState !== "hidden";
+const serverVisible = () => true;
+
 /** Teclas de atalho não valem enquanto a pessoa digita. */
 function isTyping(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
@@ -71,6 +83,8 @@ export default function JobsPage() {
   const [queryPending, setQueryPending] = useState(false);
   /** Sobe quando os filtros mudam por fora do painel manual (chat, chips): ele redesenha. */
   const [revision, setRevision] = useState(0);
+  /** O chat está gravando uma proposta: a barra não aceita outra frase até terminar. */
+  const [applyingProposal, setApplyingProposal] = useState(false);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [items, setItems] = useState<MatchItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -94,7 +108,17 @@ export default function JobsPage() {
   const saveSeq = useRef(0);
   const mounted = useRef(true);
   const itemsRef = useRef<MatchItem[]>([]);
-  const queryPendingRef = useRef(false);
+  /**
+   * Últimos filtros/consulta PEDIDOS (atualizado antes de cada PUT): base de toda ação nova,
+   * para duas ações seguidas não partirem do mesmo estado salvo e uma apagar a outra.
+   */
+  const intended = useRef<Intent | null>(null);
+  /** Últimos filtros/consulta confirmados pelo servidor (para voltar quando um PUT falha). */
+  const confirmed = useRef<Intent | null>(null);
+  /** Salvamento mais recente: um salvamento substituído responde com o resultado dele. */
+  const lastSave = useRef<Promise<boolean> | null>(null);
+  const chatInputRef = useRef<HTMLInputElement>(null);
+  const visible = useSyncExternalStore(subscribeVisibility, isVisible, serverVisible);
   /** Seleção atual para o atalho de teclado (várias teclas antes do próximo render). */
   const selectedRef = useRef<number | null>(null);
   const refreshOverview = useRefreshOverview();
@@ -116,10 +140,6 @@ export default function JobsPage() {
     if (page.query_used) setQueryPending(false);
   }, []);
 
-  useEffect(() => {
-    queryPendingRef.current = queryPending;
-  }, [queryPending]);
-
   // Carga inicial (e "Tentar de novo"): filtros salvos e primeira página.
   useEffect(() => {
     const id = ++latest.current;
@@ -130,6 +150,9 @@ export default function JobsPage() {
     ])
       .then(([saved, page]) => {
         if (cancelled || id !== latest.current) return;
+        const base = { filters: saved.filters, queryText: saved.query_text };
+        intended.current = base;
+        confirmed.current = base;
         setFilters(saved.filters);
         setQueryText(saved.query_text);
         setQueryPending(saved.query_pending);
@@ -167,63 +190,104 @@ export default function JobsPage() {
     }
   }, [apply]);
 
+  /** Mostra um estado de filtros (pedido ou confirmado) nos chips e, se `resync`, no painel. */
+  const show = useCallback((state: Intent, resync: boolean) => {
+    setFilters(state.filters);
+    setQueryText(state.queryText);
+    if (resync) {
+      // O painel redesenha e descarta o rascunho (e o debounce que ele esperava).
+      setRevision((r) => r + 1);
+      setEditing(false);
+    }
+  }, []);
+
   /**
    * O único caminho de gravação dos filtros (painel manual, chat e chips): salva o perfil de
-   * busca e recarrega a lista. `queryText` omitido preserva a consulta salva; null a apaga.
-   * `resync` (chat e chips) faz o painel manual redesenhar a partir do que foi salvo.
-   * Devolve false quando o PUT falhou.
+   * busca e recarrega a lista. `queryText` omitido preserva a consulta; null a apaga.
+   * `external` (chat, chips, consulta): o painel manual redesenha ANTES do PUT, para que um
+   * rascunho velho dele não reverta a mudança. O salvamento do próprio painel nunca o redesenha.
+   * Devolve true só se a mudança valeu: um salvamento substituído devolve o resultado do mais
+   * novo (que partiu deste, via `intended`); uma falha devolve false.
    */
   const saveFilters = useCallback(
-    async (next: SearchFilters, queryText?: string | null, resync = false): Promise<boolean> => {
+    (next: SearchFilters, queryText?: string | null, external = false): Promise<boolean> => {
       const saveId = ++saveSeq.current;
+      const want: Intent = {
+        filters: next,
+        queryText: queryText === undefined ? (intended.current?.queryText ?? null) : queryText,
+      };
+      intended.current = want;
+      show(want, external);
       // Listas pedidas antes deste salvamento usam filtros velhos: descarta.
       ++latest.current;
       setSaving(true);
       setSaveError(null);
-      try {
-        const saved =
-          queryText === undefined ? await putSearchProfile(next) : await putSearchProfile(next, queryText);
-        if (!mounted.current || saveId !== saveSeq.current) return true;
-        setFilters(saved.filters);
-        setQueryText(saved.query_text);
-        setQueryPending(saved.query_pending);
-        if (resync) {
-          // O rascunho do painel foi descartado junto: nada mais espera o debounce.
-          setRevision((r) => r + 1);
-          setEditing(false);
+      const superseded = () => saveId !== saveSeq.current;
+      const run = (async () => {
+        try {
+          const saved =
+            queryText === undefined ? await putSearchProfile(next) : await putSearchProfile(next, queryText);
+          if (!mounted.current) return false;
+          // Resposta fora de ordem: só a do salvamento mais recente atualiza o estado.
+          if (superseded()) return (await lastSave.current) ?? false;
+          const state = { filters: saved.filters, queryText: saved.query_text };
+          confirmed.current = state;
+          intended.current = state;
+          show(state, false);
+          setQueryPending(saved.query_pending);
+          await reloadList();
+          return true;
+        } catch (err) {
+          if (!mounted.current) return false;
+          if (superseded()) return (await lastSave.current) ?? false;
+          setSaveError(message(err));
+          // Volta ao que o servidor tem; o painel só redesenha se a mudança veio de fora dele.
+          if (confirmed.current) {
+            intended.current = confirmed.current;
+            show(confirmed.current, external);
+          }
+          return false;
+        } finally {
+          // Sempre limpa, mesmo se outra recarga da lista correu no meio do PUT.
+          if (mounted.current && !superseded()) setSaving(false);
         }
-        await reloadList();
-        return true;
-      } catch (err) {
-        if (mounted.current && saveId === saveSeq.current) setSaveError(message(err));
-        return false;
-      } finally {
-        // Sempre limpa, mesmo se outra recarga da lista correu no meio do PUT.
-        if (mounted.current && saveId === saveSeq.current) setSaving(false);
-      }
+      })();
+      lastSave.current = run;
+      return run;
     },
-    [reloadList],
+    [reloadList, show],
   );
 
   /** "Aplicar" do chat: funde a proposta (a frase vence) e grava pelo mesmo caminho do painel. */
   async function applyProposal(p: ParsedQuery) {
-    if (!filters) return;
-    const merged = mergeProposal(filters, queryText, p);
-    const ok = await saveFilters(merged.filters, merged.queryText, true);
+    const base = intended.current;
+    if (!base) return;
+    const merged = mergeProposal(base.filters, base.queryText, p);
+    setApplyingProposal(true);
+    let ok = false;
+    try {
+      ok = await saveFilters(merged.filters, merged.queryText, true);
+    } finally {
+      if (mounted.current) setApplyingProposal(false);
+    }
     // Rejeitar mantém a proposta na barra de chat; o erro aparece no painel de filtros.
     if (!ok) throw new Error("save failed");
   }
 
   function removeFilterChip(chip: Chip) {
-    if (!filters) return;
-    const next = removeChip(filters, queryText, chip);
+    const base = intended.current;
+    if (!base) return;
+    const next = removeChip(base.filters, base.queryText, chip);
     void saveFilters(next.filters, next.queryText, true);
   }
 
   function editQuery(text: string | null) {
-    if (!filters) return;
-    void saveFilters(filters, text, true);
+    const base = intended.current;
+    if (!base) return;
+    void saveFilters(base.filters, text, true);
   }
+
+  const focusChat = useCallback(() => chatInputRef.current?.focus(), []);
 
   /** 409 de filtros salvos inválidos: grava os padrões e recomeça. */
   async function restoreDefaults() {
@@ -275,10 +339,10 @@ export default function JobsPage() {
     }
   }
 
-  // Polling a cada 10 s só enquanto alguma vaga estiver "pendente" ou a consulta semântica
-  // esperar o vetor; para num erro e ao desmontar.
+  // Polling a cada 10 s só enquanto alguma vaga estiver "pendente"; pausa com a aba oculta,
+  // para num erro e ao desmontar.
   const pending = hasPending(items);
-  const polling = (pending || queryPending) && pollError === null;
+  const polling = pending && pollError === null && visible;
   useEffect(() => {
     if (!polling) return;
     let cancelled = false;
@@ -302,7 +366,7 @@ export default function JobsPage() {
         const scoring = hasPending(merged);
         // A fila da IA esvaziou: as notas novas entram nos contadores da casca.
         if (wasScoring && !scoring) refreshOverview();
-        if (scoring || (queryPendingRef.current && !page.query_used)) timer = setTimeout(poll, POLL_MS);
+        if (scoring) timer = setTimeout(poll, POLL_MS);
       } catch (err) {
         if (!cancelled) setPollError(message(err));
       }
@@ -313,6 +377,39 @@ export default function JobsPage() {
       clearTimeout(timer);
     };
   }, [polling, apply, refreshOverview]);
+
+  // Consulta semântica esperando o vetor: a cada 10 s relê o perfil de busca e para quando o
+  // SERVIDOR disser que não está mais pendente (query_used pode ficar false para sempre, ex.:
+  // peso da consulta 0). Sem perfil vetorizado o worker não ranqueia: não consulta. Pausa com
+  // a aba oculta.
+  const queryPolling = queryPending && meta !== null && meta.vectorized && pollError === null && visible;
+  useEffect(() => {
+    if (!queryPolling) return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      const seq = saveSeq.current;
+      try {
+        const profile = await getSearchProfile();
+        if (cancelled) return;
+        // Um salvamento no meio traz o próprio query_pending: esta resposta não vale.
+        if (seq !== saveSeq.current || profile.query_pending) {
+          timer = setTimeout(poll, POLL_MS);
+          return;
+        }
+        setQueryPending(false);
+        // O vetor ficou pronto: a lista passa a usar a consulta.
+        void reloadList();
+      } catch (err) {
+        if (!cancelled) setPollError(message(err));
+      }
+    };
+    timer = setTimeout(poll, POLL_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [queryPolling, reloadList]);
 
   // Detalhe da vaga selecionada; relido quando a avaliação dela muda (polling).
   const selected = items.find((i) => i.job.id === selectedId);
@@ -506,13 +603,14 @@ export default function JobsPage() {
         <>
           {hasProfile && (
             <>
-              <ChatBar onApply={applyProposal} />
+              <ChatBar onApply={applyProposal} disabled={applyingProposal} inputRef={chatInputRef} />
               <FilterChips
                 filters={filters}
                 queryText={queryText}
-                queryPending={queryPending}
+                queryPending={queryPending && meta.vectorized}
                 onRemove={removeFilterChip}
                 onEditQuery={editQuery}
+                onEmptied={focusChat}
               />
             </>
           )}
@@ -587,11 +685,9 @@ export default function JobsPage() {
               {(hasMore || moreError || polling) && (
                 <div className="panel__foot">
                   <span aria-live="polite">
-                    {polling && pending
+                    {polling
                       ? `Avaliando ${countText(pendingCount)}. A lista confere a cada 10 segundos.`
-                      : polling
-                        ? "Preparando a consulta semântica. A lista confere a cada 10 segundos."
-                        : `${items.length} de ${meta.total}`}
+                      : `${items.length} de ${meta.total}`}
                   </span>
                   {moreError && (
                     <span className="field__error matches__more-error" role="alert">

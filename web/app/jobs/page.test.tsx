@@ -652,36 +652,195 @@ describe("JobsPage", () => {
       expect(screen.getByLabelText("Países")).toHaveValue("");
     });
 
-    it("query_pending mostra o selo e o polling para quando query_used vira true", async () => {
+    it("consulta pendente: selo e releitura do perfil até o SERVIDOR dizer que ficou pronta", async () => {
+      // query_used fica false para sempre (ex.: peso da consulta 0): não pode prender o polling.
       m.list.mockResolvedValue(matchPage([matchItem(1)]));
       m.parse.mockResolvedValue(parsedQuery({}, { query_text: "dados" }));
       m.put.mockImplementation(async (f, q) => ({ filters: f, query_text: q ?? null, query_pending: true }));
       await renderPage();
       await askAndApply("algo com dados");
       expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
+      expect(m.profile).toHaveBeenCalledTimes(1);
       expect(m.list).toHaveBeenCalledTimes(2);
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true });
       await tick(10_000);
-      expect(m.list).toHaveBeenCalledTimes(3);
+      expect(m.profile).toHaveBeenCalledTimes(2);
       expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
-      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: false });
       await tick(10_000);
-      expect(m.list).toHaveBeenCalledTimes(4);
+      expect(m.profile).toHaveBeenCalledTimes(3);
       expect(screen.queryByText("consulta semântica pendente")).toBeNull();
-      await tick(30_000);
-      expect(m.list).toHaveBeenCalledTimes(4);
+      // A lista é relida uma vez para usar a consulta; depois nada mais.
+      expect(m.list).toHaveBeenCalledTimes(3);
+      await tick(60_000);
+      expect(m.profile).toHaveBeenCalledTimes(3);
+      expect(m.list).toHaveBeenCalledTimes(3);
     });
 
-    it("query_pending salvo antes também consulta a cada 10 s", async () => {
+    it("query_used na lista também tira o selo, sem polling", async () => {
       m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true });
+      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      await renderPage();
+      expect(screen.queryByText("consulta semântica pendente")).toBeNull();
+      await tick(60_000);
+      expect(m.profile).toHaveBeenCalledTimes(1);
+      expect(m.list).toHaveBeenCalledTimes(1);
+    });
+
+    it("perfil nunca vetorizado: sem selo e sem polling da consulta", async () => {
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true });
+      m.list.mockResolvedValue(matchPage([], { profile_version: 2, vectorized: false, chunks_used: 0 }));
+      await renderPage();
+      expect(screen.getByText("Seu perfil ainda está sendo vetorizado.")).toBeInTheDocument();
+      expect(screen.queryByText("consulta semântica pendente")).toBeNull();
+      await tick(120_000);
+      expect(m.profile).toHaveBeenCalledTimes(1);
+      expect(m.list).toHaveBeenCalledTimes(1);
+    });
+
+    it("aba oculta pausa os dois pollings; ao voltar, retomam", async () => {
+      let state: DocumentVisibilityState = "visible";
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
+      const setVisibility = (next: DocumentVisibilityState) =>
+        act(() => {
+          state = next;
+          document.dispatchEvent(new Event("visibilitychange"));
+        });
+      try {
+        m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true });
+        m.list.mockResolvedValue(matchPage([matchItem(1, { state: "pendente" })]));
+        const { unmount } = await renderPage();
+        setVisibility("hidden");
+        await tick(60_000);
+        expect(m.list).toHaveBeenCalledTimes(1);
+        expect(m.profile).toHaveBeenCalledTimes(1);
+        setVisibility("visible");
+        await tick(10_000);
+        expect(m.list).toHaveBeenCalledTimes(2);
+        expect(m.profile).toHaveBeenCalledTimes(2);
+        // Sem intervalos duplicados: mais 10 s, uma consulta de cada.
+        await tick(10_000);
+        expect(m.list).toHaveBeenCalledTimes(3);
+        expect(m.profile).toHaveBeenCalledTimes(3);
+        unmount();
+        await tick(60_000);
+        expect(m.list).toHaveBeenCalledTimes(3);
+        expect(m.profile).toHaveBeenCalledTimes(3);
+      } finally {
+        delete (document as { visibilityState?: unknown }).visibilityState;
+      }
+    });
+
+    describe("ações seguidas não se perdem", () => {
+      function deferred<T>() {
+        let resolve!: (v: T) => void;
+        const promise = new Promise<T>((r) => (resolve = r));
+        return { promise, resolve };
+      }
+
+      it("duas remoções seguidas valem as duas; a resposta lenta do PUT antigo não volta o BR", async () => {
+        m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR", "PT"] }));
+        m.list.mockResolvedValue(matchPage([matchItem(1)]));
+        const first = deferred<SearchProfile>();
+        m.put.mockReturnValueOnce(first.promise);
+        await renderPage();
+        fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+        fireEvent.click(screen.getByRole("button", { name: "Remover filtro PT" }));
+        expect(m.put).toHaveBeenCalledTimes(2);
+        expect(m.put).toHaveBeenNthCalledWith(1, { ...DEFAULT_FILTERS, countries: ["PT"] }, null);
+        expect(m.put).toHaveBeenNthCalledWith(2, { ...DEFAULT_FILTERS, countries: [] }, null);
+        await tick(0);
+        await act(async () => first.resolve(sp({ ...DEFAULT_FILTERS, countries: ["PT"] })));
+        expect(screen.queryByRole("button", { name: "Remover filtro BR" })).toBeNull();
+        expect(screen.queryByRole("button", { name: "Remover filtro PT" })).toBeNull();
+        expect(screen.getByLabelText("Países")).toHaveValue("");
+        expect(screen.queryByText("salvando…")).toBeNull();
+      });
+
+      it("× de chip durante o salvamento do painel inclui a edição manual e não é revertido", async () => {
+        m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
+        m.list.mockResolvedValue(matchPage([matchItem(1)]));
+        const manual = deferred<SearchProfile>();
+        m.put.mockReturnValueOnce(manual.promise);
+        await renderPage();
+        fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+        await tick(300);
+        expect(m.put).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, countries: ["BR"], work_models: ["remote"] });
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+        });
+        expect(m.put).toHaveBeenLastCalledWith({ ...DEFAULT_FILTERS, work_models: ["remote"] }, null);
+        await act(async () => manual.resolve(sp({ ...DEFAULT_FILTERS, countries: ["BR"], work_models: ["remote"] })));
+        expect(screen.queryByRole("button", { name: "Remover filtro BR" })).toBeNull();
+        expect(screen.getByLabelText("Países")).toHaveValue("");
+        expect(screen.getByRole("checkbox", { name: "remoto" })).toBeChecked();
+        await tick(1000);
+        expect(m.put).toHaveBeenCalledTimes(2);
+      });
+
+      it("× de chip com edição do painel esperando o debounce: o rascunho velho não reverte o chip", async () => {
+        m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR", "PT"] }));
+        m.list.mockResolvedValue(matchPage([matchItem(1)]));
+        await renderPage();
+        fireEvent.change(screen.getByLabelText("Países"), { target: { value: "BR, PT, DE" } });
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+        });
+        await tick(1000);
+        expect(m.put).toHaveBeenCalledTimes(1);
+        expect(m.put).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, countries: ["PT"] }, null);
+        expect(screen.getByLabelText("Países")).toHaveValue("PT");
+        expect(screen.queryByRole("button", { name: "Remover filtro BR" })).toBeNull();
+      });
+
+      it("Aplicar do chat durante um salvamento manual em voo inclui a mudança manual na fusão", async () => {
+        m.list.mockResolvedValue(matchPage([matchItem(1)]));
+        m.parse.mockResolvedValue(parsedQuery({ countries: ["PT"] }));
+        const manual = deferred<SearchProfile>();
+        m.put.mockReturnValueOnce(manual.promise);
+        await renderPage();
+        fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+        await tick(300);
+        expect(m.put).toHaveBeenCalledTimes(1);
+        await askAndApply("Portugal");
+        expect(m.put).toHaveBeenCalledTimes(2);
+        expect(m.put).toHaveBeenLastCalledWith({ ...DEFAULT_FILTERS, work_models: ["remote"], countries: ["PT"] }, null);
+        await act(async () => manual.resolve(sp({ ...DEFAULT_FILTERS, work_models: ["remote"] })));
+        expect(screen.getByLabelText("Países")).toHaveValue("PT");
+        expect(screen.getByRole("checkbox", { name: "remoto" })).toBeChecked();
+        expect(proposal()).toBeNull();
+      });
+
+      it("aplicação substituída por um salvamento que falha não limpa a proposta", async () => {
+        m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
+        m.list.mockResolvedValue(matchPage([matchItem(1)]));
+        m.parse.mockResolvedValue(parsedQuery({ countries: ["PT"] }));
+        const chatPut = deferred<SearchProfile>();
+        m.put.mockReturnValueOnce(chatPut.promise).mockRejectedValueOnce(new ApiError(422, "Confira os filtros."));
+        await renderPage();
+        await askAndApply("Portugal");
+        // Enquanto a proposta grava, o envio de outra frase fica desligado.
+        expect(chat()).toBeDisabled();
+        await act(async () => {
+          fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+        });
+        await act(async () => chatPut.resolve(sp({ ...DEFAULT_FILTERS, countries: ["BR", "PT"] })));
+        expect(proposal()).not.toBeNull();
+        expect(screen.getByRole("alert")).toHaveTextContent("Confira os filtros.");
+        // Volta ao último estado confirmado pelo servidor.
+        expect(screen.getByRole("button", { name: "Remover filtro BR" })).toBeInTheDocument();
+        expect(screen.getByLabelText("Países")).toHaveValue("BR");
+      });
+    });
+
+    it("remover o último chip leva o foco ao campo do chat", async () => {
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
       m.list.mockResolvedValue(matchPage([matchItem(1)]));
       await renderPage();
-      expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
-      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
-      await tick(10_000);
-      expect(m.list).toHaveBeenCalledTimes(2);
-      expect(screen.queryByText("consulta semântica pendente")).toBeNull();
-      await tick(30_000);
-      expect(m.list).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+      });
+      expect(chat()).toHaveFocus();
     });
 
     it("Testar qualidade no cabeçalho leva a /jobs/qualidade", async () => {

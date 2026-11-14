@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type RefObject } from "react";
 import { filterChips, parseFilters, type ParsedQuery } from "@/lib/chatFilters";
 import { ApiError } from "@/lib/profile";
 import { ChipView, QUERY_MAX } from "./FilterChips";
@@ -9,6 +9,8 @@ type Props = {
   /** Grava a proposta (fusão + PUT na página). Rejeitar mantém a proposta na tela. */
   onApply: (p: ParsedQuery) => Promise<void>;
   disabled?: boolean;
+  /** Campo da frase, para a página devolver o foco a ele (ex.: depois de remover o último chip). */
+  inputRef?: RefObject<HTMLInputElement | null>;
 };
 
 type State =
@@ -20,16 +22,33 @@ type State =
 const message = (err: unknown) =>
   err instanceof ApiError ? err.message : "Algo deu errado ao interpretar a frase. Tente de novo.";
 
+const countText = (n: number) => `${n} ${n === 1 ? "filtro" : "filtros"}`;
+
 /** Frase → proposta de filtros (nada é salvo antes de "Aplicar"). */
-export function ChatBar({ onApply, disabled = false }: Props) {
+export function ChatBar({ onApply, disabled = false, inputRef }: Props) {
   const [text, setText] = useState("");
   const [state, setState] = useState<State>({ name: "idle" });
   const id = useId();
+  const ownRef = useRef<HTMLInputElement>(null);
+  const fieldRef = inputRef ?? ownRef;
   const parsing = state.name === "parsing";
+  const applying = state.name === "proposal" && state.applying;
+
+  /** Depois de aplicar ou descartar, o foco volta ao campo (o botão clicado some). */
+  const wantFocus = useRef(false);
+  const focusField = () => {
+    wantFocus.current = true;
+  };
+  useEffect(() => {
+    if (!wantFocus.current || disabled || state.name !== "idle") return;
+    wantFocus.current = false;
+    fieldRef.current?.focus();
+  }, [state, disabled, fieldRef]);
 
   async function interpret(phrase: string) {
     const clean = phrase.trim();
-    if (!clean || parsing) return;
+    // Enter no campo envia o formulário mesmo com o botão desligado: mesma regra aqui.
+    if (!clean || parsing || applying || disabled) return;
     setState({ name: "parsing" });
     try {
       const proposal = await parseFilters(clean);
@@ -43,6 +62,7 @@ export function ChatBar({ onApply, disabled = false }: Props) {
     setState({ name: "proposal", proposal, applying: true });
     try {
       await onApply(proposal);
+      focusField();
       setState({ name: "idle" });
       setText("");
     } catch {
@@ -67,6 +87,7 @@ export function ChatBar({ onApply, disabled = false }: Props) {
         </label>
         <div className="chat__row">
           <input
+            ref={fieldRef}
             id={`${id}-text`}
             className="input"
             type="text"
@@ -80,7 +101,7 @@ export function ChatBar({ onApply, disabled = false }: Props) {
           <button
             type="submit"
             className="button"
-            disabled={disabled || parsing || text.trim() === ""}
+            disabled={disabled || parsing || applying || text.trim() === ""}
             aria-busy={parsing || undefined}
           >
             Aplicar
@@ -90,6 +111,14 @@ export function ChatBar({ onApply, disabled = false }: Props) {
           Ex.: “remoto na Europa, sem plantão, sênior, algo com dados”. Nada muda até você aplicar a proposta.
         </p>
       </form>
+
+      <p className="sr-only" role="status" aria-live="polite">
+        {state.name === "proposal" && !state.applying
+          ? chips.length > 0
+            ? `Proposta com ${countText(chips.length)}. Confira e aplique ou descarte.`
+            : "Proposta sem filtros."
+          : ""}
+      </p>
 
       {state.name === "error" && (
         <div className="notice chat__notice" role="alert">
@@ -138,7 +167,10 @@ export function ChatBar({ onApply, disabled = false }: Props) {
               type="button"
               className="button button--secondary"
               disabled={state.applying}
-              onClick={() => setState({ name: "idle" })}
+              onClick={() => {
+                focusField();
+                setState({ name: "idle" });
+              }}
             >
               Descartar
             </button>
