@@ -10,11 +10,9 @@
  *     horários). Algarismos claros e largos, distingue 0/O e 1/l, e conversa
  *     com a Instrument Sans pelo mesmo desenho racional.
  *
- * Acento: azul-petróleo (#1f5f78 no claro, #7dbbd4 no escuro).
- *   "Rumo" é direção, curso de navegação: o petróleo vem da tinta das cartas
- *   náuticas. É frio o bastante para conviver com os cinzas quentes da base,
- *   fica longe do verde de "ok", do âmbar de aviso e do vermelho de erro, e
- *   não é roxo/índigo. Usado só em ações primárias, links e foco.
+ * Acento: verde-esmeralda (#0f7a55 no claro, #4cc795 no escuro), sobre cinzas
+ *   neutros. Fica longe do âmbar de aviso e do vermelho de erro, e não é
+ *   roxo/índigo. Usado só em ações primárias, links e foco.
  *
  * Regras: bordas de 1px, raio pequeno (4 px campos, 6 px cartões), sem sombras
  * grandes, sem gradientes, contraste AA nos dois temas.
@@ -3476,5 +3474,107 @@ select.input {
 
   .filter-chip__input {
     min-height: 40px;
+  }
+}
+
+/* Teste de qualidade: rotular vagas e relatório */
+.quality > .notice {
+  margin: 0;
+}
+
+.label-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.label-card__title {
+  font-size: var(--text-lg);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.label-card__title a {
+  color: var(--accent);
+}
+
+.label-card__meta,
+.label-card__current {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.label-card__snippet {
+  margin: 0;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.label-card__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.label-card__hint {
+  margin: 0;
+  font-size: var(--text-xs);
+}
+
+.quality-verdict {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+
+.quality-verdict--dentro_da_meta {
+  color: var(--ok);
+}
+
+.quality-verdict--abaixo_da_meta {
+  color: var(--warn);
+}
+
+.quality-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-3);
+  margin: 0;
+}
+
+.quality-stats dt {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+
+.quality-stats dd {
+  margin: var(--space-1) 0 0;
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+.quality-subhead {
+  margin: 0;
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+
+.quality-list {
+  margin: 0;
+  padding-left: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: var(--text-md);
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 560px) {
+  .label-card__actions .button {
+    flex: 1 1 40%;
+    justify-content: center;
   }
 }

@@ -42,6 +42,7 @@ describe("isActive", () => {
     ["/onboarding", "/onboarding/interview", false],
     ["/onboarding/interview", "/onboarding/interview", true],
     ["/jobs", "/jobs/42", true],
+    ["/jobs", "/jobs/qualidade", true],
     ["/jobs", "/jobsx", false],
     ["/settings", "/settings", true],
   ])("%s em %s → %s", (href, path, expected) => {
