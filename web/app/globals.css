@@ -1946,7 +1946,15 @@ select.input {
 /* Telas médias: a tabela tem largura para 5 colunas só a partir de ~860 px de conteúdo */
 
 /* Pontos de quebra do CONTEÚDO: a lateral (232 px) só existe a partir de 860 px de janela,
- * então "conteúdo até 860 px" = janela até 1091.98 px (abaixo de 860 o conteúdo é a janela). */
+ * então "conteúdo até 860 px" = janela até 1091.98 px (abaixo de 860 o conteúdo é a janela).
+ * Manter 1091.98px em sincronia com --sidebar-w (232px) + 860px. Locais:
+ *   - .jobs (tabela de vagas coletadas em /sources): @media (max-width: 1091.98px)
+ *   - .jobs__filters: @media (min-width: 561px) and (max-width: 1091.98px)
+ *   - .filters__fields, .filters__salary, .matches, .matches__panel (/jobs): @media (max-width: 1091.98px)
+ *   - .matches__panel left = --sidebar-w: mesmo bloco, desfeito (left: 0) em @media (max-width: 859.98px)
+ *   - .discovery__body: @media (max-width: 1091.98px)
+ * O 860 da casca (.sidebar/.topbar__menu/.drawer: 859.98px e 860px) é o ponto de quebra da gaveta;
+ * o literal 860 em window.matchMedia("(min-width: 860px)") no AppShell.tsx é o mesmo. */
 @media (max-width: 1091.98px) {
   .jobs thead {
     position: absolute;
@@ -2590,7 +2598,8 @@ select.input {
   .matches__panel {
     position: fixed;
     top: auto;
-    left: 0;
+    /* Com a lateral visível a folha começa depois dela; sem lateral, ver 859.98px abaixo. */
+    left: var(--sidebar-w);
     right: 0;
     bottom: 0;
     z-index: 10;
@@ -2601,9 +2610,9 @@ select.input {
   }
 }
 
-@media (min-width: 860px) and (max-width: 1091.98px) {
+@media (max-width: 859.98px) {
   .matches__panel {
-    left: var(--sidebar-w);
+    left: 0;
   }
 }
 

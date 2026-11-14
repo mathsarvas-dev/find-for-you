@@ -274,6 +274,25 @@ describe("AppShell: gaveta fecha sozinha", () => {
     expect(menuButton()).toHaveFocus();
   });
 
+  it("não reabre sozinha ao voltar para a rota em que foi aberta", async () => {
+    const view = await renderShell();
+    fireEvent.click(menuButton());
+    m.path.mockReturnValue("/sources");
+    view.rerender(<AppShell><main>conteúdo</main></AppShell>);
+    await act(async () => {});
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const outside = screen.getByText("conteúdo");
+    outside.setAttribute("tabindex", "-1");
+    outside.focus();
+    m.path.mockReturnValue("/");
+    view.rerender(<AppShell><main>conteúdo</main></AppShell>);
+    await act(async () => {});
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.style.overflow).toBe("");
+    expect(menuButton()).toHaveAttribute("aria-expanded", "false");
+    expect(outside).toHaveFocus();
+  });
+
   it("fecha ao virar desktop e leva o foco ao conteúdo (botão escondido)", async () => {
     const { container } = await renderShell();
     fireEvent.click(menuButton());

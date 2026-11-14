@@ -23,9 +23,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const overviewValue = useMemo(() => ({ overview, status: apiStatus, refresh }), [overview, apiStatus, refresh]);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
   // A gaveta fica aberta só na rota em que foi aberta: qualquer navegação
-  // (link, voltar/avançar do navegador) a fecha sem precisar de efeito.
+  // (link, voltar/avançar do navegador) a fecha. O reset acontece no render (padrão
+  // "ajustar estado quando a prop muda"), então voltar à rota de origem não a reabre.
   const [drawerPath, setDrawerPath] = useState<string | null>(null);
-  const drawerOpen = drawerPath === pathname;
+  if (drawerPath !== null && drawerPath !== pathname) setDrawerPath(null);
+  const drawerOpen = drawerPath !== null && drawerPath === pathname;
   const menuButtonRef = useRef<HTMLButtonElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -40,6 +42,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const body = document.body;
     const previous = body.style.overflow;
     body.style.overflow = "hidden";
+    // 860 = ponto de quebra da gaveta/lateral. Manter em sincronia com globals.css:
+    // 859.98px/860px da casca e 1091.98px (= --sidebar-w 232px + 860px) das páginas.
     const wide = typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 860px)") : null;
     const onWide = (event: MediaQueryListEvent) => {
       if (event.matches) setDrawerPath(null);
