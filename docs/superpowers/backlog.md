@@ -56,3 +56,17 @@
 
 ## Ideias futuras (spec própria)
 - **Calibração por feedback (marco 4c, a brainstormar depois dos planos 4b/5):** em cada vaga, "recomendação certa / errada" + motivo por tipo (localidade errada, competências não batem, senioridade, salário, empresa/setor, idioma, outro) + campo livre opcional. Base já planejada: `job_labels` (boa/ruim) do 4b e o relatório de precision@10. Hipóteses a decidir: (1) usar o feedback primeiro como **sinal explícito** — pesos `match_weight_*`, filtros sugeridos ("você rejeitou 5 vagas fora da Europa: excluir?") e ajuste do prompt/penalidades por tipo de erro — antes de qualquer treino; (2) treino leve por usuário (regressão logística sobre vec_score, ai_score e atributos) quando houver rótulos suficientes; (3) no SaaS, agregação entre usuários só com consentimento e sem texto pessoal; (4) métrica de acompanhamento: precision@10 antes/depois e taxa de feedback "errada" por tipo. Cuidados: feedback ruidoso, ciclo de realimentação (só ver o que o ranking mostra), nunca enviar texto livre do feedback a terceiros sem aviso.
+
+## Marco 4b (filtros por chat, consulta semântica, teste de qualidade)
+- **Regra de negação:** os marcadores `no`/`sem` na consulta de gosto geram falsos positivos ("foco no cliente", "no-code"); um gosto negado vindo do LLM agora é descartado com uma nota, mas o texto digitado pela pessoa ainda é recusado. Considerar tratar só "sem"/"não" ou analisar a frase.
+- **Retentativas e custo:** uma interpretação pode custar até 4 requisições ao Groq (2 do `parse_query` × 2 do provedor); o `httpx.AsyncClient` do `/filters/parse` não é fechado; o 422 do Pydantic devolve ao próprio chamador a frase longa demais.
+- **Worker `embed_queries`:** o recuo é global (um texto ruim segura todos), reaproveita `embed_batch_size`, embeda todos os perfis e não só o padrão; teste do recuo cobre só o primeiro passo.
+- **Ranking:** pesos `inf`/`NaN`/negativos passados direto a `rank_jobs` não são validados (só vêm do `Settings`, que aceita `inf`); `missing_embeddings` com `only_ids` sem teste.
+- **API de qualidade:** `url` sem checagem de esquema no servidor (o web só renderiza http/https); `labeled_total` carrega todos os rótulos; testes faltando para o limite de inteiro (> int8), troca de semente no endpoint e vazamento entre usuários na contagem; `_profile_out` lê a linha duas vezes.
+- **Tela de vagas:** rollback pode restaurar um estado mais antigo sobre um confirmado quando há falha + sucesso em voo; rascunho inválido do painel é descartado por uma ação externa; mudança de consulta pode ser dada como salva se um salvamento do painel (que não envia `query_text`) a substituir; "não vetorizado" é detectado no web pelo texto "sendo processado" da mensagem (usar uma constante compartilhada ou um código); reabrir o editor do chip após erro não foca e pode reenviar o texto ruim ao perder o foco.
+- **Tela de qualidade:** link do 409 só na carga inicial, plural "1 rotuladas", falha silenciosa ao atualizar o relatório, perda de foco depois de rotular, `window.confirm` na "Nova amostra".
+- **Migração 0007:** o downgrade remove `unaccent` mesmo se já existia antes.
+- **Amostra de qualidade:** deriva do ranking atual e pode se reorganizar quando entram vagas ou notas de IA (decisão registrada).
+
+## Modelo do Groq
+- O modelo padrão mudou para `openai/gpt-oss-120b` (o `llama-3.3-70b-versatile` foi removido); o preenchimento de vagas mostra falhas ocasionais `LLMInvalidResponse` com o modelo novo — observar a taxa e, se alta, ajustar o prompt ou usar o `qwen/qwen3.8-27b`.
