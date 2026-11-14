@@ -616,6 +616,131 @@ html {
   margin-top: var(--space-4);
 }
 
+/* Início: trilha "Seu caminho" + cartões-resumo (ao lado com >= 860 px de conteúdo, abaixo antes) */
+
+.home__lead {
+  display: block;
+  min-height: 1.45em;
+  overflow-wrap: anywhere;
+}
+
+.home__greeting {
+  color: var(--text);
+}
+
+.home {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 16rem;
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.home__path-body {
+  padding: var(--space-4);
+}
+
+.home__path-skeleton {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-5);
+}
+
+.home__path-skeleton li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+}
+
+.home__dot {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+}
+
+.home__stale {
+  margin-bottom: var(--space-4);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.home__error {
+  max-width: 60ch;
+}
+
+.summary-cards {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--space-3);
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-card);
+  color: var(--text);
+  text-decoration: none;
+  transition: border-color var(--duration) ease;
+}
+
+a.summary-card:hover {
+  border-color: var(--accent);
+}
+
+.summary-card__label {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+a.summary-card:hover .summary-card__label {
+  color: var(--accent);
+}
+
+.summary-card__value {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+
+.summary-card__detail {
+  font-size: var(--text-sm);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* Conteúdo < 860 px (janela até 1091.98 px, ver nota dos pontos de quebra): cartões abaixo. */
+@media (max-width: 1091.98px) {
+  .home {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .summary-cards {
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 10.5rem), 1fr));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .summary-card {
+    transition: none;
+  }
+}
+
 
 /* Página */
 
@@ -1372,30 +1497,6 @@ textarea.input {
   font-size: var(--text-lg);
 }
 
-/* Próximo passo na página inicial */
-
-.next-step {
-  margin-top: var(--space-5);
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--space-3);
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-}
-
-.next-step p {
-  color: var(--muted);
-  max-width: 60ch;
-}
-
-.next-step strong {
-  color: var(--text);
-  font-weight: 600;
-}
-
 @media (max-width: 560px) {
   .grid {
     grid-template-columns: 1fr;
@@ -1687,10 +1788,6 @@ kbd {
 
 /* Fontes: cadastro de empresas, lista de empresas e vagas coletadas */
 
-.next-step--follow {
-  margin-top: var(--space-3);
-}
-
 .add-company__fields {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 7rem;
@@ -1953,6 +2050,7 @@ select.input {
  *   - .filters__fields, .filters__salary, .matches, .matches__panel (/jobs): @media (max-width: 1091.98px)
  *   - .matches__panel left = --sidebar-w: mesmo bloco, desfeito (left: 0) em @media (max-width: 859.98px)
  *   - .discovery__body: @media (max-width: 1091.98px)
+ *   - .home, .summary-cards (Início): @media (max-width: 1091.98px)
  * O 860 da casca (.sidebar/.topbar__menu/.drawer: 859.98px e 860px) é o ponto de quebra da gaveta;
  * o literal 860 em window.matchMedia("(min-width: 860px)") no AppShell.tsx é o mesmo. */
 @media (max-width: 1091.98px) {

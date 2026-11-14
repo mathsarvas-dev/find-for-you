@@ -10,11 +10,15 @@ export type OverviewState = {
   /** Último overview recebido (mantido quando uma busca posterior falha); null até o primeiro. */
   overview: Overview | null;
   status: OverviewStatus;
-  /** Busca de novo (ex.: depois de confirmar o perfil ou cadastrar uma empresa). */
-  refresh: () => void;
+  /**
+   * Busca de novo (ex.: depois de confirmar o perfil ou cadastrar uma empresa).
+   * A promessa termina quando essa busca termina (com ou sem sucesso) ou é substituída;
+   * nunca rejeita.
+   */
+  refresh: () => Promise<void>;
 };
 
-const noop = () => {};
+const noop = async () => {};
 
 export const OverviewContext = createContext<OverviewState>({
   overview: null,
@@ -45,7 +49,7 @@ export function useOverviewLoader(key: string): OverviewState {
     controller.current = current;
     const id = ++seq.current;
     const fresh = () => id === seq.current && !current.signal.aborted;
-    getOverview(current.signal).then(
+    return getOverview(current.signal).then(
       (data) => {
         if (!fresh()) return;
         setOverview(data);
