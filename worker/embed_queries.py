@@ -5,6 +5,7 @@ class and the batch size)."""
 
 import asyncio
 import logging
+import math
 import time
 
 from sqlalchemy import or_, select, update
@@ -64,32 +65,55 @@ async def embed_pending_queries(
             stmt = stmt.where(SearchProfile.user_id == user_id)
         rows = [
             (r.id, r.query_text)
-            for r in s.execute(stmt.order_by(SearchProfile.id).limit(batch)).all()
+            for r in s.execute(stmt.order_by(SearchProfile.query_embedding.is_(None).desc(), SearchProfile.id).limit(batch)).all()
         ]
         s.commit()
     if not rows:
         return 0
+    def fail(reason: str, clock=clock) -> int:
+        global _next_try, _failures
+        delay = min(EMBED_BACKOFF_BASE * 2**_failures, EMBED_BACKOFF_CAP)
+        _failures += 1
+        _next_try = clock() + delay
+        # never the exception message/traceback: it can carry the query text
+        logger.error(
+            "query embedding failed (%s, batch of %d); backing off %ds",
+            reason, len(rows), delay,
+        )
+        return 0
+
     try:
         async with EMBED_LOCK:
             vectors = await asyncio.to_thread(embedder.embed, [t for _, t in rows])
     except Exception as exc:
-        delay = min(EMBED_BACKOFF_BASE * 2**_failures, EMBED_BACKOFF_CAP)
-        _failures += 1
-        _next_try = clock() + delay
-        logger.error(
-            "query embedding failed (%s, batch of %d); backing off %ds",
-            type(exc).__name__, len(rows), delay,
+        return fail(type(exc).__name__)
+    dims = getattr(embedder, "dimensions", 1024)
+    try:
+        valid = len(vectors) == len(rows) and all(
+            len(v) == dims
+            and math.isfinite(n := math.sqrt(sum(float(x) ** 2 for x in v)))
+            and n > 0
+            for v in vectors
         )
-        return 0
+    except Exception as exc:
+        return fail(type(exc).__name__)
+    if not valid:
+        return fail("InvalidEmbedderOutput")
+    try:
+        written = 0
+        with session_factory() as s:
+            for (pid, text), vec in zip(rows, vectors, strict=True):
+                res = s.execute(
+                    update(SearchProfile)
+                    .where(SearchProfile.id == pid, SearchProfile.query_text == text)
+                    .values(
+                        query_embedding=list(vec),
+                        query_model_version=embedder.model_version,
+                    )
+                )
+                written += res.rowcount
+            s.commit()
+    except Exception as exc:
+        return fail(type(exc).__name__)
     _failures = 0
-    written = 0
-    with session_factory() as s:
-        for (pid, text), vec in zip(rows, vectors, strict=True):
-            res = s.execute(
-                update(SearchProfile)
-                .where(SearchProfile.id == pid, SearchProfile.query_text == text)
-                .values(query_embedding=vec, query_model_version=embedder.model_version)
-            )
-            written += res.rowcount
-        s.commit()
     return written

@@ -157,7 +157,7 @@ def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
         ),
         15,
     )
-    # after embed_chunks (profile first); one small batch per tick so a long
+    # after the embed_chunks/embed_queries jobs (profile first); one small batch per tick so a long
     # backlog (~0.4 texts/s on CPU) never starves the other jobs
     registry.register(
         "embed_jobs", build_embed_jobs_job(settings, session_factory, embedder), 5

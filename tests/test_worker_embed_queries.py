@@ -139,3 +139,69 @@ def test_registered_after_embed_chunks_every_15s():
     names = list(reg._jobs)
     assert names[names.index("embed_chunks") + 1] == "embed_queries"
     assert reg._jobs["embed_queries"][1] == 15
+
+
+class BadEmbedder(FakeEmbedder):
+    def __init__(self, vectors_for):
+        super().__init__()
+        self.vectors_for = vectors_for
+
+    def embed(self, texts):
+        self.calls.append(list(texts))
+        return self.vectors_for(texts)
+
+
+@pytest.mark.parametrize("make", [
+    lambda t: [[0.5] * 3 for _ in t],          # wrong dimension
+    lambda t: [],                              # wrong count
+    lambda t: [[0.0] * 1024 for _ in t],       # zero vector
+    lambda t: [[float("nan")] * 1024 for _ in t],
+])
+async def test_invalid_embedder_output_backs_off_without_leaking(uid, caplog, make):
+    pid = _profile(uid, SECRET)
+    emb = BadEmbedder(make)
+    now = [100.0]
+    clock = lambda: now[0]  # noqa: E731
+    with caplog.at_level("DEBUG"):
+        assert await _run(uid, emb, clock=clock) == 0
+    assert _get(pid).query_embedding is None
+    assert SECRET not in caplog.text
+    assert eq._failures == 1 and eq._next_try == 105.0
+    assert await _run(uid, emb, clock=clock) == 0
+    assert len(emb.calls) == 1
+
+
+async def test_db_error_in_write_does_not_raise_or_leak(uid, caplog, monkeypatch):
+    pid = _profile(uid, SECRET)
+    from sqlalchemy.orm import Session
+
+    real = Session.execute
+    state = {"armed": False}
+
+    def boom(self, stmt, *a, **k):
+        if state["armed"] and "UPDATE" in str(stmt).upper():
+            raise RuntimeError(f"db down {SECRET}")
+        return real(self, stmt, *a, **k)
+
+    def arm():
+        state["armed"] = True
+
+    monkeypatch.setattr(Session, "execute", boom)
+    emb = FakeEmbedder(on_embed=arm)
+    with caplog.at_level("DEBUG"):
+        assert await _run(uid, emb, clock=lambda: 100.0) == 0
+    state["armed"] = False
+    assert _get(pid).query_embedding is None
+    assert SECRET not in caplog.text and "RuntimeError" in caplog.text
+    assert eq._failures == 1
+
+
+async def test_new_texts_before_model_reindex(uid):
+    old = _profile(uid, "antigo", name="a")
+    await _run(uid, FakeEmbedder(version="old@1"))
+    new = _profile(uid, "novo", name="b")
+    emb = FakeEmbedder(version="new@2")
+    assert await _run(uid, emb, batch=1) == 1
+    assert emb.calls == [["novo"]]
+    assert _get(new).query_model_version == "new@2"
+    assert _get(old).query_model_version == "old@1"
