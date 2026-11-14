@@ -1,0 +1,591 @@
+{
+  "offers": [
+    {
+      "salary": {
+        "max": "20000",
+        "min": "10000",
+        "period": "year",
+        "currency": "EUR"
+      },
+      "locations_question_type": "multiple_choice",
+      "position": 149,
+      "published_at": "2026-10-15 13:29:32 UTC",
+      "company_name": "Marketplace integrations",
+      "guid": "1rp8r",
+      "careers_url": "https://techpartnerships.recruitee.com/o/front-office-employee-austria",
+      "category_code": "hospitality",
+      "options_cv": "required",
+      "postal_code": "1010",
+      "experience_code": "entry_level",
+      "requirements": "<h4><strong>Qualifications</strong></h4><ol><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> Proven experience as a Front Office Representative, Receptionist, or a similar customer-facing administrative role.</span></p></li></ol><ol><li><p><strong><span style=\"color:#121317\">Communication Skills</span></strong><span style=\"color:#121317\">: Excellent verbal and written communication skills in German and English. </span></p></li><li><p><strong><span style=\"color:#121317\">Tech-Savvy:</span></strong><span style=\"color:#121317\"> Proficiency in Microsoft Office Suite (Word, Excel, Outlook) and familiarity with office equipment (e.g., multi-line phone systems, printers).</span></p></li><li><p><strong><span style=\"color:#121317\">Organizational Skills:</span></strong><span style=\"color:#121317\"> Strong ability to multitask, prioritize tasks effectively, and maintain a calm demeanor during busy hours.</span></p></li><li><p><strong><span style=\"color:#121317\">Personality:</span></strong><span style=\"color:#121317\"> A positive, problem-solving attitude with a strong sense of discretion and professionalism.</span></p></li></ol>",
+      "sharing_image": null,
+      "options_salutation": "off",
+      "open_questions": [],
+      "city": "Vienna",
+      "sharing_title": "Front Office Employee Austria",
+      "max_hours": 40,
+      "min_hours": 40,
+      "translations": {
+        "en": {
+          "description": "<h4><strong><span style=\"color:#121317\">About Us</span></strong></h4><p><span style=\"color:#121317\">We are a dynamic, growing team in the Hospitality</span><strong><span style=\"color:#121317\"> </span></strong><span style=\"color:#121317\">sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will play a crucial role in shaping how the world perceives our brand from the moment they walk through our doors or call our line.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#121317\">The Role</span></strong></h4><p><span style=\"color:#121317\">We are looking for a welcoming, organized, and proactive </span><strong><span style=\"color:#121317\">Front Office Employee</span></strong><span style=\"color:#121317\"> to join our team. In this role, you will be the primary point of contact for all visitors and incoming communications. You will ensure the smooth, day-to-day operations of our front desk, combining top-tier customer service with essential administrative support.</span></p><p><span style=\"color:#121317\">If you are a people person who thrives in a vibrant environment and loves keeping things organized, we want to hear from you!</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#121317\">Your Responsibilities</span></strong></h4><ul><li><p><strong><span style=\"color:#121317\">First Class Hospitality:</span></strong><span style=\"color:#121317\"> Greet and welcome visitors, clients, and candidates with warmth and professionalism, ensuring they are directed to the right person or meeting room.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Hub:</span></strong><span style=\"color:#121317\"> Answer, screen, and forward incoming phone calls, and handle the general company email inbox.</span></p></li><li><p><strong><span style=\"color:#121317\">Logistics &amp; Mail:</span></strong><span style=\"color:#121317\"> Sort and distribute daily mail, deliveries, and couriers; prepare outgoing shipments and coordinate office supplies inventory.</span></p></li><li><p><strong><span style=\"color:#121317\">Administrative Support:</span></strong><span style=\"color:#121317\"> Assist various departments (such as HR or Finance) with light administrative tasks, data entry, scheduling meeting rooms, and organizing company events.</span></p></li><li><p><strong><span style=\"color:#121317\">Security &amp; Access:</span></strong><span style=\"color:#121317\"> Monitor visitor logs and issue visitor badges to maintain a secure office environment.</span></p></li></ul><p style=\"min-height: 1.7em;\"></p><h4><span style=\"color:#121317\">Additional information</span></h4><p><span style=\"color:#121317\">Salary: 60 000 euros per year.</span> </p>",
+          "title": "Front Office Employee Austria",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<h4><strong>Qualifications</strong></h4><ol><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> Proven experience as a Front Office Representative, Receptionist, or a similar customer-facing administrative role.</span></p></li></ol><ol><li><p><strong><span style=\"color:#121317\">Communication Skills</span></strong><span style=\"color:#121317\">: Excellent verbal and written communication skills in German and English. </span></p></li><li><p><strong><span style=\"color:#121317\">Tech-Savvy:</span></strong><span style=\"color:#121317\"> Proficiency in Microsoft Office Suite (Word, Excel, Outlook) and familiarity with office equipment (e.g., multi-line phone systems, printers).</span></p></li><li><p><strong><span style=\"color:#121317\">Organizational Skills:</span></strong><span style=\"color:#121317\"> Strong ability to multitask, prioritize tasks effectively, and maintain a calm demeanor during busy hours.</span></p></li><li><p><strong><span style=\"color:#121317\">Personality:</span></strong><span style=\"color:#121317\"> A positive, problem-solving attitude with a strong sense of discretion and professionalism.</span></p></li></ol>",
+          "sharing_title": "Front Office Employee Austria",
+          "sharing_description": "About UsWe are a dynamic, growing team in the Hospitality sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will ",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "country": "Oostenrijk",
+      "careers_apply_url": "https://techpartnerships.recruitee.com/o/front-office-employee-austria/c/new",
+      "slug": "front-office-employee-austria",
+      "tags": [],
+      "education_code": "high_school",
+      "options_phone": "required",
+      "state_code": "9",
+      "options_photo": "off",
+      "mailbox_email": "removido@example.test",
+      "description": "<h4><strong><span style=\"color:#121317\">About Us</span></strong></h4><p><span style=\"color:#121317\">We are a dynamic, growing team in the Hospitality</span><strong><span style=\"color:#121317\"> </span></strong><span style=\"color:#121317\">sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will play a crucial role in shaping how the world perceives our brand from the moment they walk through our doors or call our line.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#121317\">The Role</span></strong></h4><p><span style=\"color:#121317\">We are looking for a welcoming, organized, and proactive </span><strong><span style=\"color:#121317\">Front Office Employee</span></strong><span style=\"color:#121317\"> to join our team. In this role, you will be the primary point of contact for all visitors and incoming communications. You will ensure the smooth, day-to-day operations of our front desk, combining top-tier customer service with essential administrative support.</span></p><p><span style=\"color:#121317\">If you are a people person who thrives in a vibrant environment and loves keeping things organized, we want to hear from you!</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong><span style=\"color:#121317\">Your Responsibilities</span></strong></h4><ul><li><p><strong><span style=\"color:#121317\">First Class Hospitality:</span></strong><span style=\"color:#121317\"> Greet and welcome visitors, clients, and candidates with warmth and professionalism, ensuring they are directed to the right person or meeting room.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Hub:</span></strong><span style=\"color:#121317\"> Answer, screen, and forward incoming phone calls, and handle the general company email inbox.</span></p></li><li><p><strong><span style=\"color:#121317\">Logistics &amp; Mail:</span></strong><span style=\"color:#121317\"> Sort and distribute daily mail, deliveries, and couriers; prepare outgoing shipments and coordinate office supplies inventory.</span></p></li><li><p><strong><span style=\"color:#121317\">Administrative Support:</span></strong><span style=\"color:#121317\"> Assist various departments (such as HR or Finance) with light administrative tasks, data entry, scheduling meeting rooms, and organizing company events.</span></p></li><li><p><strong><span style=\"color:#121317\">Security &amp; Access:</span></strong><span style=\"color:#121317\"> Monitor visitor logs and issue visitor badges to maintain a secure office environment.</span></p></li></ul><p style=\"min-height: 1.7em;\"></p><h4><span style=\"color:#121317\">Additional information</span></h4><p><span style=\"color:#121317\">Salary: 60 000 euros per year.</span> </p>",
+      "locations_question_required": true,
+      "max_hours_per_week": "40",
+      "location_question_visible": false,
+      "options_title": "off",
+      "remote": false,
+      "created_at": "2026-10-15 13:29:00 UTC",
+      "hybrid": false,
+      "employment_type_code": "internship",
+      "min_hours_per_week": "40",
+      "department": null,
+      "title": "Front Office Employee Austria",
+      "location": "Vienna, Wenen, Oostenrijk",
+      "on_site": true,
+      "locations": [
+        {
+          "id": 221823,
+          "name": "Vienna",
+          "state": "Wien",
+          "country": "Austria",
+          "city": "Vienna",
+          "translations": {
+            "en": {
+              "name": "Vienna",
+              "city": "Vienna",
+              "postal_code": "1010",
+              "street": "Test",
+              "note": null
+            }
+          },
+          "country_code": "AT",
+          "postal_code": "1010",
+          "state_code": "9",
+          "street": "Test",
+          "note": null
+        }
+      ],
+      "country_code": "AT",
+      "id": 2785596,
+      "locations_question": "What is your preferred work location?",
+      "cover_image": null,
+      "options_cover_letter": "optional",
+      "updated_at": "2026-10-15 13:35:47 UTC",
+      "close_at": null,
+      "highlight": null,
+      "status": "published",
+      "sharing_description": "About UsWe are a dynamic, growing team in the Hospitality sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will ",
+      "state_name": "Wenen",
+      "dynamic_fields": []
+    },
+    {
+      "salary": {
+        "max": "38000",
+        "min": "35000",
+        "period": "year",
+        "currency": "EUR"
+      },
+      "locations_question_type": "multiple_choice",
+      "position": 144,
+      "published_at": "2026-09-18 11:55:56 UTC",
+      "company_name": "Marketplace integrations",
+      "guid": "45a1f",
+      "careers_url": "https://techpartnerships.recruitee.com/o/frontend-engineer-1",
+      "category_code": "customer_service",
+      "options_cv": "required",
+      "postal_code": "1016",
+      "experience_code": "entry_level",
+      "requirements": "<p><strong><span style=\"color:#121317\">Requirements:</span></strong></p><ol><li><p><strong><span style=\"color:#121317\">Languages:</span></strong><span style=\"color:#121317\"> </span><strong><span style=\"color:#121317\">Native or near-native French</span></strong><span style=\"color:#121317\"> (C2 level) and </span><strong><span style=\"color:#121317\">Fluent English</span></strong><span style=\"color:#121317\"> (C1). Communication is 100% in French for customers and 100% in English for the internal team.</span></p></li><li><p><strong><span style=\"color:#121317\">Customer-Centric:</span></strong><span style=\"color:#121317\"> You have a natural \"hospitality\" mindset - you enjoy solving puzzles and making someone's day better.</span></p></li><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> 1+ years in a customer support role is preferred, but we are open to graduates or career-changers with the right language profile.</span></p></li><li><p><strong><span style=\"color:#121317\">Location:</span></strong><span style=\"color:#121317\"> You must be based in the Netherlands and hold a valid BSN and work permit (we cannot provide sponsorship for this specific role).</span></p></li></ol>",
+      "sharing_image": null,
+      "options_salutation": "off",
+      "open_questions": [
+        {
+          "id": 4379836,
+          "position": 1,
+          "options": {},
+          "required": false,
+          "body": "Are you located in the Netherlands?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Are you located in the Netherlands?"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "city": "Amsterdsam",
+      "sharing_title": "Frontend Engineer",
+      "max_hours": 39,
+      "min_hours": 39,
+      "translations": {
+        "en": {
+          "description": "<p><span style=\"color:#121317\">Are you a French speaker living in the Netherlands? We are looking for a </span><strong><span style=\"color:#121317\">Customer Support Specialist</span></strong><span style=\"color:#121317\"> to lead our expansion into the French market. You will be the primary point of contact for our French-speaking users, ensuring they receive high-quality support while helping us adapt our service to the cultural nuances of the region.</span></p><p style=\"min-height: 1.7em;\"></p><p><strong><span style=\"color:#121317\">Your Key Responsibilities:</span></strong></p><ul><li><p><strong><span style=\"color:#121317\">Market Ownership:</span></strong><span style=\"color:#121317\"> Act as the dedicated support lead for our French-speaking customers via email, chat, and phone.</span></p></li><li><p><strong><span style=\"color:#121317\">Translation &amp; Localization:</span></strong><span style=\"color:#121317\"> Help localize support content, templates, and FAQ articles to ensure they resonate with the French market.</span></p></li><li><p><strong><span style=\"color:#121317\">Problem Solving:</span></strong><span style=\"color:#121317\"> Resolve technical, billing, or account inquiries with a focus on high first-contact resolution.</span></p></li><li><p><strong><span style=\"color:#121317\">Cross-Functional Collaboration:</span></strong><span style=\"color:#121317\"> Work closely with our English-speaking product team to report bugs or user feedback specific to the French user experience.</span></p></li></ul>",
+          "title": "Frontend Engineer",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<p><strong><span style=\"color:#121317\">Requirements:</span></strong></p><ol><li><p><strong><span style=\"color:#121317\">Languages:</span></strong><span style=\"color:#121317\"> </span><strong><span style=\"color:#121317\">Native or near-native French</span></strong><span style=\"color:#121317\"> (C2 level) and </span><strong><span style=\"color:#121317\">Fluent English</span></strong><span style=\"color:#121317\"> (C1). Communication is 100% in French for customers and 100% in English for the internal team.</span></p></li><li><p><strong><span style=\"color:#121317\">Customer-Centric:</span></strong><span style=\"color:#121317\"> You have a natural \"hospitality\" mindset - you enjoy solving puzzles and making someone's day better.</span></p></li><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> 1+ years in a customer support role is preferred, but we are open to graduates or career-changers with the right language profile.</span></p></li><li><p><strong><span style=\"color:#121317\">Location:</span></strong><span style=\"color:#121317\"> You must be based in the Netherlands and hold a valid BSN and work permit (we cannot provide sponsorship for this specific role).</span></p></li></ol>",
+          "sharing_title": "Frontend Engineer",
+          "sharing_description": "Are you a French speaker living in the Netherlands? We are looking for a Customer Support Specialist to lead our expansion into the French market. You will be the primary point of contact for our Fren",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "country": "Nederland",
+      "careers_apply_url": "https://techpartnerships.recruitee.com/o/frontend-engineer-1/c/new",
+      "slug": "frontend-engineer-1",
+      "tags": [
+        "LinkedIn Apply Connect"
+      ],
+      "education_code": "bachelor_degree",
+      "options_phone": "required",
+      "state_code": "NH",
+      "options_photo": "off",
+      "mailbox_email": "removido@example.test",
+      "description": "<p><span style=\"color:#121317\">Are you a French speaker living in the Netherlands? We are looking for a </span><strong><span style=\"color:#121317\">Customer Support Specialist</span></strong><span style=\"color:#121317\"> to lead our expansion into the French market. You will be the primary point of contact for our French-speaking users, ensuring they receive high-quality support while helping us adapt our service to the cultural nuances of the region.</span></p><p style=\"min-height: 1.7em;\"></p><p><strong><span style=\"color:#121317\">Your Key Responsibilities:</span></strong></p><ul><li><p><strong><span style=\"color:#121317\">Market Ownership:</span></strong><span style=\"color:#121317\"> Act as the dedicated support lead for our French-speaking customers via email, chat, and phone.</span></p></li><li><p><strong><span style=\"color:#121317\">Translation &amp; Localization:</span></strong><span style=\"color:#121317\"> Help localize support content, templates, and FAQ articles to ensure they resonate with the French market.</span></p></li><li><p><strong><span style=\"color:#121317\">Problem Solving:</span></strong><span style=\"color:#121317\"> Resolve technical, billing, or account inquiries with a focus on high first-contact resolution.</span></p></li><li><p><strong><span style=\"color:#121317\">Cross-Functional Collaboration:</span></strong><span style=\"color:#121317\"> Work closely with our English-speaking product team to report bugs or user feedback specific to the French user experience.</span></p></li></ul>",
+      "locations_question_required": true,
+      "max_hours_per_week": "38.50",
+      "location_question_visible": false,
+      "options_title": "off",
+      "remote": false,
+      "created_at": "2026-09-18 11:55:49 UTC",
+      "hybrid": false,
+      "employment_type_code": "fulltime_permanent",
+      "min_hours_per_week": "38.50",
+      "department": "Operations",
+      "title": "Frontend Engineer",
+      "location": "Amsterdsam, Noord-Holland, Nederland",
+      "on_site": true,
+      "locations": [
+        {
+          "id": 26206,
+          "name": "Amsterdam, 1016EE",
+          "state": "Noord-Holland",
+          "country": "Netherlands",
+          "city": "Amsterdam",
+          "translations": {
+            "en": {
+              "name": "Amsterdam, 1016EE",
+              "city": "Amsterdam",
+              "postal_code": "1016EE",
+              "street": "Keizersgracht",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "1016EE",
+          "state_code": "NH",
+          "street": "Keizersgracht",
+          "note": null
+        }
+      ],
+      "country_code": "NL",
+      "id": 2751783,
+      "locations_question": "What is your preferred work location?",
+      "cover_image": null,
+      "options_cover_letter": "off",
+      "updated_at": "2026-10-15 07:19:56 UTC",
+      "close_at": null,
+      "highlight": null,
+      "status": "published",
+      "sharing_description": "Are you a French speaker living in the Netherlands? We are looking for a Customer Support Specialist to lead our expansion into the French market. You will be the primary point of contact for our Fren",
+      "state_name": "Noord-Holland",
+      "dynamic_fields": []
+    },
+    {
+      "salary": {
+        "max": "70000",
+        "min": "60000",
+        "period": "year",
+        "currency": "EUR"
+      },
+      "locations_question_type": "multiple_choice",
+      "position": 142,
+      "published_at": "2026-09-17 08:58:12 UTC",
+      "company_name": "Marketplace integrations",
+      "guid": "pv94v",
+      "careers_url": "https://techpartnerships.recruitee.com/o/hotel-manager-netherlands",
+      "category_code": "hospitality",
+      "options_cv": "off",
+      "postal_code": "1016",
+      "experience_code": "manager",
+      "requirements": "<p>To be considered for the Hotel Manager role, candidates must meet the following requirements:</p><ul><li><p>Proven experience in hotel management or a similar role</p></li><li><p>Demonstrated leadership skills and ability to manage a diverse team</p></li><li><p>Strong communication and interpersonal abilities</p></li><li><p>Excellent organizational and time-management skills</p></li><li><p>Knowledge of hotel operations and industry trends</p></li></ul><ul><li><p>Customer-focused mindset and dedication to providing exceptional service</p></li><li><p>Proficiency in relevant software and technology</p></li><li><p>Flexibility to work evenings, weekends, and holidays as needed</p></li><li><p>Relevant certification or degree in Hospitality Management or a related field</p></li></ul>",
+      "sharing_image": null,
+      "options_salutation": "off",
+      "open_questions": [],
+      "city": "Amsterdsam",
+      "sharing_title": "Hotel Manager Netherlands",
+      "max_hours": 40,
+      "min_hours": 40,
+      "translations": {
+        "en": {
+          "description": "<p><u>Description:</u><br>We are seeking a dedicated Hotel Manager to oversee our operations. As the Hotel Manager, you will be responsible for ensuring the smooth running of all hotel departments, maintaining high standards of customer service, and maximizing profitability.</p><ul><li><p>Manage day-to-day operations of the hotel</p></li><li><p>Supervise staff and ensure they provide excellent service to guests</p></li><li><p>Develop and implement strategies to increase occupancy and revenue</p></li><li><p>Monitor budgets and control expenses</p></li><li><p>Ensure compliance with health and safety regulations</p></li></ul><p>If you have a passion for hospitality, strong leadership skills, and a proven track record in hotel management, we would love to hear from you. </p><p style=\"min-height: 1.7em;\"></p><p><u>Job requirements:</u></p><p style=\"text-align:start;\">To be considered for the Hotel Manager role, candidates must meet the following requirements:</p><ul><li><p>Proven experience in hotel management or a similar role</p></li><li><p>Demonstrated leadership skills and ability to manage a diverse team</p></li><li><p>Strong communication and interpersonal abilities</p></li><li><p>Excellent organizational and time-management skills</p></li><li><p>Knowledge of hotel operations and industry trends</p></li></ul><ul><li><p>Customer-focused mindset and dedication to providing exceptional service</p></li><li><p>Proficiency in relevant software and technology</p></li><li><p>Flexibility to work evenings, weekends, and holidays as needed</p></li><li><p>Relevant certification or degree in Hospitality Management or a related field</p></li></ul><p style=\"min-height: 1.7em;\"></p>",
+          "title": "Hotel Manager Netherlands",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<p>To be considered for the Hotel Manager role, candidates must meet the following requirements:</p><ul><li><p>Proven experience in hotel management or a similar role</p></li><li><p>Demonstrated leadership skills and ability to manage a diverse team</p></li><li><p>Strong communication and interpersonal abilities</p></li><li><p>Excellent organizational and time-management skills</p></li><li><p>Knowledge of hotel operations and industry trends</p></li></ul><ul><li><p>Customer-focused mindset and dedication to providing exceptional service</p></li><li><p>Proficiency in relevant software and technology</p></li><li><p>Flexibility to work evenings, weekends, and holidays as needed</p></li><li><p>Relevant certification or degree in Hospitality Management or a related field</p></li></ul>",
+          "sharing_title": "Hotel Manager Netherlands",
+          "sharing_description": "Description:We are seeking a dedicated Hotel Manager to oversee our operations. As the Hotel Manager, you will be responsible for ensuring the smooth running of all hotel departments, maintaining high",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "country": "Nederland",
+      "careers_apply_url": "https://techpartnerships.recruitee.com/o/hotel-manager-netherlands/c/new",
+      "slug": "hotel-manager-netherlands",
+      "tags": [],
+      "education_code": "master_degree",
+      "options_phone": "required",
+      "state_code": "NH",
+      "options_photo": "off",
+      "mailbox_email": "removido@example.test",
+      "description": "<p><u>Description:</u><br>We are seeking a dedicated Hotel Manager to oversee our operations. As the Hotel Manager, you will be responsible for ensuring the smooth running of all hotel departments, maintaining high standards of customer service, and maximizing profitability.</p><ul><li><p>Manage day-to-day operations of the hotel</p></li><li><p>Supervise staff and ensure they provide excellent service to guests</p></li><li><p>Develop and implement strategies to increase occupancy and revenue</p></li><li><p>Monitor budgets and control expenses</p></li><li><p>Ensure compliance with health and safety regulations</p></li></ul><p>If you have a passion for hospitality, strong leadership skills, and a proven track record in hotel management, we would love to hear from you. </p><p style=\"min-height: 1.7em;\"></p><p><u>Job requirements:</u></p><p style=\"text-align:start;\">To be considered for the Hotel Manager role, candidates must meet the following requirements:</p><ul><li><p>Proven experience in hotel management or a similar role</p></li><li><p>Demonstrated leadership skills and ability to manage a diverse team</p></li><li><p>Strong communication and interpersonal abilities</p></li><li><p>Excellent organizational and time-management skills</p></li><li><p>Knowledge of hotel operations and industry trends</p></li></ul><ul><li><p>Customer-focused mindset and dedication to providing exceptional service</p></li><li><p>Proficiency in relevant software and technology</p></li><li><p>Flexibility to work evenings, weekends, and holidays as needed</p></li><li><p>Relevant certification or degree in Hospitality Management or a related field</p></li></ul><p style=\"min-height: 1.7em;\"></p>",
+      "locations_question_required": true,
+      "max_hours_per_week": "40",
+      "location_question_visible": false,
+      "options_title": "off",
+      "remote": false,
+      "created_at": "2026-09-17 08:58:02 UTC",
+      "hybrid": false,
+      "employment_type_code": "fulltime_permanent",
+      "min_hours_per_week": "40",
+      "department": null,
+      "title": "Hotel Manager Netherlands",
+      "location": "Amsterdsam, Noord-Holland, Nederland",
+      "on_site": true,
+      "locations": [
+        {
+          "id": 26206,
+          "name": "Amsterdam, 1016EE",
+          "state": "Noord-Holland",
+          "country": "Netherlands",
+          "city": "Amsterdam",
+          "translations": {
+            "en": {
+              "name": "Amsterdam, 1016EE",
+              "city": "Amsterdam",
+              "postal_code": "1016EE",
+              "street": "Keizersgracht",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "1016EE",
+          "state_code": "NH",
+          "street": "Keizersgracht",
+          "note": null
+        }
+      ],
+      "country_code": "NL",
+      "id": 2749167,
+      "locations_question": "What is your preferred work location?",
+      "cover_image": null,
+      "options_cover_letter": "off",
+      "updated_at": "2026-10-15 09:15:26 UTC",
+      "close_at": null,
+      "highlight": null,
+      "status": "published",
+      "sharing_description": "Description:We are seeking a dedicated Hotel Manager to oversee our operations. As the Hotel Manager, you will be responsible for ensuring the smooth running of all hotel departments, maintaining high",
+      "state_name": "Noord-Holland",
+      "dynamic_fields": []
+    },
+    {
+      "salary": {
+        "max": "70000",
+        "min": "60000",
+        "period": "year",
+        "currency": "EUR"
+      },
+      "locations_question_type": "multiple_choice",
+      "position": 139,
+      "published_at": "2026-09-08 08:27:14 UTC",
+      "company_name": "Marketplace integrations",
+      "guid": "bbguw",
+      "careers_url": "https://techpartnerships.recruitee.com/o/demo-specialist",
+      "category_code": "sales",
+      "options_cv": "required",
+      "postal_code": "1016",
+      "experience_code": "mid_level",
+      "requirements": "<p><strong><u><span style=\"color:#121317\">Requirements:</span></u></strong></p><ul><li><p><span style=\"color:#121317\">Minimum of 2 years of experience in conducting product demonstrations</span></p></li></ul><ul><li><p><span style=\"color:#121317\">Excellent communication and presentation skills</span></p></li><li><p><span style=\"color:#121317\">Strong understanding of technical products and ability to explain complex concepts in a simple manner</span></p></li><li><p><span style=\"color:#121317\">Ability to travel within the Netherlands for client visits and events</span></p></li><li><p><span style=\"color:#121317\">Experience in providing training and support to clients</span></p></li><li><p><span style=\"color:#121317\">Proficiency in Dutch and English languages</span></p></li><li><p><span style=\"color:#121317\">Strong organizational skills and attention to detail</span></p></li><li><p><span style=\"color:#121317\">Ability to work independently and as part of a team</span></p></li><li><p><span style=\"color:#121317\">Flexibility to adapt to changing priorities and requirements</span></p></li><li><p><span style=\"color:#121317\">Bachelor's degree in a relevant field</span></p></li></ul>",
+      "sharing_image": null,
+      "options_salutation": "off",
+      "open_questions": [
+        {
+          "id": 4356694,
+          "position": 1,
+          "options": {},
+          "required": true,
+          "body": "Do you need a visa to work in The Netherlands?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Do you need a visa to work in The Netherlands?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4356695,
+          "position": 2,
+          "options": {},
+          "required": true,
+          "body": "When can you start?",
+          "kind": "date",
+          "translations": {
+            "en": {
+              "body": "When can you start?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4356696,
+          "position": 3,
+          "options": {
+            "currency": "EUR"
+          },
+          "required": true,
+          "body": "What is your expected salary?",
+          "kind": "salary",
+          "translations": {
+            "en": {
+              "body": "What is your expected salary?"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "city": "Amsterdsam",
+      "sharing_title": "Demo Specialist",
+      "max_hours": 40,
+      "min_hours": 40,
+      "translations": {
+        "en": {
+          "description": "<p><span style=\"color:#121317\">We are seeking a talented Demo Specialist to join our team in the Netherlands at a leading company that specializes in providing innovative HR, ATS, and Performance Management Software solutions. As a Demo Specialist, you will play a crucial role in showcasing the capabilities and features of our software to potential clients, helping them understand how our solutions can meet their specific needs and drive their business forward.</span></p><p style=\"min-height: 1.7em;\"></p><p><strong><span style=\"color:#121317\">Key Responsibilities:</span></strong></p><ul><li><p><span style=\"color:#121317\">Conducting engaging and informative product demonstrations to prospective clients, highlighting the key functionalities and benefits of our HR, ATS, and Performance Management Software.</span></p></li><li><p><span style=\"color:#121317\">Understanding the unique requirements of each client and tailoring the demo presentations to address their specific needs and challenges.</span></p></li><li><p><span style=\"color:#121317\">Collaborating closely with the sales team to support the sales process and contribute to the overall success of the business.</span></p></li><li><p><span style=\"color:#121317\">Gathering feedback from clients during and after the demos to continuously improve the quality of presentations and better meet customer expectations.</span></p></li><li><p><span style=\"color:#121317\">Staying up-to-date with the latest features and updates of our software products to effectively communicate their value to potential clients.</span></p><p style=\"min-height: 1.7em;\"></p></li></ul><p><span style=\"color:#121317\">If you are passionate about technology, have a knack for delivering compelling presentations, and enjoy working in a dynamic and innovative environment, we would love to hear from you. Join us in revolutionizing the HR and performance management landscape with our cutting-edge software solutions!</span></p>",
+          "title": "Demo Specialist",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<p><strong><u><span style=\"color:#121317\">Requirements:</span></u></strong></p><ul><li><p><span style=\"color:#121317\">Minimum of 2 years of experience in conducting product demonstrations</span></p></li></ul><ul><li><p><span style=\"color:#121317\">Excellent communication and presentation skills</span></p></li><li><p><span style=\"color:#121317\">Strong understanding of technical products and ability to explain complex concepts in a simple manner</span></p></li><li><p><span style=\"color:#121317\">Ability to travel within the Netherlands for client visits and events</span></p></li><li><p><span style=\"color:#121317\">Experience in providing training and support to clients</span></p></li><li><p><span style=\"color:#121317\">Proficiency in Dutch and English languages</span></p></li><li><p><span style=\"color:#121317\">Strong organizational skills and attention to detail</span></p></li><li><p><span style=\"color:#121317\">Ability to work independently and as part of a team</span></p></li><li><p><span style=\"color:#121317\">Flexibility to adapt to changing priorities and requirements</span></p></li><li><p><span style=\"color:#121317\">Bachelor's degree in a relevant field</span></p></li></ul>",
+          "sharing_title": "Demo Specialist",
+          "sharing_description": "We are seeking a talented Demo Specialist to join our team in the Netherlands at a leading company that specializes in providing innovative HR, ATS, and Performance Management Software solutions. As a",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "country": "Nederland",
+      "careers_apply_url": "https://techpartnerships.recruitee.com/o/demo-specialist/c/new",
+      "slug": "demo-specialist",
+      "tags": [],
+      "education_code": "bachelor_degree",
+      "options_phone": "required",
+      "state_code": "NH",
+      "options_photo": "off",
+      "mailbox_email": "removido@example.test",
+      "description": "<p><span style=\"color:#121317\">We are seeking a talented Demo Specialist to join our team in the Netherlands at a leading company that specializes in providing innovative HR, ATS, and Performance Management Software solutions. As a Demo Specialist, you will play a crucial role in showcasing the capabilities and features of our software to potential clients, helping them understand how our solutions can meet their specific needs and drive their business forward.</span></p><p style=\"min-height: 1.7em;\"></p><p><strong><span style=\"color:#121317\">Key Responsibilities:</span></strong></p><ul><li><p><span style=\"color:#121317\">Conducting engaging and informative product demonstrations to prospective clients, highlighting the key functionalities and benefits of our HR, ATS, and Performance Management Software.</span></p></li><li><p><span style=\"color:#121317\">Understanding the unique requirements of each client and tailoring the demo presentations to address their specific needs and challenges.</span></p></li><li><p><span style=\"color:#121317\">Collaborating closely with the sales team to support the sales process and contribute to the overall success of the business.</span></p></li><li><p><span style=\"color:#121317\">Gathering feedback from clients during and after the demos to continuously improve the quality of presentations and better meet customer expectations.</span></p></li><li><p><span style=\"color:#121317\">Staying up-to-date with the latest features and updates of our software products to effectively communicate their value to potential clients.</span></p><p style=\"min-height: 1.7em;\"></p></li></ul><p><span style=\"color:#121317\">If you are passionate about technology, have a knack for delivering compelling presentations, and enjoy working in a dynamic and innovative environment, we would love to hear from you. Join us in revolutionizing the HR and performance management landscape with our cutting-edge software solutions!</span></p>",
+      "locations_question_required": true,
+      "max_hours_per_week": "40",
+      "location_question_visible": false,
+      "options_title": "off",
+      "remote": false,
+      "created_at": "2026-09-08 08:22:41 UTC",
+      "hybrid": false,
+      "employment_type_code": "fulltime_permanent",
+      "min_hours_per_week": "40",
+      "department": null,
+      "title": "Demo Specialist",
+      "location": "Amsterdsam, Noord-Holland, Nederland",
+      "on_site": true,
+      "locations": [
+        {
+          "id": 26206,
+          "name": "Amsterdam, 1016EE",
+          "state": "Noord-Holland",
+          "country": "Netherlands",
+          "city": "Amsterdam",
+          "translations": {
+            "en": {
+              "name": "Amsterdam, 1016EE",
+              "city": "Amsterdam",
+              "postal_code": "1016EE",
+              "street": "Keizersgracht",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "1016EE",
+          "state_code": "NH",
+          "street": "Keizersgracht",
+          "note": null
+        }
+      ],
+      "country_code": "NL",
+      "id": 2737981,
+      "locations_question": "What is your preferred work location?",
+      "cover_image": null,
+      "options_cover_letter": "optional",
+      "updated_at": "2026-09-08 08:27:14 UTC",
+      "close_at": null,
+      "highlight": null,
+      "status": "published",
+      "sharing_description": "We are seeking a talented Demo Specialist to join our team in the Netherlands at a leading company that specializes in providing innovative HR, ATS, and Performance Management Software solutions. As a",
+      "state_name": "Noord-Holland",
+      "dynamic_fields": []
+    },
+    {
+      "salary": {
+        "max": "35000",
+        "min": "30000",
+        "period": "year",
+        "currency": "EUR"
+      },
+      "locations_question_type": "multiple_choice",
+      "position": 138,
+      "published_at": "2026-09-08 08:16:06 UTC",
+      "company_name": "Marketplace integrations",
+      "guid": "6s146",
+      "careers_url": "https://techpartnerships.recruitee.com/o/front-office-employee-netherlands",
+      "category_code": "hospitality",
+      "options_cv": "required",
+      "postal_code": "1016",
+      "experience_code": "entry_level",
+      "requirements": "<ol><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> Proven experience as a Front Office Representative, Receptionist, or a similar customer-facing administrative role.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Skills</span></strong><span style=\"color:#121317\">: Excellent verbal and written communication skills in Dutch and English. </span></p></li><li><p><strong><span style=\"color:#121317\">Tech-Savvy:</span></strong><span style=\"color:#121317\"> Proficiency in Microsoft Office Suite (Word, Excel, Outlook) and familiarity with office equipment (e.g., multi-line phone systems, printers).</span></p></li><li><p><strong><span style=\"color:#121317\">Organizational Skills:</span></strong><span style=\"color:#121317\"> Strong ability to multitask, prioritize tasks effectively, and maintain a calm demeanor during busy hours.</span></p></li><li><p><strong><span style=\"color:#121317\">Personality:</span></strong><span style=\"color:#121317\"> A positive, problem-solving attitude with a strong sense of discretion and professionalism.</span></p></li></ol>",
+      "sharing_image": null,
+      "options_salutation": "off",
+      "open_questions": [
+        {
+          "id": 4356664,
+          "position": 1,
+          "options": {},
+          "required": true,
+          "body": "Do you need a visa to work in The Netherlands?",
+          "kind": "boolean",
+          "translations": {
+            "en": {
+              "body": "Do you need a visa to work in The Netherlands?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4356665,
+          "position": 2,
+          "options": {},
+          "required": true,
+          "body": "When can you start?",
+          "kind": "date",
+          "translations": {
+            "en": {
+              "body": "When can you start?"
+            }
+          },
+          "open_question_options": []
+        },
+        {
+          "id": 4356666,
+          "position": 3,
+          "options": {
+            "currency": "EUR"
+          },
+          "required": true,
+          "body": "What is your expected salary?",
+          "kind": "salary",
+          "translations": {
+            "en": {
+              "body": "What is your expected salary?"
+            }
+          },
+          "open_question_options": []
+        }
+      ],
+      "city": "Amsterdsam",
+      "sharing_title": "Front Office Employee - Netherlands",
+      "max_hours": 40,
+      "min_hours": 40,
+      "translations": {
+        "en": {
+          "description": "<h4><strong>About Us</strong></h4><p><span style=\"color:#121317\">We are a dynamic, growing team in the Hospitality</span><strong><span style=\"color:#121317\"> </span></strong><span style=\"color:#121317\">sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will play a crucial role in shaping how the world perceives our brand from the moment they walk through our doors or call our line.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong>The Role</strong></h4><p><span style=\"color:#121317\">We are looking for a welcoming, organized, and proactive </span><strong><span style=\"color:#121317\">Front Office Employee</span></strong><span style=\"color:#121317\"> to join our team. In this role, you will be the primary point of contact for all visitors and incoming communications. You will ensure the smooth, day-to-day operations of our front desk, combining top-tier customer service with essential administrative support.</span></p><p><span style=\"color:#121317\">If you are a people person who thrives in a vibrant environment and loves keeping things organized, we want to hear from you!</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong>Your Responsibilities</strong></h4><ul><li><p><strong><span style=\"color:#121317\">First Class Hospitality:</span></strong><span style=\"color:#121317\"> Greet and welcome visitors, clients, and candidates with warmth and professionalism, ensuring they are directed to the right person or meeting room.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Hub:</span></strong><span style=\"color:#121317\"> Answer, screen, and forward incoming phone calls, and handle the general company email inbox.</span></p></li><li><p><strong><span style=\"color:#121317\">Logistics &amp; Mail:</span></strong><span style=\"color:#121317\"> Sort and distribute daily mail, deliveries, and couriers; prepare outgoing shipments and coordinate office supplies inventory.</span></p></li><li><p><strong><span style=\"color:#121317\">Administrative Support:</span></strong><span style=\"color:#121317\"> Assist various departments (such as HR or Finance) with light administrative tasks, data entry, scheduling meeting rooms, and organizing company events.</span></p></li><li><p><strong><span style=\"color:#121317\">Security &amp; Access:</span></strong><span style=\"color:#121317\"> Monitor visitor logs and issue visitor badges to maintain a secure office environment.</span></p></li></ul>",
+          "title": "Front Office Employee - Netherlands",
+          "highlight": null,
+          "sharing_image": null,
+          "requirements": "<ol><li><p><strong><span style=\"color:#121317\">Experience:</span></strong><span style=\"color:#121317\"> Proven experience as a Front Office Representative, Receptionist, or a similar customer-facing administrative role.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Skills</span></strong><span style=\"color:#121317\">: Excellent verbal and written communication skills in Dutch and English. </span></p></li><li><p><strong><span style=\"color:#121317\">Tech-Savvy:</span></strong><span style=\"color:#121317\"> Proficiency in Microsoft Office Suite (Word, Excel, Outlook) and familiarity with office equipment (e.g., multi-line phone systems, printers).</span></p></li><li><p><strong><span style=\"color:#121317\">Organizational Skills:</span></strong><span style=\"color:#121317\"> Strong ability to multitask, prioritize tasks effectively, and maintain a calm demeanor during busy hours.</span></p></li><li><p><strong><span style=\"color:#121317\">Personality:</span></strong><span style=\"color:#121317\"> A positive, problem-solving attitude with a strong sense of discretion and professionalism.</span></p></li></ol>",
+          "sharing_title": "Front Office Employee - Netherlands",
+          "sharing_description": "About UsWe are a dynamic, growing team in the Hospitality sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will ",
+          "locations_question": "What is your preferred work location?"
+        }
+      },
+      "country": "Nederland",
+      "careers_apply_url": "https://techpartnerships.recruitee.com/o/front-office-employee-netherlands/c/new",
+      "slug": "front-office-employee-netherlands",
+      "tags": [],
+      "education_code": "high_school",
+      "options_phone": "required",
+      "state_code": "NH",
+      "options_photo": "off",
+      "mailbox_email": "removido@example.test",
+      "description": "<h4><strong>About Us</strong></h4><p><span style=\"color:#121317\">We are a dynamic, growing team in the Hospitality</span><strong><span style=\"color:#121317\"> </span></strong><span style=\"color:#121317\">sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will play a crucial role in shaping how the world perceives our brand from the moment they walk through our doors or call our line.</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong>The Role</strong></h4><p><span style=\"color:#121317\">We are looking for a welcoming, organized, and proactive </span><strong><span style=\"color:#121317\">Front Office Employee</span></strong><span style=\"color:#121317\"> to join our team. In this role, you will be the primary point of contact for all visitors and incoming communications. You will ensure the smooth, day-to-day operations of our front desk, combining top-tier customer service with essential administrative support.</span></p><p><span style=\"color:#121317\">If you are a people person who thrives in a vibrant environment and loves keeping things organized, we want to hear from you!</span></p><p style=\"min-height: 1.7em;\"></p><h4><strong>Your Responsibilities</strong></h4><ul><li><p><strong><span style=\"color:#121317\">First Class Hospitality:</span></strong><span style=\"color:#121317\"> Greet and welcome visitors, clients, and candidates with warmth and professionalism, ensuring they are directed to the right person or meeting room.</span></p></li><li><p><strong><span style=\"color:#121317\">Communication Hub:</span></strong><span style=\"color:#121317\"> Answer, screen, and forward incoming phone calls, and handle the general company email inbox.</span></p></li><li><p><strong><span style=\"color:#121317\">Logistics &amp; Mail:</span></strong><span style=\"color:#121317\"> Sort and distribute daily mail, deliveries, and couriers; prepare outgoing shipments and coordinate office supplies inventory.</span></p></li><li><p><strong><span style=\"color:#121317\">Administrative Support:</span></strong><span style=\"color:#121317\"> Assist various departments (such as HR or Finance) with light administrative tasks, data entry, scheduling meeting rooms, and organizing company events.</span></p></li><li><p><strong><span style=\"color:#121317\">Security &amp; Access:</span></strong><span style=\"color:#121317\"> Monitor visitor logs and issue visitor badges to maintain a secure office environment.</span></p></li></ul>",
+      "locations_question_required": true,
+      "max_hours_per_week": "40",
+      "location_question_visible": false,
+      "options_title": "off",
+      "remote": false,
+      "created_at": "2026-09-08 08:13:35 UTC",
+      "hybrid": false,
+      "employment_type_code": "fulltime_permanent",
+      "min_hours_per_week": "40",
+      "department": null,
+      "title": "Front Office Employee - Netherlands",
+      "location": "Amsterdsam, Noord-Holland, Nederland",
+      "on_site": true,
+      "locations": [
+        {
+          "id": 26206,
+          "name": "Amsterdam, 1016EE",
+          "state": "Noord-Holland",
+          "country": "Netherlands",
+          "city": "Amsterdam",
+          "translations": {
+            "en": {
+              "name": "Amsterdam, 1016EE",
+              "city": "Amsterdam",
+              "postal_code": "1016EE",
+              "street": "Keizersgracht",
+              "note": null
+            }
+          },
+          "country_code": "NL",
+          "postal_code": "1016EE",
+          "state_code": "NH",
+          "street": "Keizersgracht",
+          "note": null
+        }
+      ],
+      "country_code": "NL",
+      "id": 2737952,
+      "locations_question": "What is your preferred work location?",
+      "cover_image": null,
+      "options_cover_letter": "optional",
+      "updated_at": "2026-09-08 08:16:06 UTC",
+      "close_at": null,
+      "highlight": null,
+      "status": "published",
+      "sharing_description": "About UsWe are a dynamic, growing team in the Hospitality sector, dedicated to delivering exceptional experiences to our clients, partners, and visitors. As the face and voice of our office, you will ",
+      "state_name": "Noord-Holland",
+      "dynamic_fields": []
+    }
+  ]
+}
