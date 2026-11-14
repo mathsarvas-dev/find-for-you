@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     match_batch: int = Field(3, gt=0)
     match_top_n: int = Field(30, gt=0)
     match_weight_profile: float = Field(1.0, ge=0)
-    match_weight_query: float = Field(0.0, ge=0)
+    match_weight_query: float = Field(0.5, ge=0)
     match_max_attempts: int = Field(3, gt=0)
     # Max matches scored by the LLM in any rolling 24 h (all users): protects
     # the Groq daily budget shared with the interview.

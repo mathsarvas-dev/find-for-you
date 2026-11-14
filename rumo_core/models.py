@@ -4,7 +4,7 @@ from pgvector.sqlalchemy import Vector
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Numeric,
+    Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric,
     String, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -294,6 +294,7 @@ class SearchProfile(UserScopedMixin, TimestampMixin, Base):
     )
     query_text: Mapped[str | None] = mapped_column(Text)
     query_embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
+    query_model_version: Mapped[str | None] = mapped_column(String(128))
     is_default: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
@@ -337,6 +338,20 @@ class Match(UserScopedMixin, TimestampMixin, Base):
     scored_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # hash of the job content at scoring time
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
+class JobLabel(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "job_labels"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_job_labels_user_job"),
+        CheckConstraint("label in ('good','bad')", name="ck_job_labels_label"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    label: Mapped[str] = mapped_column(String(8), nullable=False)
 
 
 class DiscoveryCandidate(UserScopedMixin, TimestampMixin, Base):
@@ -389,6 +404,7 @@ class UserPreference(Base):
     target_companies: Mapped[list] = mapped_column(
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
+    quality_seed: Mapped[int | None] = mapped_column(Integer)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
