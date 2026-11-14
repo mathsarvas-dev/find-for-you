@@ -16,6 +16,7 @@ from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
 from api.profile import router as profile_router
+from api.quality import router as quality_router
 from api.sources import router as sources_router
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
@@ -27,7 +28,7 @@ app = FastAPI(title="Rumo")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=get_settings().cors_origin_list,
-    allow_methods=["GET", "POST", "PATCH", "PUT"],
+    allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE"],
     allow_headers=["*"],
 )
 
@@ -38,6 +39,7 @@ app.include_router(matching_router)
 app.include_router(discovery_router)
 app.include_router(overview_router)
 app.include_router(chat_filters_router)
+app.include_router(quality_router)
 
 
 def _json_safe(value):
