@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { OverviewContext, type OverviewState } from "@/components/shell/OverviewContext";
 import {
   ApiError,
   confirmProfile,
@@ -57,6 +58,27 @@ async function tick(ms: number) {
   });
 }
 
+/** Passo marcado como atual na trilha do cabeçalho. */
+function currentStep() {
+  const list = screen.getByRole("list", { name: "Etapas do perfil" });
+  const items = within(list)
+    .getAllByRole("listitem")
+    .filter((li) => li.getAttribute("aria-current") === "step");
+  expect(items).toHaveLength(1);
+  return items[0];
+}
+
+function renderWithOverview() {
+  const refresh = vi.fn(async () => {});
+  const state: OverviewState = { overview: null, status: "ok", refresh };
+  render(
+    <OverviewContext.Provider value={state}>
+      <OnboardingPage />
+    </OverviewContext.Provider>,
+  );
+  return { refresh };
+}
+
 async function uploadFile() {
   const input = await screen.findByLabelText(/Arquivo do currículo/);
   const file = new File(["%PDF-1.4"], "curriculo.pdf", { type: "application/pdf" });
@@ -80,7 +102,7 @@ describe("OnboardingPage", () => {
     render(<OnboardingPage />);
     expect(await screen.findByLabelText(/Arquivo do currículo/)).toBeInTheDocument();
     expect(screen.getByLabelText(/Conte com suas palavras/)).toBeInTheDocument();
-    expect(screen.getByText("Passo 1 de 3")).toBeInTheDocument();
+    expect(screen.getByText("Passo 1 de 4 · Enviar currículo")).toBeInTheDocument();
   });
 
   it("erro de rede ao carregar: diz o que houve e permite tentar de novo", async () => {
@@ -113,7 +135,7 @@ describe("OnboardingPage", () => {
       .mockResolvedValue(importState("ready"));
     render(<OnboardingPage />);
     await uploadFile();
-    expect(await screen.findByText("Passo 2 de 3")).toBeInTheDocument();
+    expect(await screen.findByText("Passo 2 de 4 · Revisar")).toBeInTheDocument();
     await vi.waitFor(() => expect(m.getImport).toHaveBeenCalledTimes(1));
     await tick(2000);
     await vi.waitFor(() => expect(m.getImport).toHaveBeenCalledTimes(2));
@@ -130,7 +152,7 @@ describe("OnboardingPage", () => {
     m.getImport.mockResolvedValue(importState("pending"));
     render(<OnboardingPage />);
     await uploadFile();
-    expect(await screen.findByText("Passo 2 de 3")).toBeInTheDocument();
+    expect(await screen.findByText("Passo 2 de 4 · Revisar")).toBeInTheDocument();
     await tick(10_000);
     expect(screen.queryByText("A leitura não começou.")).not.toBeInTheDocument();
     await tick(21_000);
@@ -208,5 +230,105 @@ describe("OnboardingPage", () => {
     expect(screen.queryByText(/pode levar alguns minutos/)).not.toBeInTheDocument();
     await tick(30000);
     expect(await screen.findByText(/pode levar alguns minutos/)).toBeInTheDocument();
+  });
+
+  describe("cabeçalho e trilha", () => {
+    it("um único h1, também enquanto carrega", async () => {
+      m.getProfile.mockReturnValue(new Promise(() => {}));
+      render(<OnboardingPage />);
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(screen.getByRole("heading", { level: 1, name: "Seu perfil" })).toBeInTheDocument();
+      // Sem saber a fase ainda: nada de trilha.
+      expect(screen.queryByRole("list", { name: "Etapas do perfil" })).toBeNull();
+    });
+
+    it("sem perfil: passo atual Enviar currículo, um só botão de envio e nada de entrevista", async () => {
+      m.getProfile.mockResolvedValue(null);
+      render(<OnboardingPage />);
+      await screen.findByLabelText(/Arquivo do currículo/);
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(currentStep()).toHaveTextContent("Enviar currículo");
+      expect(screen.getAllByRole("button", { name: "Enviar currículo" })).toHaveLength(1);
+      expect(screen.queryByRole("link", { name: "Continuar entrevista" })).toBeNull();
+    });
+
+    it("perfil existente: Continuar entrevista no cabeçalho e Enviar currículo abre o envio sem nova requisição", async () => {
+      m.getProfile.mockResolvedValue(stored(4));
+      render(<OnboardingPage />);
+      await screen.findByRole("button", { name: "Ver perfil atual" });
+      expect(currentStep()).toHaveTextContent("Entrevista");
+      expect(screen.getByRole("link", { name: "Continuar entrevista" })).toHaveAttribute(
+        "href",
+        "/onboarding/interview",
+      );
+      const calls = m.getProfile.mock.calls.length;
+      fireEvent.click(screen.getByRole("button", { name: "Enviar currículo" }));
+      expect(await screen.findByLabelText(/Arquivo do currículo/)).toBeInTheDocument();
+      expect(m.getProfile).toHaveBeenCalledTimes(calls);
+      expect(m.upload).not.toHaveBeenCalled();
+      expect(currentStep()).toHaveTextContent("Enviar currículo");
+      // Já há perfil: a entrevista continua a um clique.
+      expect(screen.getByRole("link", { name: "Continuar entrevista" })).toBeInTheDocument();
+    });
+
+    it("perfil existente ainda vetorizando: passo atual Confirmar", async () => {
+      m.getProfile.mockResolvedValue(stored(1));
+      render(<OnboardingPage />);
+      await screen.findByRole("button", { name: "Ver perfil atual" });
+      expect(currentStep()).toHaveTextContent("Confirmar");
+    });
+
+    it("leitura e revisão: passo atual Revisar; depois de confirmar, Confirmar e então Entrevista", async () => {
+      m.getProfile.mockResolvedValueOnce(null);
+      m.getImport.mockResolvedValueOnce(importState("pending")).mockResolvedValue(importState("ready"));
+      m.confirm.mockResolvedValue({ version: 1, chunks_total: 4, chunks_embedded: 0 });
+      render(<OnboardingPage />);
+      await uploadFile();
+      await screen.findByText(/Na fila para leitura/);
+      expect(currentStep()).toHaveTextContent("Revisar");
+      await tick(2000);
+      await screen.findByLabelText("Nome completo");
+      expect(currentStep()).toHaveTextContent("Revisar");
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar perfil" }));
+      expect(await screen.findByText("0 de 4")).toBeInTheDocument();
+      expect(currentStep()).toHaveTextContent("Confirmar");
+      m.getProfile.mockResolvedValue(stored(4));
+      await tick(2000);
+      expect(await screen.findByText(/Perfil pronto/)).toBeInTheDocument();
+      expect(currentStep()).toHaveTextContent("Entrevista");
+      expect(screen.getByRole("link", { name: "Continuar entrevista" })).toHaveAttribute(
+        "href",
+        "/onboarding/interview",
+      );
+    });
+
+    it("confirmar o perfil atualiza o resumo da casca (e de novo quando os vetores ficam prontos)", async () => {
+      m.getProfile.mockResolvedValueOnce(null);
+      m.getImport.mockResolvedValue(importState("ready"));
+      m.confirm.mockResolvedValue({ version: 1, chunks_total: 4, chunks_embedded: 0 });
+      const { refresh } = renderWithOverview();
+      await uploadFile();
+      await screen.findByLabelText("Nome completo");
+      expect(refresh).not.toHaveBeenCalled();
+      fireEvent.click(screen.getByRole("button", { name: "Confirmar perfil" }));
+      await screen.findByText("0 de 4");
+      expect(m.confirm).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      m.getProfile.mockResolvedValue(stored(4));
+      await tick(2000);
+      await screen.findByText(/Perfil pronto/);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it("confirmar com erro não atualiza o resumo", async () => {
+      m.getProfile.mockResolvedValueOnce(null);
+      m.getImport.mockResolvedValue(importState("ready"));
+      m.confirm.mockRejectedValue(new ApiError(500, "Falhou ao salvar."));
+      const { refresh } = renderWithOverview();
+      await uploadFile();
+      fireEvent.click(await screen.findByRole("button", { name: "Confirmar perfil" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("Falhou ao salvar.");
+      expect(refresh).not.toHaveBeenCalled();
+    });
   });
 });

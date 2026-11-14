@@ -6,6 +6,10 @@ import { AddCompanyForm } from "@/components/sources/AddCompanyForm";
 import { CompanyRow } from "@/components/sources/CompanyRow";
 import { DiscoveryPanel } from "@/components/sources/DiscoveryPanel";
 import { JobsList } from "@/components/sources/JobsList";
+import { sourcesSteps } from "@/components/sources/sourcesSteps";
+import { useRefreshOverview } from "@/components/shell/OverviewContext";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { Stepper } from "@/components/stepper/Stepper";
 import { ApiError } from "@/lib/profile";
 import { isPending, listCompanies, type Company, type CompanyOrigin } from "@/lib/sources";
 
@@ -59,6 +63,9 @@ export default function SourcesPage() {
   const [now, setNow] = useState(0);
   const mounted = useRef(true);
   const known = useRef<Company[]>([]);
+  /** Corpo do painel com o formulário de cadastro (alvo de "Adicionar empresa"). */
+  const addRef = useRef<HTMLDivElement>(null);
+  const refreshOverview = useRefreshOverview();
 
   useEffect(() => {
     mounted.current = true;
@@ -165,19 +172,42 @@ export default function SourcesPage() {
   }
 
   function replace(updated: Company) {
+    // Pausar, reativar ou coletar agora muda os contadores da casca.
+    refreshOverview();
     if (!companies) return;
     apply(companies.map((c) => (c.id === updated.id ? updated : c)));
   }
 
+  /** Leva ao campo do formulário de cadastro (o foco rola a página até ele). */
+  function focusAddForm() {
+    addRef.current?.querySelector<HTMLInputElement>("input")?.focus();
+  }
+
   return (
     <main className="page">
-      <div className="page-head">
-        <h1>Fontes</h1>
-        <p>
-          As empresas que o Rumo vigia. Cada uma é coletada sozinha, em segundo plano, e as vagas
-          novas aparecem na lista abaixo.
-        </p>
-      </div>
+      <PageHeader
+        title="Fontes"
+        description="As empresas que o Rumo vigia. Cada uma é coletada sozinha, em segundo plano, e as vagas novas aparecem na lista abaixo."
+        actions={
+          companies && (
+            <>
+              <button type="button" className="button" onClick={focusAddForm}>
+                Adicionar empresa
+              </button>
+              {companies.length > 0 && (
+                <Link className="button button--secondary" href="/jobs">
+                  Ver vagas
+                </Link>
+              )}
+            </>
+          )
+        }
+        stepper={
+          companies && (
+            <Stepper steps={sourcesSteps(companies)} orientation="horizontal" label="Etapas das fontes" />
+          )
+        }
+      />
 
       {phase.name === "loading" && (
         <section className="panel" aria-busy="true" aria-label="Carregando empresas">
@@ -214,8 +244,13 @@ export default function SourcesPage() {
                 {companies.length} {companies.length === 1 ? "empresa" : "empresas"} · Greenhouse
               </span>
             </div>
-            <div className="panel__body">
-              <AddCompanyForm onAdded={() => void refresh()} />
+            <div className="panel__body" ref={addRef}>
+              <AddCompanyForm
+                onAdded={() => {
+                  refreshOverview();
+                  void refresh();
+                }}
+              />
             </div>
 
             {pollError && (
@@ -267,6 +302,11 @@ export default function SourcesPage() {
                   Nenhuma empresa cadastrada ainda. Cole acima o token ou a URL do quadro de vagas
                   de uma empresa no Greenhouse; a primeira coleta começa logo depois.
                 </p>
+                <div className="actions">
+                  <button type="button" className="button button--secondary" onClick={focusAddForm}>
+                    Adicionar empresa
+                  </button>
+                </div>
               </div>
             ) : visible && visible.length === 0 && origin !== "all" ? (
               <div className="sources__empty">
@@ -291,7 +331,14 @@ export default function SourcesPage() {
           </section>
 
           <div className="sources__discovery">
-            <DiscoveryPanel refreshKey={activeAuto} onCompaniesChanged={() => void refresh()} />
+            <DiscoveryPanel
+              refreshKey={activeAuto}
+              onCompaniesChanged={() => {
+                refreshOverview();
+                void refresh();
+              }}
+              onSaved={refreshOverview}
+            />
           </div>
 
           <div className="sources__jobs">

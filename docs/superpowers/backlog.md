@@ -44,3 +44,12 @@
 - **UI:** contadores do painel e da página podem ficar defasados em corridas raras (empresa criada pelo worker entre duas leituras; `refreshKey` por contagem); depois de ligar a descoberta, `pending` é 0 e o polling só começa após recarregar; paginação por offset dos candidatos pode repetir/pular linhas.
 - **API/validação:** surrogate solto em chave de objeto no corpo ainda gera 500 do tratador de 422 (`{_json_safe(k): _json_safe(v)}`); o limite de 50 nomes vale antes da deduplicação, com mensagem em inglês do pydantic; catálogo escrito de memória: tokens errados viram `invalid` na validação; `name` do catálogo sem saneamento (a UI escapa); letras não decompostas por NFKD (ß, ı, ø, ł) geram variantes ruins.
 - **Testes:** sem teste para candidato removido entre a reivindicação e o registro; asserção fraca no sufixo Stone.
+
+## Redesign da casca (início, navegação, trilha)
+- **Atualização do resumo:** o painel de descoberta em Configurações (`DiscoverySection`) não passa `onSaved`; as ações da entrevista (iniciar, concluir, aceitar sugestão) não chamam `refresh()` (o resumo só atualiza ao navegar).
+- **Rótulos:** "Adicionar empresas" quando todas estão pausadas (deveria ser "Reativar empresas"); o botão da entrevista em /onboarding diz sempre "Continuar entrevista" (Início: "Fazer a entrevista", Conta: "Começar entrevista") — compartilhar um helper; "Ativar descoberta" da spec §5 não existe como botão em /sources (o interruptor do painel cobre).
+- **/onboarding:** "Confirmar perfil" só no fim do formulário (não no cabeçalho); trilha mostra "Lendo o currículo…" durante `read-error`; foco se perde após o "Enviar currículo" do cabeçalho; a trilha volta ao passo "Revisar/Enviar" ao ver ou reenviar o perfil.
+- **/jobs e /sources:** "Avaliar melhores vagas" desabilitado sem explicação; "Filtros" do cabeçalho usa `querySelector(".filters__toggle")` e não tem `aria-controls`; `focusAddForm` depende do primeiro `input`; duas buscas de overview ao ligar a descoberta; estados vazios filtrados sem botão.
+- **Casca:** fundo não inerte atrás da gaveta; título da página pisca; literal 1091.98px repetido; botão primário duplicado em Início; "Ver vetorização"; empresas pausadas contadas como automáticas; Stepper estreito em 559.98px vs 560px nos demais blocos.
+- **API /overview:** falha de uma seção ainda derruba as outras; ao isolar, usar `begin_nested` (um erro do Postgres aborta a transação).
+- **Verificação visual:** 375/768/desktop em claro e escuro feita só pelo implementador com API simulada.

@@ -440,4 +440,14 @@ describe("InterviewPage", () => {
     fireEvent.click(retry);
     expect(m.retry).not.toHaveBeenCalled();
   });
+
+  it("cabeçalho: um único h1 e a ação Voltar ao perfil", () => {
+    m.getProfile.mockReturnValue(new Promise(() => {}));
+    render(<InterviewPage />);
+    expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+    expect(screen.getByRole("heading", { level: 1, name: "Entrevista do perfil" })).toBeInTheDocument();
+    const back = screen.getByRole("link", { name: "Voltar ao perfil" });
+    expect(back).toHaveAttribute("href", "/onboarding");
+    expect(back.closest(".page-header__actions")).not.toBeNull();
+  });
 });
