@@ -213,8 +213,8 @@ def test_sample_requires_vectorized_profile_409(env, as_user):
     uid, cid = new_user()
     add_job(uid, cid, e(0))
     c = as_user(uid)
-    for r in (c.get("/quality/sample"), c.post("/quality/sample/new")):
+    for r in (c.get("/quality/sample"), c.post("/quality/sample/new"), c.get("/quality/report")):
         assert r.status_code == 409 and r.json()["detail"] == MSG_NO_PROFILE
     add_profile(uid, None)
-    for r in (c.get("/quality/sample"), c.post("/quality/sample/new")):
+    for r in (c.get("/quality/sample"), c.post("/quality/sample/new"), c.get("/quality/report")):
         assert r.status_code == 409 and r.json()["detail"] == MSG_NOT_VECTORIZED

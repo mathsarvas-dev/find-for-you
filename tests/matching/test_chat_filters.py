@@ -45,12 +45,45 @@ async def test_negation_becomes_exclusion():
     assert len(llm.calls) == 1
 
 
-async def test_query_text_with_negation_retries_then_fails():
-    bad = {"query_text": "dados sem plantão"}
-    llm = FakeLLM([bad, bad])
-    with pytest.raises(ParseInvalid):
-        await parse_query(llm, "x", SearchFilters(), ALLOWED)
-    assert len(llm.calls) == 2
+async def test_query_text_with_negation_is_dropped_keeping_filters():
+    llm = FakeLLM([{
+        "filters": {"work_models": ["remote"], "seniorities": ["senior"]},
+        "query_text": "foco no cliente",
+    }])
+    out = await parse_query(llm, "remoto senior foco no cliente", SearchFilters(), ALLOWED)
+    assert out.filters.work_models == ["remote"]
+    assert out.filters.seniorities == ["senior"]
+    assert out.query_text is None
+    assert any("ignorei o gosto" in n and "negação" in n for n in out.notes)
+    assert EMPTY_NOTE not in out.notes
+    assert len(llm.calls) == 1
+
+
+async def test_dropped_query_note_wins_over_the_notes_cap():
+    llm = FakeLLM([{
+        "filters": {"languages": ["en"]},
+        "query_text": "dados sem plantão",
+        "notes": ["a", "b", "c"],
+    }])
+    out = await parse_query(llm, "x", SearchFilters(), ALLOWED)
+    assert len(out.notes) == 3 and out.notes[0].startswith("ignorei o gosto")
+    assert out.filters.languages == ["en"]
+
+
+async def test_overlong_or_bad_chars_query_text_is_dropped_too():
+    for q in ("x" * 301, "dados‮"):
+        llm = FakeLLM([{"filters": {"languages": ["en"]}, "query_text": q}])
+        out = await parse_query(llm, "x", SearchFilters(), ALLOWED)
+        assert out.query_text is None and out.filters.languages == ["en"]
+        assert out.notes and all(len(n) <= 160 for n in out.notes)
+        assert len(llm.calls) == 1
+
+
+async def test_dropped_query_without_filters_is_empty():
+    out = await parse_query(FakeLLM([{"query_text": "dados sem plantão"}]), "x",
+                            SearchFilters(), ALLOWED)
+    assert out.query_text is None
+    assert EMPTY_NOTE in out.notes
 
 
 async def test_invalid_json_retries_once_then_succeeds():

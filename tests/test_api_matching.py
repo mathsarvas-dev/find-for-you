@@ -570,6 +570,15 @@ def test_put_query_with_negation_422(env, as_user):
     uid, _ = new_user()
     r = as_user(uid).put("/search-profile", json={"query_text": "sem plantão"})
     assert r.status_code == 422
+    assert r.json()["detail"] == "A consulta de gosto não pode ter negações; use os filtros de exclusão."
+    r2 = as_user(uid).put("/search-profile", json={"query_text": "a" * 400})
+    assert r2.status_code == 422 and r2.json()["detail"].startswith("A consulta de gosto é longa demais")
+    r3 = as_user(uid).put("/search-profile", json={"query_text": "a" * 1500})
+    assert r3.status_code == 422 and r3.json()["detail"].startswith("A consulta de gosto é longa demais")
+    r4 = as_user(uid).put("/search-profile", json={"query_text": "dados‮"})
+    assert r4.status_code == 422 and r4.json()["detail"] == "O texto contém caracteres inválidos."
+    r5 = as_user(uid).put("/search-profile", json={"countries": ["BRASIL"]})
+    assert r5.status_code == 422 and isinstance(r5.json()["detail"], list)
     with SessionLocal() as s:
         assert s.scalars(select(SearchProfile).where(SearchProfile.user_id == uid)).all() == []
 

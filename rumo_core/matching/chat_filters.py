@@ -44,6 +44,7 @@ def _fold(text: str) -> str:
 
 
 INVALID_CHARS_MESSAGE = "O texto contém caracteres inválidos."
+QUERY_TOO_LONG_MESSAGE = f"A consulta de gosto é longa demais (máx. {MAX_TEXT} caracteres)."
 
 
 def check_chars(text: str) -> None:
@@ -62,7 +63,7 @@ def check_query_text(text: str | None) -> str | None:
         return None
     check_chars(text)
     if len(text) > MAX_TEXT:
-        raise ValueError(f"A consulta de gosto é longa demais (máx. {MAX_TEXT} caracteres).")
+        raise ValueError(QUERY_TOO_LONG_MESSAGE)
     if _NEGATION.search(_fold(text)):
         raise ValueError(NEGATION_MESSAGE)
     return text
@@ -182,11 +183,21 @@ def _validate(raw: _RawParsed, current: SearchFilters, allowed: AllowedValues) -
     # the phrase never changes these two switches
     data["include_unknown"] = current.include_unknown
     data["accept_no_salary"] = current.accept_no_salary
-    notes = [n.strip()[:NOTE_MAX] for n in raw.notes if n.strip()][:MAX_NOTES]
+    notes = [n.strip()[:NOTE_MAX] for n in raw.notes if n.strip()]
+    # a bad taste text only drops the taste text, never the validated filters
+    query_text = None
+    try:
+        query_text = check_query_text(raw.query_text)
+    except ValueError as exc:
+        reason = {
+            NEGATION_MESSAGE: "ele continha uma negação; use os filtros de exclusão",
+            QUERY_TOO_LONG_MESSAGE: "ele era longo demais",
+        }.get(str(exc), "ele tinha caracteres inválidos")
+        notes.insert(0, f"ignorei o gosto: {reason}"[:NOTE_MAX])
     parsed = ParsedQuery(
         filters=SearchFilters.model_validate(data),
-        query_text=raw.query_text,
-        notes=notes,
+        query_text=query_text,
+        notes=notes[:MAX_NOTES],
     )
     constraints = parsed.filters.model_dump(
         exclude={"include_unknown", "accept_no_salary"}, exclude_defaults=True

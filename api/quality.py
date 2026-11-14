@@ -196,6 +196,7 @@ def get_report(
     user_id: int = Depends(current_user_id),
     mv: str = Depends(model_version),
 ):
+    _require_vectorized(session, user_id, mv)
     r = evaluate(session, user_id, model_version=mv)
     return QualityReportOut(
         status=r.status, labeled=r.labeled, good=r.good, bad=r.bad,
