@@ -36,7 +36,7 @@ Fora de escopo: destaques no painel inicial, vagas salvas/pipeline (marco 6), ch
   - `POST /filters/parse` `{text}` → `{filters, query_text, notes}` (proposta; não grava; escopado por `user_id`).
   - `PUT /search-profile` passa a aceitar `query_text` e zera `query_embedding`/`query_model_version` quando o texto muda.
   - `GET /quality/sample` → até 40 vagas para rotular (§6); `PUT /quality/labels/{job_id}` `{label}` e `DELETE` do rótulo; `GET /quality/report`.
-- Web: barra de chat acima dos filtros em `/jobs` ("Descreva o que procura…" + botão "Aplicar"); faixa de **chips** (um por valor; "×" remove; inclusão em azul, exclusão em vermelho com texto "sem …", estado nunca só por cor); chip da consulta semântica ("gosto: dados") editável; página `/jobs/qualidade` com a tela de rotulagem e o relatório. Rótulos em PT-BR, verbo no infinitivo.
+- Web: barra de chat acima dos filtros em `/jobs` ("Descreva o que procura…" + botão "Aplicar"); faixa de **chips** (um por valor; "×" remove; inclusão em tom neutro com ícone de check no verde de acento, exclusão em vermelho com texto "sem …", estado nunca só por cor); chip da consulta semântica ("gosto: dados") editável; página `/jobs/qualidade` com a tela de rotulagem e o relatório. Rótulos em PT-BR, verbo no infinitivo.
 
 ## 5. Fluxo do chat
 1. Frase → `POST /filters/parse` → proposta. A UI mostra os chips propostos com "Aplicar" e "Descartar"; nada é salvo antes.
