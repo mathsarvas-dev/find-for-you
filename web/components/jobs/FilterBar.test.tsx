@@ -11,7 +11,7 @@ async function tick(ms: number) {
 
 function renderBar(initial: SearchFilters = DEFAULT_FILTERS) {
   const onChange = vi.fn();
-  render(<FilterBar initial={initial} onChange={onChange} />);
+  render(<FilterBar initial={initial} revision={0} onChange={onChange} />);
   return onChange;
 }
 
@@ -99,7 +99,7 @@ describe("FilterBar", () => {
 
   it("avisa a página enquanto há edição esperando o debounce", async () => {
     const onEditing = vi.fn();
-    render(<FilterBar initial={DEFAULT_FILTERS} onChange={vi.fn()} onEditing={onEditing} />);
+    render(<FilterBar initial={DEFAULT_FILTERS} revision={0} onChange={vi.fn()} onEditing={onEditing} />);
     fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
     expect(onEditing).toHaveBeenLastCalledWith(true);
     await tick(300);
@@ -160,6 +160,116 @@ describe("FilterBar", () => {
       ...DEFAULT_FILTERS,
       include_unknown: false,
       accept_no_salary: false,
+    });
+  });
+
+  describe("exclusões e revisão", () => {
+    it("mostra as exclusões de país e título salvas", () => {
+      renderBar({ ...DEFAULT_FILTERS, exclude_countries: ["US", "CN"], title_exclude: ["plantão"] });
+      expect(screen.getByLabelText("Excluir países")).toHaveValue("US, CN");
+      expect(screen.getByLabelText("Evitar no título")).toHaveValue("plantão");
+    });
+
+    it("editar países mantém todas as exclusões no onChange", async () => {
+      const initial: SearchFilters = {
+        ...DEFAULT_FILTERS,
+        exclude_countries: ["US"],
+        exclude_work_models: ["onsite"],
+        exclude_seniorities: ["intern"],
+        exclude_languages: ["de"],
+        exclude_departments: ["Sales"],
+        title_exclude: ["plantão"],
+      };
+      const onChange = renderBar(initial);
+      fireEvent.change(screen.getByLabelText("Países"), { target: { value: "br" } });
+      await tick(300);
+      expect(onChange).toHaveBeenCalledWith({ ...initial, countries: ["BR"] });
+    });
+
+    it("os campos novos emitem listas separadas por vírgula", async () => {
+      const onChange = renderBar();
+      fireEvent.change(screen.getByLabelText("Excluir países"), { target: { value: "us, cn ,US" } });
+      fireEvent.change(screen.getByLabelText("Evitar no título"), {
+        target: { value: "plantão, Estágio , estágio," },
+      });
+      await tick(300);
+      expect(onChange).toHaveBeenCalledWith({
+        ...DEFAULT_FILTERS,
+        exclude_countries: ["US", "CN"],
+        title_exclude: ["plantão", "Estágio"],
+      });
+    });
+
+    it("'Evitar no título' guarda no máximo 10 termos", async () => {
+      const onChange = renderBar();
+      const terms = Array.from({ length: 12 }, (_, i) => `t${i}`);
+      fireEvent.change(screen.getByLabelText("Evitar no título"), { target: { value: terms.join(", ") } });
+      await tick(300);
+      expect(onChange.mock.calls[0][0].title_exclude).toEqual(terms.slice(0, 10));
+    });
+
+    it("marcar uma inclusão tira o mesmo valor da exclusão", async () => {
+      const onChange = renderBar({
+        ...DEFAULT_FILTERS,
+        exclude_work_models: ["remote"],
+        exclude_seniorities: ["intern", "senior"],
+      });
+      fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: "sênior" }));
+      await tick(300);
+      expect(onChange).toHaveBeenCalledWith({
+        ...DEFAULT_FILTERS,
+        work_models: ["remote"],
+        exclude_work_models: [],
+        seniorities: ["senior"],
+        exclude_seniorities: ["intern"],
+      });
+    });
+
+    it("incluir um país excluído tira a exclusão (também do campo)", async () => {
+      const onChange = renderBar({ ...DEFAULT_FILTERS, exclude_countries: ["BR", "US"] });
+      fireEvent.change(screen.getByLabelText("Países"), { target: { value: "br" } });
+      await tick(300);
+      expect(onChange).toHaveBeenCalledWith({
+        ...DEFAULT_FILTERS,
+        countries: ["BR"],
+        exclude_countries: ["US"],
+      });
+      expect(screen.getByLabelText("Excluir países")).toHaveValue("US");
+      // A limpeza do campo não gera um segundo salvamento.
+      await tick(1000);
+      expect(onChange).toHaveBeenCalledTimes(1);
+    });
+
+    it("revision nova redesenha a partir do initial novo e descarta o rascunho", async () => {
+      const onChange = vi.fn();
+      const { rerender } = render(<FilterBar initial={DEFAULT_FILTERS} revision={0} onChange={onChange} />);
+      fireEvent.change(screen.getByLabelText("Países"), { target: { value: "DE" } });
+      await tick(100);
+      const next: SearchFilters = {
+        ...DEFAULT_FILTERS,
+        countries: ["PT"],
+        exclude_seniorities: ["intern"],
+        title_exclude: ["plantão"],
+      };
+      rerender(<FilterBar initial={next} revision={1} onChange={onChange} />);
+      expect(screen.getByLabelText("Países")).toHaveValue("PT");
+      expect(screen.getByLabelText("Evitar no título")).toHaveValue("plantão");
+      // O rascunho velho ("DE") foi descartado: nada é salvo sozinho.
+      await tick(1000);
+      expect(onChange).not.toHaveBeenCalled();
+      // Uma edição manual depois disso parte do initial novo (não reverte a mudança do chat).
+      fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+      await tick(300);
+      expect(onChange).toHaveBeenCalledWith({ ...next, work_models: ["remote"] });
+    });
+
+    it("initial novo sem revision nova não mexe no rascunho", () => {
+      const onChange = vi.fn();
+      const { rerender } = render(<FilterBar initial={DEFAULT_FILTERS} revision={0} onChange={onChange} />);
+      fireEvent.change(screen.getByLabelText("Países"), { target: { value: "DE" } });
+      rerender(<FilterBar initial={{ ...DEFAULT_FILTERS, countries: ["PT"] }} revision={0} onChange={onChange} />);
+      expect(screen.getByLabelText("Países")).toHaveValue("DE");
     });
   });
 });

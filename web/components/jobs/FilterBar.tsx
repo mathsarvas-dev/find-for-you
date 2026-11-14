@@ -11,8 +11,9 @@ import {
 } from "@/lib/matching";
 
 export const FILTER_DEBOUNCE_MS = 300;
-/** Mesmo limite da API (listas de até 20 itens). */
+/** Mesmos limites da API: listas de até 20 itens; até 10 termos a evitar no título. */
 const MAX_ITEMS = 20;
+const MAX_TITLE_TERMS = 10;
 
 const WORK_MODELS: [WorkModelFilter, string][] = [
   ["remote", "remoto"],
@@ -32,18 +33,16 @@ type Draft = {
   currency: string;
   include_unknown: boolean;
   accept_no_salary: boolean;
-  /** Exclusões: a UI nova (Task 11) as edita; por ora só são preservadas. */
+  /** Exclusões editáveis aqui (texto separado por vírgula). */
+  exclude_countries: string;
+  title_exclude: string;
+  /** Exclusões que só mudam por chip ou frase: o painel as preserva intactas. */
   exclusions: Exclusions;
 };
 
 type Exclusions = Pick<
   SearchFilters,
-  | "exclude_countries"
-  | "exclude_work_models"
-  | "exclude_seniorities"
-  | "exclude_languages"
-  | "exclude_departments"
-  | "title_exclude"
+  "exclude_work_models" | "exclude_seniorities" | "exclude_languages" | "exclude_departments"
 >;
 
 function toDraft(f: SearchFilters): Draft {
@@ -57,26 +56,41 @@ function toDraft(f: SearchFilters): Draft {
     currency: f.salary_currency ?? "",
     include_unknown: f.include_unknown,
     accept_no_salary: f.accept_no_salary,
+    exclude_countries: f.exclude_countries.join(", "),
+    title_exclude: f.title_exclude.join(", "),
     exclusions: {
-      exclude_countries: f.exclude_countries,
       exclude_work_models: f.exclude_work_models,
       exclude_seniorities: f.exclude_seniorities,
       exclude_languages: f.exclude_languages,
       exclude_departments: f.exclude_departments,
-      title_exclude: f.title_exclude,
     },
   };
 }
 
-function splitList(raw: string, upperCodes = false): string[] {
+const same = (v: string) => v;
+const lower = (v: string) => v.toLowerCase();
+const upper = (v: string) => v.toUpperCase();
+
+/** Lista separada por vírgula, sem repetidos (pela chave `norm`), até `max` itens. */
+function splitList(raw: string, { upperCodes = false, norm = same, max = MAX_ITEMS } = {}): string[] {
   const out: string[] = [];
+  const seen = new Set<string>();
   for (const part of raw.split(",")) {
     let v = part.trim();
     if (!v) continue;
     if (upperCodes && v.length === 2) v = v.toUpperCase();
-    if (!out.includes(v)) out.push(v);
+    const k = norm(v);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(v);
   }
-  return out.slice(0, MAX_ITEMS);
+  return out.slice(0, max);
+}
+
+/** Tira da exclusão o que também está na inclusão (a inclusão vence). */
+function minus<T extends string>(exclude: T[], include: T[], norm: (v: string) => string = same): T[] {
+  const inc = new Set(include.map(norm));
+  return exclude.filter((v) => !inc.has(norm(v)));
 }
 
 type Parsed = { filters: SearchFilters; error: null } | { filters: null; error: Problem };
@@ -97,15 +111,23 @@ function parse(d: Draft): Parsed {
       };
     }
   }
+  const countries = splitList(d.countries, { upperCodes: true });
+  const departments = splitList(d.departments);
+  const ex = d.exclusions;
   return {
     error: null,
     filters: {
-      countries: splitList(d.countries, true),
+      countries,
       work_models: d.work_models,
       seniorities: d.seniorities,
       languages: d.languages,
-      departments: splitList(d.departments),
-      ...d.exclusions,
+      departments,
+      exclude_countries: minus(splitList(d.exclude_countries, { upperCodes: true }), countries, upper),
+      exclude_work_models: minus(ex.exclude_work_models, d.work_models),
+      exclude_seniorities: minus(ex.exclude_seniorities, d.seniorities),
+      exclude_languages: minus(ex.exclude_languages, d.languages),
+      exclude_departments: minus(ex.exclude_departments, departments, lower),
+      title_exclude: splitList(d.title_exclude, { norm: lower, max: MAX_TITLE_TERMS }),
       salary_min: salary,
       salary_currency: currency,
       include_unknown: d.include_unknown,
@@ -144,6 +166,9 @@ function activeCount(d: Draft): number {
     d.seniorities.length > 0,
     d.languages.length > 0,
     d.salary.trim() !== "",
+    d.exclude_countries.trim() !== "",
+    d.title_exclude.trim() !== "",
+    ...Object.values(d.exclusions).map((list) => list.length > 0),
   ].filter(Boolean).length;
 }
 
@@ -151,8 +176,13 @@ const activeText = (n: number) =>
   n === 0 ? "nenhum ativo" : `${n} ${n === 1 ? "ativo" : "ativos"}`;
 
 type FilterBarProps = {
-  /** Filtros salvos; lidos só ao montar. */
+  /** Filtros salvos; lidos ao montar e quando `revision` muda. */
   initial: SearchFilters;
+  /**
+   * Muda quando os filtros salvos mudam por fora do painel (chat, chips): o painel redesenha
+   * a partir de `initial` e descarta o rascunho, para não salvar exclusões velhas depois.
+   */
+  revision: number;
   /** Chamado 300 ms depois da última mudança, só com filtros válidos. */
   onChange: (filters: SearchFilters) => void;
   /** Texto curto de estado ("salvando…"). */
@@ -164,10 +194,19 @@ type FilterBarProps = {
 };
 
 /** Filtros manuais. Cada mudança, depois do debounce, vira um PUT do perfil de busca (na página). */
-export function FilterBar({ initial, onChange, status, error, onEditing }: FilterBarProps) {
+export function FilterBar({ initial, revision, onChange, status, error, onEditing }: FilterBarProps) {
   const [draft, setDraft] = useState<Draft>(() => toDraft(initial));
+  /** true: há edição da pessoa esperando o debounce. */
   const [dirty, setDirty] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
+  const [seenRevision, setSeenRevision] = useState(revision);
+  if (revision !== seenRevision) {
+    // Ajuste durante o render (padrão do React para estado derivado de prop).
+    setSeenRevision(revision);
+    setDraft(toDraft(initial));
+    setDirty(false);
+    setProblem(null);
+  }
   /** null: segue a largura da tela; depois do primeiro clique, vale a escolha da pessoa. */
   const [chosenOpen, setChosenOpen] = useState<boolean | null>(null);
   const narrow = useSyncExternalStore(subscribeNarrow, isNarrow, serverNarrow);
@@ -187,10 +226,29 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
       const parsed = parse(draft);
       onEditingRef.current?.(false);
       setProblem(parsed.error);
-      if (parsed.filters) onChangeRef.current(parsed.filters);
+      if (!parsed.filters) return;
+      setDirty(false);
+      // O campo mostra o que foi salvo (sem o país que passou a ser incluído).
+      const shown = parsed.filters.exclude_countries.join(", ");
+      if (splitList(draft.exclude_countries, { upperCodes: true }).join(", ") !== shown) {
+        setDraft((d) => ({ ...d, exclude_countries: shown }));
+      }
+      onChangeRef.current(parsed.filters);
     }, FILTER_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [draft, dirty]);
+
+  /** Marcar uma inclusão tira o mesmo valor da exclusão correspondente. */
+  function include(field: "work_models" | "seniorities" | "languages", value: string, on: boolean) {
+    const exKey = `exclude_${field}` as const;
+    const list = draft[field] as string[];
+    const patch: Record<string, unknown> = { [field]: toggle(list, value, on) };
+    if (on) {
+      const excluded = draft.exclusions[exKey] as string[];
+      patch.exclusions = { ...draft.exclusions, [exKey]: excluded.filter((v) => v !== value) };
+    }
+    update(patch as Partial<Draft>);
+  }
 
   function update(patch: Partial<Draft>) {
     setDraft((d) => ({ ...d, ...patch }));
@@ -294,25 +352,55 @@ export function FilterBar({ initial, onChange, status, error, onEditing }: Filte
             )}
           </div>
         </div>
+        <div className="filters__fields filters__fields--exclude">
+          <div className="field">
+            <label className="field__label" htmlFor={`${id}-exclude-countries`}>
+              Excluir países
+            </label>
+            <input
+              id={`${id}-exclude-countries`}
+              className="input"
+              type="text"
+              autoComplete="off"
+              placeholder="US, CN"
+              value={draft.exclude_countries}
+              onChange={(e) => update({ exclude_countries: e.target.value })}
+            />
+          </div>
+          <div className="field">
+            <label className="field__label" htmlFor={`${id}-title-exclude`}>
+              Evitar no título
+            </label>
+            <input
+              id={`${id}-title-exclude`}
+              className="input"
+              type="text"
+              autoComplete="off"
+              placeholder="plantão, estágio"
+              value={draft.title_exclude}
+              onChange={(e) => update({ title_exclude: e.target.value })}
+            />
+          </div>
+        </div>
 
         <div className="filters__groups">
           <OptionGroup
             legend="Modelo"
             options={WORK_MODELS}
             selected={draft.work_models}
-            onToggle={(v, on) => update({ work_models: toggle(draft.work_models, v, on) })}
+            onToggle={(v, on) => include("work_models", v, on)}
           />
           <OptionGroup
             legend="Idioma da vaga"
             options={LANGUAGES}
             selected={draft.languages}
-            onToggle={(v, on) => update({ languages: toggle(draft.languages, v, on) })}
+            onToggle={(v, on) => include("languages", v, on)}
           />
           <OptionGroup
             legend="Senioridade"
             options={SENIORITIES}
             selected={draft.seniorities}
-            onToggle={(v, on) => update({ seniorities: toggle(draft.seniorities, v, on) })}
+            onToggle={(v, on) => include("seniorities", v, on)}
           />
         </div>
 

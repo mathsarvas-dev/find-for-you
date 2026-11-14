@@ -13,8 +13,14 @@ import {
   type SearchFilters,
   type SearchProfile,
 } from "@/lib/matching";
-import { matchDetail, matchItem, matchPage } from "@/components/jobs/fixtures";
+import { parseFilters } from "@/lib/chatFilters";
+import { matchDetail, matchItem, matchPage, parsedQuery } from "@/components/jobs/fixtures";
 import JobsPage from "./page";
+
+vi.mock("@/lib/chatFilters", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/chatFilters")>()),
+  parseFilters: vi.fn(),
+}));
 
 vi.mock("@/lib/matching", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/matching")>()),
@@ -31,6 +37,7 @@ const m = {
   list: vi.mocked(listMatches),
   get: vi.mocked(getMatch),
   refresh: vi.mocked(refreshMatches),
+  parse: vi.mocked(parseFilters),
 };
 
 const sp = (filters: SearchFilters): SearchProfile => ({ filters, query_text: null, query_pending: false });
@@ -77,7 +84,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
   m.profile.mockResolvedValue(sp(DEFAULT_FILTERS));
-  m.put.mockImplementation(async (f) => sp(f));
+  m.put.mockImplementation(async (f, q) => ({ filters: f, query_text: q ?? null, query_pending: false }));
   m.get.mockImplementation(async (id) => matchDetail(id));
 });
 
@@ -518,6 +525,172 @@ describe("JobsPage", () => {
         fireEvent.click(screen.getByRole("button", { name: "Avaliar melhores vagas" }));
       });
       expect(refresh).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("chat e chips", () => {
+    const chat = () => screen.getByRole("textbox", { name: "Descreva o que procura" });
+    const proposal = () => screen.queryByRole("region", { name: "Proposta de filtros" });
+
+    async function askAndApply(text: string) {
+      fireEvent.change(chat(), { target: { value: text } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+      });
+      await act(async () => {
+        fireEvent.click(within(proposal()!).getByRole("button", { name: "Aplicar" }));
+      });
+    }
+
+    it("a barra de chat fica acima dos chips, que ficam acima do painel manual", async () => {
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      const chatEl = chat();
+      const chip = screen.getByRole("button", { name: "Remover filtro BR" });
+      const panel = screen.getByLabelText("Países");
+      expect(chatEl.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(chip.compareDocumentPosition(panel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it("aplicar a proposta salva uma vez a fusão e o painel manual mostra os países novos", async () => {
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      m.parse.mockResolvedValue(
+        parsedQuery({ countries: ["PT"], exclude_seniorities: ["intern"] }, { query_text: "dados" }),
+      );
+      await renderPage();
+      await askAndApply("Portugal, sem estágio, algo com dados");
+      expect(m.parse).toHaveBeenCalledWith("Portugal, sem estágio, algo com dados");
+      expect(m.put).toHaveBeenCalledTimes(1);
+      const merged = { ...DEFAULT_FILTERS, countries: ["BR", "PT"], exclude_seniorities: ["intern"] };
+      expect(m.put).toHaveBeenCalledWith(merged, "dados");
+      expect(screen.getByLabelText("Países")).toHaveValue("BR, PT");
+      expect(screen.getByRole("button", { name: "Remover filtro sem estágio" })).toBeInTheDocument();
+      expect(screen.getByText("gosto: dados")).toBeInTheDocument();
+      expect(proposal()).toBeNull();
+      expect(m.list).toHaveBeenCalledTimes(2);
+      // Nenhum PUT extra vindo do painel manual.
+      await tick(1000);
+      expect(m.put).toHaveBeenCalledTimes(1);
+    });
+
+    it("edição manual depois do chat parte dos filtros novos (não reverte o chat)", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      m.parse.mockResolvedValue(parsedQuery({ exclude_seniorities: ["intern"], title_exclude: ["plantão"] }));
+      await renderPage();
+      // Rascunho manual esperando o debounce quando o chat aplica: é descartado.
+      fireEvent.change(screen.getByLabelText("Países"), { target: { value: "DE" } });
+      await askAndApply("sem estágio, sem plantão");
+      expect(screen.getByRole("button", { name: "Avaliar melhores vagas" })).toBeEnabled();
+      await tick(1000);
+      expect(m.put).toHaveBeenCalledTimes(1);
+      fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
+      await tick(300);
+      expect(m.put).toHaveBeenCalledTimes(2);
+      expect(m.put).toHaveBeenLastCalledWith({
+        ...DEFAULT_FILTERS,
+        work_models: ["remote"],
+        exclude_seniorities: ["intern"],
+        title_exclude: ["plantão"],
+      });
+    });
+
+    it("remover o chip BR atualiza o campo Países do painel", async () => {
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR", "PT"] }));
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      expect(screen.getByLabelText("Países")).toHaveValue("BR, PT");
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Remover filtro BR" }));
+      });
+      expect(m.put).toHaveBeenCalledTimes(1);
+      expect(m.put).toHaveBeenCalledWith({ ...DEFAULT_FILTERS, countries: ["PT"] }, null);
+      expect(screen.getByLabelText("Países")).toHaveValue("PT");
+      expect(screen.queryByRole("button", { name: "Remover filtro BR" })).toBeNull();
+    });
+
+    it("editar o chip da consulta salva o texto novo pelo mesmo caminho", async () => {
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: false });
+      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      await renderPage();
+      fireEvent.click(screen.getByRole("button", { name: /^gosto: dados/ }));
+      const input = screen.getByRole("textbox", { name: "Editar consulta" });
+      fireEvent.change(input, { target: { value: "produto" } });
+      await act(async () => {
+        fireEvent.keyDown(input, { key: "Enter" });
+      });
+      expect(m.put).toHaveBeenCalledTimes(1);
+      expect(m.put).toHaveBeenCalledWith(DEFAULT_FILTERS, "produto");
+      expect(screen.getByText("gosto: produto")).toBeInTheDocument();
+    });
+
+    it("falha do parseFilters não salva nada e mantém os chips", async () => {
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, countries: ["BR"] }));
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      m.parse.mockRejectedValue(new ApiError(503, "O interpretador está ocupado; tente em instantes."));
+      await renderPage();
+      fireEvent.change(chat(), { target: { value: "remoto" } });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Aplicar" }));
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("tente em instantes");
+      expect(screen.getByRole("button", { name: "Tentar de novo" })).toBeInTheDocument();
+      expect(m.put).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Remover filtro BR" })).toBeInTheDocument();
+      expect(screen.getByLabelText("Países")).toHaveValue("BR");
+    });
+
+    it("erro ao salvar a proposta mantém a proposta e mostra o erro", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      m.parse.mockResolvedValue(parsedQuery({ countries: ["PT"] }));
+      m.put.mockRejectedValueOnce(new ApiError(422, "Confira os filtros."));
+      await renderPage();
+      await askAndApply("Portugal");
+      expect(screen.getByRole("alert")).toHaveTextContent("Confira os filtros.");
+      expect(proposal()).not.toBeNull();
+      expect(screen.getByLabelText("Países")).toHaveValue("");
+    });
+
+    it("query_pending mostra o selo e o polling para quando query_used vira true", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      m.parse.mockResolvedValue(parsedQuery({}, { query_text: "dados" }));
+      m.put.mockImplementation(async (f, q) => ({ filters: f, query_text: q ?? null, query_pending: true }));
+      await renderPage();
+      await askAndApply("algo com dados");
+      expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
+      expect(m.list).toHaveBeenCalledTimes(2);
+      await tick(10_000);
+      expect(m.list).toHaveBeenCalledTimes(3);
+      expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
+      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      await tick(10_000);
+      expect(m.list).toHaveBeenCalledTimes(4);
+      expect(screen.queryByText("consulta semântica pendente")).toBeNull();
+      await tick(30_000);
+      expect(m.list).toHaveBeenCalledTimes(4);
+    });
+
+    it("query_pending salvo antes também consulta a cada 10 s", async () => {
+      m.profile.mockResolvedValue({ filters: DEFAULT_FILTERS, query_text: "dados", query_pending: true });
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      expect(screen.getByText("consulta semântica pendente")).toBeInTheDocument();
+      m.list.mockResolvedValue(matchPage([matchItem(1)], { query_used: true }));
+      await tick(10_000);
+      expect(m.list).toHaveBeenCalledTimes(2);
+      expect(screen.queryByText("consulta semântica pendente")).toBeNull();
+      await tick(30_000);
+      expect(m.list).toHaveBeenCalledTimes(2);
+    });
+
+    it("Testar qualidade no cabeçalho leva a /jobs/qualidade", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      expect(within(header()!).getByRole("link", { name: "Testar qualidade" })).toHaveAttribute(
+        "href",
+        "/jobs/qualidade",
+      );
     });
   });
 });

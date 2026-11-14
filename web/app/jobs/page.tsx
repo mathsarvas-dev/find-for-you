@@ -2,7 +2,9 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChatBar } from "@/components/jobs/ChatBar";
 import { FilterBar } from "@/components/jobs/FilterBar";
+import { FilterChips } from "@/components/jobs/FilterChips";
 import { jobsSteps } from "@/components/jobs/jobsSteps";
 import { MatchList } from "@/components/jobs/MatchList";
 import { MatchPanel, type PanelState } from "@/components/jobs/MatchPanel";
@@ -23,6 +25,7 @@ import {
   type RefreshResult,
   type SearchFilters,
 } from "@/lib/matching";
+import { mergeProposal, removeChip, type Chip, type ParsedQuery } from "@/lib/chatFilters";
 import { ApiError } from "@/lib/profile";
 
 const MATCHES_PAGE_SIZE = 50;
@@ -61,7 +64,13 @@ function isTyping(target: EventTarget | null): boolean {
 export default function JobsPage() {
   const [phase, setPhase] = useState<Phase>({ name: "loading" });
   const [bootKey, setBootKey] = useState(0);
+  /** Fonte única dos filtros salvos: chips, chat e painel manual leem daqui. */
   const [filters, setFilters] = useState<SearchFilters | null>(null);
+  const [queryText, setQueryText] = useState<string | null>(null);
+  /** A consulta semântica ainda não tem vetor (o worker vetoriza a cada 15 s). */
+  const [queryPending, setQueryPending] = useState(false);
+  /** Sobe quando os filtros mudam por fora do painel manual (chat, chips): ele redesenha. */
+  const [revision, setRevision] = useState(0);
   const [meta, setMeta] = useState<Meta | null>(null);
   const [items, setItems] = useState<MatchItem[]>([]);
   const [saving, setSaving] = useState(false);
@@ -85,6 +94,7 @@ export default function JobsPage() {
   const saveSeq = useRef(0);
   const mounted = useRef(true);
   const itemsRef = useRef<MatchItem[]>([]);
+  const queryPendingRef = useRef(false);
   /** Seleção atual para o atalho de teclado (várias teclas antes do próximo render). */
   const selectedRef = useRef<number | null>(null);
   const refreshOverview = useRefreshOverview();
@@ -102,7 +112,13 @@ export default function JobsPage() {
     setItems(next);
     setMeta(rest);
     setNow(Date.now());
+    // A consulta entrou no ranking: o vetor dela ficou pronto.
+    if (page.query_used) setQueryPending(false);
   }, []);
+
+  useEffect(() => {
+    queryPendingRef.current = queryPending;
+  }, [queryPending]);
 
   // Carga inicial (e "Tentar de novo"): filtros salvos e primeira página.
   useEffect(() => {
@@ -115,6 +131,8 @@ export default function JobsPage() {
       .then(([saved, page]) => {
         if (cancelled || id !== latest.current) return;
         setFilters(saved.filters);
+        setQueryText(saved.query_text);
+        setQueryPending(saved.query_pending);
         apply(page);
         setPhase({ name: "ready" });
       })
@@ -149,21 +167,36 @@ export default function JobsPage() {
     }
   }, [apply]);
 
-  /** FilterBar já esperou 300 ms: salva o perfil de busca e recarrega a lista. */
+  /**
+   * O único caminho de gravação dos filtros (painel manual, chat e chips): salva o perfil de
+   * busca e recarrega a lista. `queryText` omitido preserva a consulta salva; null a apaga.
+   * `resync` (chat e chips) faz o painel manual redesenhar a partir do que foi salvo.
+   * Devolve false quando o PUT falhou.
+   */
   const saveFilters = useCallback(
-    async (next: SearchFilters) => {
+    async (next: SearchFilters, queryText?: string | null, resync = false): Promise<boolean> => {
       const saveId = ++saveSeq.current;
       // Listas pedidas antes deste salvamento usam filtros velhos: descarta.
       ++latest.current;
       setSaving(true);
       setSaveError(null);
       try {
-        const saved = await putSearchProfile(next);
-        if (!mounted.current || saveId !== saveSeq.current) return;
+        const saved =
+          queryText === undefined ? await putSearchProfile(next) : await putSearchProfile(next, queryText);
+        if (!mounted.current || saveId !== saveSeq.current) return true;
         setFilters(saved.filters);
+        setQueryText(saved.query_text);
+        setQueryPending(saved.query_pending);
+        if (resync) {
+          // O rascunho do painel foi descartado junto: nada mais espera o debounce.
+          setRevision((r) => r + 1);
+          setEditing(false);
+        }
         await reloadList();
+        return true;
       } catch (err) {
         if (mounted.current && saveId === saveSeq.current) setSaveError(message(err));
+        return false;
       } finally {
         // Sempre limpa, mesmo se outra recarga da lista correu no meio do PUT.
         if (mounted.current && saveId === saveSeq.current) setSaving(false);
@@ -171,6 +204,26 @@ export default function JobsPage() {
     },
     [reloadList],
   );
+
+  /** "Aplicar" do chat: funde a proposta (a frase vence) e grava pelo mesmo caminho do painel. */
+  async function applyProposal(p: ParsedQuery) {
+    if (!filters) return;
+    const merged = mergeProposal(filters, queryText, p);
+    const ok = await saveFilters(merged.filters, merged.queryText, true);
+    // Rejeitar mantém a proposta na barra de chat; o erro aparece no painel de filtros.
+    if (!ok) throw new Error("save failed");
+  }
+
+  function removeFilterChip(chip: Chip) {
+    if (!filters) return;
+    const next = removeChip(filters, queryText, chip);
+    void saveFilters(next.filters, next.queryText, true);
+  }
+
+  function editQuery(text: string | null) {
+    if (!filters) return;
+    void saveFilters(filters, text, true);
+  }
 
   /** 409 de filtros salvos inválidos: grava os padrões e recomeça. */
   async function restoreDefaults() {
@@ -222,9 +275,10 @@ export default function JobsPage() {
     }
   }
 
-  // Polling a cada 10 s só enquanto alguma vaga estiver "pendente"; para num erro e ao desmontar.
+  // Polling a cada 10 s só enquanto alguma vaga estiver "pendente" ou a consulta semântica
+  // esperar o vetor; para num erro e ao desmontar.
   const pending = hasPending(items);
-  const polling = pending && pollError === null;
+  const polling = (pending || queryPending) && pollError === null;
   useEffect(() => {
     if (!polling) return;
     let cancelled = false;
@@ -243,10 +297,12 @@ export default function JobsPage() {
         const seen = new Set(page.items.map((i) => i.job.id));
         const tail = itemsRef.current.slice(limit).filter((i) => !seen.has(i.job.id));
         const merged = [...page.items, ...tail];
+        const wasScoring = hasPending(itemsRef.current);
         apply({ ...page, items: merged });
-        if (hasPending(merged)) timer = setTimeout(poll, POLL_MS);
+        const scoring = hasPending(merged);
         // A fila da IA esvaziou: as notas novas entram nos contadores da casca.
-        else refreshOverview();
+        if (wasScoring && !scoring) refreshOverview();
+        if (scoring || (queryPendingRef.current && !page.query_used)) timer = setTimeout(poll, POLL_MS);
       } catch (err) {
         if (!cancelled) setPollError(message(err));
       }
@@ -373,6 +429,11 @@ export default function JobsPage() {
                   Filtros
                 </button>
               )}
+              {hasProfile && (
+                <Link className="button button--secondary" href="/jobs/qualidade">
+                  Testar qualidade
+                </Link>
+              )}
             </>
           )
         }
@@ -444,8 +505,21 @@ export default function JobsPage() {
       {phase.name === "ready" && meta && filters && (
         <>
           {hasProfile && (
+            <>
+              <ChatBar onApply={applyProposal} />
+              <FilterChips
+                filters={filters}
+                queryText={queryText}
+                queryPending={queryPending}
+                onRemove={removeFilterChip}
+                onEditQuery={editQuery}
+              />
+            </>
+          )}
+          {hasProfile && (
             <FilterBar
               initial={filters}
+              revision={revision}
               onChange={(f) => void saveFilters(f)}
               status={saving ? "salvando…" : undefined}
               error={saveError}
@@ -513,9 +587,11 @@ export default function JobsPage() {
               {(hasMore || moreError || polling) && (
                 <div className="panel__foot">
                   <span aria-live="polite">
-                    {polling
+                    {polling && pending
                       ? `Avaliando ${countText(pendingCount)}. A lista confere a cada 10 segundos.`
-                      : `${items.length} de ${meta.total}`}
+                      : polling
+                        ? "Preparando a consulta semântica. A lista confere a cada 10 segundos."
+                        : `${items.length} de ${meta.total}`}
                   </span>
                   {moreError && (
                     <span className="field__error matches__more-error" role="alert">

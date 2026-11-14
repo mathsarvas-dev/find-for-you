@@ -36,6 +36,10 @@
   --danger: #b42318;
   --danger-bg: #fdf1ef;
   --danger-border: #f1c9c3;
+  /* Chips de filtro de inclusão (azul); a exclusão usa as cores de --danger */
+  --info: #1d4f91;
+  --info-bg: #eef4fb;
+  --info-border: #c3d6ee;
 
   --radius-field: 4px;
   --radius-card: 6px;
@@ -80,6 +84,9 @@
     --danger: #f28b7f;
     --danger-bg: #2a1a18;
     --danger-border: #5a2c26;
+    --info: #8db8f0;
+    --info-bg: #16202c;
+    --info-border: #2c4766;
     color-scheme: dark;
   }
 }
@@ -99,6 +106,9 @@
   --danger: #f28b7f;
   --danger-bg: #2a1a18;
   --danger-border: #5a2c26;
+  --info: #8db8f0;
+  --info-bg: #16202c;
+  --info-border: #2c4766;
   color-scheme: dark;
 }
 
@@ -2231,6 +2241,12 @@ select.input {
   gap: 0 var(--space-2);
 }
 
+/* Segunda linha (exclusões): mesmas colunas da primeira; os @media de .filters__fields valem aqui */
+.filters__fields--exclude {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) calc(16.5rem + var(--space-2));
+  padding-top: 0;
+}
+
 .filters__error {
   grid-column: 1 / -1;
   margin: var(--space-1) 0 0;
@@ -3253,5 +3269,217 @@ select.input {
 
   .stepper-wrap--horizontal .stepper__cta {
     margin-top: 0;
+  }
+}
+
+/* Vagas: barra de chat (frase → proposta) e chips dos filtros salvos */
+
+.chat {
+  margin-bottom: var(--space-4);
+}
+
+.chat__form {
+  display: grid;
+  gap: var(--space-1);
+  padding: var(--space-3) var(--space-4);
+}
+
+.chat__row {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.chat__row .input {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat__row .button {
+  flex: none;
+}
+
+.chat__notice {
+  overflow-wrap: anywhere;
+}
+
+.chat__notice .actions {
+  margin-top: var(--space-3);
+  justify-content: flex-start;
+}
+
+.chat__proposal {
+  display: grid;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.chat__proposal-title {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.chat__notes {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: var(--text-sm);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.chat__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.filter-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.filter-chips__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 2px var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-field);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+}
+
+.filter-chip__icon {
+  flex: none;
+}
+
+.filter-chip__label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chip--include {
+  color: var(--info);
+  background: var(--info-bg);
+  border-color: var(--info-border);
+}
+
+.chip--exclude {
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-color: var(--danger-border);
+}
+
+.chip--query {
+  color: var(--text);
+  background: var(--surface);
+  border-color: var(--accent);
+}
+
+.chip--query .filter-chip__icon {
+  color: var(--accent);
+}
+
+.filter-chip__remove,
+.filter-chip__edit {
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-field);
+}
+
+.filter-chip__remove {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin: -2px -6px -2px 0;
+  padding: 0;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.filter-chip__remove:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.filter-chip__edit {
+  min-width: 0;
+  min-height: 28px;
+  padding: 0;
+  text-align: left;
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+}
+
+.filter-chip__remove:focus-visible,
+.filter-chip__edit:focus-visible,
+.filter-chip__input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.filter-chip__input {
+  width: min(20rem, 60vw);
+  min-width: 0;
+  min-height: 28px;
+  padding: 0 var(--space-2);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-field);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.filter-chips__pending {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 0 var(--space-2);
+  border: 1px dashed currentColor;
+  border-radius: var(--radius-field);
+  font-size: var(--text-xs);
+  font-weight: 500;
+  color: var(--warn);
+}
+
+/* Celular: alvos de toque com pelo menos 40 px */
+@media (max-width: 560px) {
+  .filter-chip {
+    min-height: 40px;
+  }
+
+  .filter-chip__remove {
+    width: 40px;
+    height: 40px;
+    margin: -4px -8px -4px 0;
+  }
+
+  .filter-chip__edit {
+    min-height: 40px;
+  }
+
+  .filter-chip__input {
+    min-height: 36px;
   }
 }
