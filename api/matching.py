@@ -11,8 +11,8 @@ from collections.abc import Callable
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ValidationError
-from sqlalchemy import func, select, text
+from pydantic import BaseModel, Field, ValidationError, field_validator
+from sqlalchemy import case, func, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,9 +22,10 @@ from api.sources import JobDetail, JobItem, _f, _ITEM_COLS, _item_fields
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
+from rumo_core.matching.chat_filters import check_query_text
 from rumo_core.matching.filters import SearchFilters
 from rumo_core.matching.ranking import (
-    current_match, job_vec_score, rank_jobs, usable_profile,
+    current_match, job_vec_score, rank_jobs, usable_profile, usable_query_embedding,
 )
 from rumo_core.matching.refresh import mark_pending
 from rumo_core.models import Company, Job, Match, SearchProfile
@@ -112,8 +113,22 @@ def get_refresh_limiter() -> RefreshLimiter:
 
 # ---- schemas --------------------------------------------------------------
 
+class SearchProfileIn(SearchFilters):
+    """Filters plus the free-text taste query. `query_text` is only touched
+    when the key is present in the body (`model_fields_set`)."""
+
+    query_text: str | None = Field(default=None, max_length=300)
+
+    @field_validator("query_text")
+    @classmethod
+    def _check_query(cls, v):
+        return check_query_text(v)
+
+
 class SearchProfileOut(BaseModel):
     filters: SearchFilters
+    query_text: str | None = None
+    query_pending: bool = False
 
 
 UnknownField = Literal["salary", "work_model", "country", "seniority", "language"]
@@ -142,6 +157,7 @@ class MatchPage(BaseModel):
     vectorized: bool
     missing_embeddings: int
     chunks_used: int
+    query_used: bool = False
     items: list[MatchItem]
 
 
@@ -195,16 +211,34 @@ def load_filters(session: Session, user_id: int) -> SearchFilters:
         raise SavedFiltersInvalid() from exc
 
 
-def save_filters(session: Session, user_id: int, filters: SearchFilters) -> SearchFilters:
-    """Atomic upsert of the user's default search profile."""
+UNSET = object()
+
+
+def save_filters(session: Session, user_id: int, filters: SearchFilters, *,
+                 query_text: "str | None | object" = UNSET) -> SearchFilters:
+    """Atomic upsert of the user's default search profile.
+
+    `query_text` is left untouched when UNSET. When it changes, the stored
+    embedding and its model version are cleared in the same statement so the
+    worker re-vectorizes it. Match rows are never touched."""
     data = filters.model_dump(mode="json")
-    stmt = insert(SearchProfile).values(
-        user_id=user_id, name=DEFAULT_PROFILE_NAME, filters=data, is_default=True,
-    )
+    values = dict(user_id=user_id, name=DEFAULT_PROFILE_NAME, filters=data,
+                  is_default=True)
+    if query_text is not UNSET:
+        values["query_text"] = query_text
+    stmt = insert(SearchProfile).values(**values)
+    set_ = {"filters": stmt.excluded.filters, "updated_at": func.now()}
+    if query_text is not UNSET:
+        changed = SearchProfile.query_text.is_distinct_from(stmt.excluded.query_text)
+        set_["query_embedding"] = case(
+            (changed, None), else_=SearchProfile.query_embedding)
+        set_["query_model_version"] = case(
+            (changed, None), else_=SearchProfile.query_model_version)
+        set_["query_text"] = stmt.excluded.query_text
     stmt = stmt.on_conflict_do_update(
         index_elements=[SearchProfile.user_id],
         index_where=text("is_default"),  # must match uq_search_profiles_one_default
-        set_={"filters": stmt.excluded.filters, "updated_at": func.now()},
+        set_=set_,
     )
     try:
         session.execute(stmt)
@@ -213,6 +247,17 @@ def save_filters(session: Session, user_id: int, filters: SearchFilters) -> Sear
         session.rollback()
         raise SearchProfileConflict() from exc
     return filters
+
+
+def _profile_out(session: Session, user_id: int, filters: SearchFilters,
+                 mv: str) -> SearchProfileOut:
+    qt = session.scalar(
+        select(SearchProfile.query_text).where(
+            SearchProfile.user_id == user_id, SearchProfile.is_default.is_(True)
+        )
+    )
+    pending = qt is not None and usable_query_embedding(session, user_id, mv) is None
+    return SearchProfileOut(filters=filters, query_text=qt, query_pending=pending)
 
 
 def _filters_or_409(session: Session, user_id: int) -> SearchFilters:
@@ -233,21 +278,25 @@ def model_version() -> str:
 def get_search_profile(
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
+    mv: str = Depends(model_version),
 ):
-    return SearchProfileOut(filters=_filters_or_409(session, user_id))
+    return _profile_out(session, user_id, _filters_or_409(session, user_id), mv)
 
 
 @router.put("/search-profile", response_model=SearchProfileOut)
 def put_search_profile(
-    body: SearchFilters,
+    body: SearchProfileIn,
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
+    mv: str = Depends(model_version),
 ):
+    filters = SearchFilters.model_validate(body.model_dump(exclude={"query_text"}))
+    kwargs = {"query_text": body.query_text} if "query_text" in body.model_fields_set else {}
     try:
-        saved = save_filters(session, user_id, body)
+        saved = save_filters(session, user_id, filters, **kwargs)
     except SearchProfileConflict:
         raise HTTPException(409, MSG_PROFILE_CONFLICT) from None
-    return SearchProfileOut(filters=saved)
+    return _profile_out(session, user_id, saved, mv)
 
 
 @router.get("/matches", response_model=MatchPage)
@@ -261,7 +310,8 @@ def list_matches(
 ):
     filters = _filters_or_409(session, user_id)
     page = rank_jobs(session, user_id, filters, model_version=mv,
-                     status=status, limit=limit, offset=offset)
+                     status=status, limit=limit, offset=offset,
+                     query_embedding=usable_query_embedding(session, user_id, mv))
     company_ids = {r.job.company_id for r in page.items}
     names = dict(session.execute(
         select(Company.id, Company.name).where(
@@ -293,7 +343,7 @@ def list_matches(
     return MatchPage(
         total=page.total, profile_version=page.profile_version,
         vectorized=page.vectorized, missing_embeddings=page.missing_embeddings,
-        chunks_used=page.chunks_used, items=items,
+        chunks_used=page.chunks_used, query_used=page.query_used, items=items,
     )
 
 
@@ -331,7 +381,9 @@ def match_detail(
         salary_min=_f(r.salary_min), salary_max=_f(r.salary_max),
         salary_currency=r.salary_currency, salary_period=r.salary_period,
         last_seen_at=r.last_seen_at, closed_at=r.closed_at,
-        vec_score=job_vec_score(session, user_id, job_id, model_version=mv),
+        vec_score=job_vec_score(
+            session, user_id, job_id, model_version=mv,
+            query_embedding=usable_query_embedding(session, user_id, mv)),
         ai_score=m.ai_score if m else None,
         state=m.state if m else None,
         rationale=m.rationale if m else None,
@@ -363,7 +415,8 @@ def refresh_matches(
             raise HTTPException(409, MSG_NOT_VECTORIZED)
         filters = _filters_or_409(session, user_id)
         res = mark_pending(session, user_id, filters, model_version=mv,
-                           n=get_settings().match_top_n)
+                           n=get_settings().match_top_n,
+                           query_embedding=usable_query_embedding(session, user_id, mv))
     except BaseException:
         # only calls that went through count toward the interval
         limiter.release(user_id, token)

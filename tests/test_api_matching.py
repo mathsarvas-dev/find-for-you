@@ -509,3 +509,129 @@ def test_model_version_constant_matches_embedder_without_torch():
     r = subprocess.run([sys.executable, "-c", code], cwd=ROOT, env=os.environ.copy(),
                        capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+# ---- marco 4b: query_text ---------------------------------------------------
+
+def _sp_row(uid):
+    with SessionLocal() as s:
+        return s.scalars(select(SearchProfile).where(SearchProfile.user_id == uid)).one()
+
+
+@pytest.mark.db
+def test_put_query_text_roundtrip_and_pending(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    r = c.put("/search-profile", json={"seniorities": ["senior"], "query_text": " dados "})
+    assert r.status_code == 200, r.text
+    assert r.json()["query_text"] == "dados" and r.json()["query_pending"] is True
+    g = c.get("/search-profile").json()
+    assert g["query_text"] == "dados" and g["query_pending"] is True
+    assert g["filters"]["seniorities"] == ["senior"]
+    assert "query_text" not in g["filters"]
+
+
+@pytest.mark.db
+def test_put_changed_query_clears_embedding(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    c.put("/search-profile", json={"query_text": "dados"})
+    with SessionLocal() as s:
+        s.execute(update(SearchProfile).where(SearchProfile.user_id == uid)
+                  .values(query_embedding=e(1), query_model_version=MODEL_VERSION))
+        s.commit()
+    r = c.put("/search-profile", json={"query_text": "dados"})
+    assert r.json()["query_pending"] is False
+    assert _sp_row(uid).query_embedding is not None
+    r = c.put("/search-profile", json={"query_text": "produto"})
+    assert r.json()["query_pending"] is True
+    row = _sp_row(uid)
+    assert row.query_embedding is None and row.query_model_version is None
+
+
+@pytest.mark.db
+def test_put_without_query_field_keeps_query(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    c.put("/search-profile", json={"query_text": "dados"})
+    r = c.put("/search-profile", json={"countries": ["BR"]})
+    assert r.status_code == 200 and r.json()["query_text"] == "dados"
+    assert _sp_row(uid).query_text == "dados"
+    r = c.put("/search-profile", json={"query_text": None})  # explicit clear
+    assert r.json()["query_text"] is None and r.json()["query_pending"] is False
+
+
+@pytest.mark.db
+def test_put_query_with_negation_422(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    r = as_user(uid).put("/search-profile", json={"query_text": "sem plantão"})
+    assert r.status_code == 422
+    with SessionLocal() as s:
+        assert s.scalars(select(SearchProfile).where(SearchProfile.user_id == uid)).all() == []
+
+
+@pytest.mark.db
+def test_put_exclusions_roundtrip(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    r = c.put("/search-profile", json={"exclude_work_models": ["onsite"],
+                                       "title_exclude": ["plantão"]})
+    assert r.status_code == 200, r.text
+    f = c.get("/search-profile").json()["filters"]
+    assert f["exclude_work_models"] == ["onsite"] and f["title_exclude"] == ["plantão"]
+    r = c.put("/search-profile", json={"work_models": ["onsite"],
+                                       "exclude_work_models": ["onsite"]})
+    assert r.status_code == 422
+
+
+def _weight_query(monkeypatch, w=3.0):
+    from rumo_core.config import Settings, get_settings
+    from rumo_core.matching import ranking
+    monkeypatch.setattr(
+        ranking, "get_settings",
+        lambda: Settings(_env_file=None, database_url=get_settings().database_url,
+                         match_weight_query=w),
+    )
+
+
+@pytest.mark.db
+def test_matches_use_query_embedding(env, as_user, monkeypatch):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, emb=e(0))
+    a = add_job(uid, cid, e(0))
+    b = add_job(uid, cid, e(1))
+    _weight_query(monkeypatch)
+    c = as_user(uid)
+    c.put("/search-profile", json={"query_text": "dados"})
+    body = c.get("/matches").json()
+    assert [i["job"]["id"] for i in body["items"]] == [a, b]  # no vector yet
+    assert body["query_used"] is False
+    with SessionLocal() as s:
+        s.execute(update(SearchProfile).where(SearchProfile.user_id == uid)
+                  .values(query_embedding=e(1), query_model_version=MODEL_VERSION))
+        s.commit()
+    body = c.get("/matches").json()
+    assert [i["job"]["id"] for i in body["items"]] == [b, a]
+    assert body["query_used"] is True
+    assert c.get(f"/matches/{b}").json()["vec_score"] is not None
+    assert c.post("/matches/refresh").status_code == 200
+
+
+@pytest.mark.db
+def test_query_text_change_keeps_llm_scores(env, as_user):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, emb=e(0))
+    a = add_job(uid, cid, e(0))
+    c = as_user(uid)
+    assert c.post("/matches/refresh").status_code == 200
+    _set_match(uid, a, state="ok", ai_score=90, rationale="Bom.", strengths=[], gaps=[])
+    c.put("/search-profile", json={"query_text": "outro texto"})
+    items = c.get("/matches").json()["items"]
+    assert items[0]["ai_score"] == 90
