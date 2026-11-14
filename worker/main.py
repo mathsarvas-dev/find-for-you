@@ -119,6 +119,7 @@ def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
     from functools import partial
 
     from worker.collect_jobs import fill_missing_job_fields
+    from worker.embed_queries import embed_pending_queries
     from worker.interview_jobs import process_interview_turns
     from worker.jobs import embed_pending_chunks, process_pending_imports
 
@@ -147,6 +148,14 @@ def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
         "embed_chunks",
         partial(embed_pending_chunks, session_factory, embedder, settings.embed_batch_size),
         5,
+    )
+    # search-phrase vectors: small batches, the user is waiting on the result
+    registry.register(
+        "embed_queries",
+        partial(
+            embed_pending_queries, session_factory, embedder, batch=settings.embed_batch_size
+        ),
+        15,
     )
     # after embed_chunks (profile first); one small batch per tick so a long
     # backlog (~0.4 texts/s on CPU) never starves the other jobs
