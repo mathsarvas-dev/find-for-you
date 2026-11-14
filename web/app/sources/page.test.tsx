@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { OverviewContext, type OverviewState } from "@/components/shell/OverviewContext";
 import { ApiError } from "@/lib/profile";
-import { addCompany, listCompanies, listJobs, patchCompany, type Company } from "@/lib/sources";
-import { getDiscovery, type DiscoveryState } from "@/lib/discovery";
+import { addCompany, collectNow, listCompanies, listJobs, patchCompany, type Company } from "@/lib/sources";
+import { getDiscovery, putDiscovery, type DiscoveryState } from "@/lib/discovery";
 import SourcesPage from "./page";
 
 vi.mock("@/lib/sources", async (importOriginal) => ({
@@ -36,6 +37,8 @@ const m = {
   jobs: vi.mocked(listJobs),
   add: vi.mocked(addCompany),
   patch: vi.mocked(patchCompany),
+  collect: vi.mocked(collectNow),
+  putDiscovery: vi.mocked(putDiscovery),
 };
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -79,6 +82,30 @@ async function renderPage() {
   await tick(0);
   return view;
 }
+
+/** Renderiza dentro de uma casca falsa e devolve o refresh() do resumo. */
+async function renderWithOverview() {
+  const refresh = vi.fn(async () => {});
+  const state: OverviewState = { overview: null, status: "ok", refresh };
+  const view = render(
+    <OverviewContext.Provider value={state}>
+      <SourcesPage />
+    </OverviewContext.Provider>,
+  );
+  await tick(0);
+  return { ...view, refresh };
+}
+
+function currentStep() {
+  const list = screen.getByRole("list", { name: "Etapas das fontes" });
+  const items = within(list)
+    .getAllByRole("listitem")
+    .filter((li) => li.getAttribute("aria-current") === "step");
+  expect(items).toHaveLength(1);
+  return items[0];
+}
+
+const header = () => document.querySelector<HTMLElement>(".page-header__actions");
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -310,5 +337,106 @@ describe("SourcesPage", () => {
     expect(m.companies).toHaveBeenCalledTimes(1);
     await tick(10_000);
     expect(m.companies).toHaveBeenCalledTimes(2);
+  });
+
+  describe("cabeçalho, trilha e resumo da casca", () => {
+    it("um único h1, também enquanto carrega", () => {
+      m.companies.mockReturnValue(new Promise(() => {}));
+      render(<SourcesPage />);
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(screen.getByRole("heading", { level: 1, name: "Fontes" })).toBeInTheDocument();
+    });
+
+    it("sem empresas: passo Adicionar e um botão no vazio que leva ao formulário", async () => {
+      m.companies.mockResolvedValue([]);
+      await renderPage();
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(currentStep()).toHaveTextContent("Adicionar");
+      const empty = document.querySelector<HTMLElement>(".sources__empty")!;
+      const buttons = within(empty).getAllByRole("button");
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]).toHaveTextContent("Adicionar empresa");
+      fireEvent.click(buttons[0]);
+      expect(screen.getByLabelText("Token ou URL do quadro Greenhouse")).toHaveFocus();
+      // Sem empresas não há vagas para ver.
+      expect(screen.queryByRole("link", { name: "Ver vagas" })).toBeNull();
+    });
+
+    it("ações do cabeçalho: Adicionar empresa foca o formulário e Ver vagas leva a /jobs", async () => {
+      m.companies.mockResolvedValue([collected]);
+      await renderPage();
+      const actions = within(header()!);
+      fireEvent.click(actions.getByRole("button", { name: "Adicionar empresa" }));
+      expect(screen.getByLabelText("Token ou URL do quadro Greenhouse")).toHaveFocus();
+      expect(actions.getByRole("link", { name: "Ver vagas" })).toHaveAttribute("href", "/jobs");
+      // Focar não chama a API.
+      expect(m.companies).toHaveBeenCalledTimes(1);
+      expect(m.add).not.toHaveBeenCalled();
+    });
+
+    it("trilha: Coletar enquanto nenhuma empresa foi coletada, Ver vagas depois", async () => {
+      m.companies.mockResolvedValueOnce([pending]).mockResolvedValue([collected, { ...pending, id: 9 }]);
+      await renderPage();
+      expect(currentStep()).toHaveTextContent("Coletar");
+      await tick(10_000);
+      expect(currentStep()).toHaveTextContent("Ver vagas");
+    });
+
+    it("cadastrar empresa atualiza o resumo da casca", async () => {
+      m.companies.mockResolvedValueOnce([collected]).mockResolvedValue([collected, pending]);
+      m.add.mockResolvedValue(pending);
+      const { refresh } = await renderWithOverview();
+      expect(refresh).not.toHaveBeenCalled();
+      fireEvent.change(screen.getByLabelText("Token ou URL do quadro Greenhouse"), {
+        target: { value: "nubank" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cadastrar empresa/ }));
+      });
+      expect(m.add).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("pausar e coletar agora atualizam o resumo da casca", async () => {
+      m.companies.mockResolvedValue([collected]);
+      m.patch.mockResolvedValue({ ...collected, active: false });
+      m.collect.mockResolvedValue({ ...collected, next_run_at: "2026-11-12T11:00:00Z" });
+      const { refresh } = await renderWithOverview();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Coletar agora — GitLab" }));
+      });
+      expect(m.collect).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Pausar — GitLab" }));
+      });
+      expect(m.patch).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it("salvar a descoberta automática atualiza o resumo da casca", async () => {
+      m.companies.mockResolvedValue([collected]);
+      m.putDiscovery.mockResolvedValue({ ...discovery, enabled: false });
+      const { refresh } = await renderWithOverview();
+      await act(async () => {
+        fireEvent.click(screen.getByRole("switch", { name: "Descobrir empresas automaticamente" }));
+      });
+      expect(m.putDiscovery).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it("erro ao cadastrar não atualiza o resumo", async () => {
+      m.companies.mockResolvedValue([collected]);
+      m.add.mockRejectedValue(new ApiError(404, "Quadro não encontrado."));
+      const { refresh } = await renderWithOverview();
+      fireEvent.change(screen.getByLabelText("Token ou URL do quadro Greenhouse"), {
+        target: { value: "nada" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: /Cadastrar empresa/ }));
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("Quadro não encontrado.");
+      expect(refresh).not.toHaveBeenCalled();
+    });
   });
 });

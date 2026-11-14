@@ -32,6 +32,22 @@ export function useOverview(): OverviewState {
 }
 
 /**
+ * refresh() do overview em "dispara e esquece", para depois de uma ação que muda os
+ * números da casca (confirmar perfil, cadastrar empresa, avaliar vagas…): não espera
+ * e ignora qualquer erro. Estável enquanto o refresh da casca for.
+ */
+export function useRefreshOverview(): () => void {
+  const { refresh } = useOverview();
+  return useCallback(() => {
+    try {
+      Promise.resolve(refresh()).catch(() => {});
+    } catch {
+      // Nunca deixa a atualização do resumo derrubar a ação da página.
+    }
+  }, [refresh]);
+}
+
+/**
  * Carrega o overview para a casca, de novo a cada mudança de `key` (a rota) e em refresh().
  * Só a busca mais recente pode atualizar o estado: a anterior é abortada e, se ainda
  * assim responder, é ignorada (número de sequência). Nada é atualizado depois de desmontar.

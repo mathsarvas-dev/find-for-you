@@ -3,8 +3,12 @@
 import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { FilterBar } from "@/components/jobs/FilterBar";
+import { jobsSteps } from "@/components/jobs/jobsSteps";
 import { MatchList } from "@/components/jobs/MatchList";
 import { MatchPanel, type PanelState } from "@/components/jobs/MatchPanel";
+import { useRefreshOverview } from "@/components/shell/OverviewContext";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { Stepper } from "@/components/stepper/Stepper";
 import {
   DEFAULT_FILTERS,
   getMatch,
@@ -83,6 +87,7 @@ export default function JobsPage() {
   const itemsRef = useRef<MatchItem[]>([]);
   /** Seleção atual para o atalho de teclado (várias teclas antes do próximo render). */
   const selectedRef = useRef<number | null>(null);
+  const refreshOverview = useRefreshOverview();
 
   useEffect(() => {
     mounted.current = true;
@@ -204,6 +209,8 @@ export default function JobsPage() {
     setFlash(null);
     try {
       const result = await refreshMatches();
+      // Vagas na fila da IA mudam os contadores da casca.
+      refreshOverview();
       if (!mounted.current) return;
       setFlash({ kind: "ok", text: refreshText(result) });
       setPollError(null);
@@ -238,6 +245,8 @@ export default function JobsPage() {
         const merged = [...page.items, ...tail];
         apply({ ...page, items: merged });
         if (hasPending(merged)) timer = setTimeout(poll, POLL_MS);
+        // A fila da IA esvaziou: as notas novas entram nos contadores da casca.
+        else refreshOverview();
       } catch (err) {
         if (!cancelled) setPollError(message(err));
       }
@@ -247,7 +256,7 @@ export default function JobsPage() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [polling, apply]);
+  }, [polling, apply, refreshOverview]);
 
   // Detalhe da vaga selecionada; relido quando a avaliação dela muda (polling).
   const selected = items.find((i) => i.job.id === selectedId);
@@ -332,16 +341,58 @@ export default function JobsPage() {
     !editing;
   const pendingCount = items.filter((i) => i.state === "pendente").length;
   const hasMore = meta !== null && items.length < meta.total;
+  const ready = phase.name === "ready" && meta !== null && filters !== null;
+
+  /** Abre o painel de filtros (se recolhido) pelo próprio botão dele e leva o foco até lá. */
+  function openFilters() {
+    const toggle = document.querySelector<HTMLButtonElement>(".filters__toggle");
+    if (!toggle) return;
+    if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+    toggle.focus();
+  }
 
   return (
     <main className="page page--wide">
-      <div className="page-head">
-        <h1>Vagas</h1>
-        <p>
-          Ordenadas pela nota contra o seu perfil confirmado. A IA avalia as 30 melhores; as outras
-          mostram a pré-seleção vetorial, em cinza.
-        </p>
-      </div>
+      <PageHeader
+        title="Vagas"
+        description="Ordenadas pela nota contra o seu perfil confirmado. A IA avalia as 30 melhores; as outras mostram a pré-seleção vetorial, em cinza."
+        actions={
+          ready && (
+            <>
+              <button
+                type="button"
+                className="button"
+                disabled={!canEvaluate}
+                aria-busy={refreshing || undefined}
+                onClick={() => void evaluate()}
+              >
+                Avaliar melhores vagas
+              </button>
+              {hasProfile && (
+                <button type="button" className="button button--secondary" onClick={openFilters}>
+                  Filtros
+                </button>
+              )}
+            </>
+          )
+        }
+        stepper={
+          ready &&
+          meta && (
+            <Stepper
+              steps={jobsSteps({
+                hasProfile,
+                vectorized: meta.vectorized,
+                total: meta.total,
+                scored: items.filter((i) => i.ai_score !== null).length,
+                pending: pendingCount,
+              })}
+              orientation="horizontal"
+              label="Etapas das vagas"
+            />
+          )
+        }
+      />
 
       {phase.name === "loading" && (
         <section className="panel" aria-busy="true" aria-label="Carregando vagas">
@@ -412,15 +463,6 @@ export default function JobsPage() {
               </div>
 
               <div className="matches__toolbar">
-                <button
-                  type="button"
-                  className="button"
-                  disabled={!canEvaluate}
-                  aria-busy={refreshing || undefined}
-                  onClick={() => void evaluate()}
-                >
-                  Avaliar melhores vagas
-                </button>
                 {flash ? (
                   <p
                     className={flash.kind === "error" ? "field__error matches__flash" : "matches__flash"}
@@ -430,7 +472,7 @@ export default function JobsPage() {
                   </p>
                 ) : (
                   <p className="matches__flash muted">
-                    Manda as 30 melhores pelos filtros atuais para a nota da IA.
+                    “Avaliar melhores vagas” manda as 30 melhores pelos filtros atuais para a nota da IA.
                   </p>
                 )}
               </div>

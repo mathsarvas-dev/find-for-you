@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AnswerBox } from "@/components/interview/AnswerBox";
 import { ChatThread } from "@/components/interview/ChatThread";
+import { PageHeader } from "@/components/shell/PageHeader";
 import {
   answerInterview,
   BUSY_STATES,
@@ -274,13 +275,15 @@ export default function InterviewPage() {
 
   return (
     <main className="page page--narrow">
-      <div className="page-head">
-        <h1>Entrevista do perfil</h1>
-        <p>
-          Perguntas curtas sobre o que falta no seu perfil, uma de cada vez. Cada resposta pode
-          virar uma sugestão de alteração, que você aceita, ajusta ou descarta.
-        </p>
-      </div>
+      <PageHeader
+        title="Entrevista do perfil"
+        description="Perguntas curtas sobre o que falta no seu perfil, uma de cada vez. Cada resposta pode virar uma sugestão de alteração, que você aceita, ajusta ou descarta."
+        actions={
+          <Link className="button button--secondary" href="/onboarding">
+            Voltar ao perfil
+          </Link>
+        }
+      />
 
       {phase.name === "loading" && (
         <section className="panel" aria-busy="true" aria-label="Carregando entrevista">

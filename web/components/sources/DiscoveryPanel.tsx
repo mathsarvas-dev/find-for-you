@@ -27,6 +27,8 @@ type DiscoveryPanelProps = {
   refreshKey?: number;
   /** O número de empresas automáticas mudou: a lista de empresas deve ser relida. */
   onCompaniesChanged?: () => void;
+  /** Preferências gravadas (interruptor ou empresas-alvo): o resumo da casca pode mudar. */
+  onSaved?: () => void;
 };
 
 type Phase =
@@ -60,7 +62,7 @@ const STATE_TONE: Record<string, "on" | "off" | "wait"> = {
   pending: "wait",
 };
 
-export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPanelProps) {
+export function DiscoveryPanel({ refreshKey, onCompaniesChanged, onSaved }: DiscoveryPanelProps) {
   const [phase, setPhase] = useState<Phase>({ name: "loading" });
   /** O que o interruptor mostra; difere de `data.enabled` só enquanto o PUT está em voo. */
   const [enabled, setEnabled] = useState(true);
@@ -79,6 +81,7 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
   const listSeq = useRef(0);
   const knownAuto = useRef<number | null>(null);
   const onChangedRef = useRef(onCompaniesChanged);
+  const onSavedRef = useRef(onSaved);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** Rascunho atual, lido quando a resposta de um Salvar chega. */
   const draftRef = useRef("");
@@ -92,7 +95,8 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
 
   useEffect(() => {
     onChangedRef.current = onCompaniesChanged;
-  }, [onCompaniesChanged]);
+    onSavedRef.current = onSaved;
+  }, [onCompaniesChanged, onSaved]);
 
   useEffect(() => {
     mounted.current = true;
@@ -211,6 +215,7 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
     try {
       // Manda a lista já salva, não o rascunho do campo.
       const res = await putDiscovery({ enabled: next, target_companies: data.target_companies });
+      onSavedRef.current?.();
       if (mounted.current && my === seq.current) apply(res);
     } catch (err) {
       if (mounted.current) {
@@ -238,6 +243,7 @@ export function DiscoveryPanel({ refreshKey, onCompaniesChanged }: DiscoveryPane
     setSave({ name: "saving" });
     try {
       const res = await putDiscovery({ enabled: data.enabled, target_companies: parsed.names });
+      onSavedRef.current?.();
       if (!mounted.current) return;
       if (my === seq.current) apply(res);
       // Só troca o campo pela lista normalizada se ninguém digitou enquanto salvava.

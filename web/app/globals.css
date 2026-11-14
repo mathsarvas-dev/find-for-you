@@ -838,24 +838,6 @@ a.summary-card:hover .summary-card__label {
   padding: var(--space-6) var(--space-4) var(--space-7);
 }
 
-.page-head {
-  margin-bottom: var(--space-5);
-}
-
-.page-head h1 {
-  font-size: var(--text-2xl);
-  font-weight: 600;
-  letter-spacing: -0.015em;
-  line-height: 1.2;
-}
-
-.page-head p {
-  margin-top: var(--space-2);
-  font-size: var(--text-lg);
-  color: var(--muted);
-  max-width: 60ch;
-}
-
 /* Painel */
 
 .panel {
@@ -1151,53 +1133,6 @@ button.button {
 
 .panel__foot .button + .button {
   margin-left: 0;
-}
-
-/* Etapas do onboarding: texto primeiro, número em mono */
-
-.steps {
-  margin-bottom: var(--space-4);
-}
-
-.steps__count {
-  font-size: var(--text-xs);
-  color: var(--muted);
-  margin-bottom: var(--space-2);
-}
-
-.steps__list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--space-2);
-}
-
-.steps__item {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  padding-top: var(--space-2);
-  border-top: 2px solid var(--border);
-  font-size: var(--text-sm);
-  color: var(--muted);
-}
-
-.steps__item[data-state="done"] {
-  border-top-color: var(--border-strong);
-  color: var(--text);
-}
-
-.steps__item[data-state="current"] {
-  border-top-color: var(--accent);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.steps__num {
-  font-size: var(--text-xs);
-  color: var(--muted);
 }
 
 /* Campos */
@@ -1597,10 +1532,6 @@ textarea.input {
 
   .facts {
     grid-template-columns: 1fr 1fr;
-  }
-
-  .steps__item {
-    font-size: var(--text-xs);
   }
 }
 

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { OverviewContext, type OverviewState } from "@/components/shell/OverviewContext";
 import { ApiError } from "@/lib/profile";
 import {
   DEFAULT_FILTERS,
@@ -43,6 +44,28 @@ async function renderPage() {
   await tick(0);
   return view;
 }
+
+async function renderWithOverview() {
+  const refresh = vi.fn(async () => {});
+  const state: OverviewState = { overview: null, status: "ok", refresh };
+  const view = render(
+    <OverviewContext.Provider value={state}>
+      <JobsPage />
+    </OverviewContext.Provider>,
+  );
+  await tick(0);
+  return { ...view, refresh };
+}
+
+function currentStep() {
+  const list = screen.getByRole("list", { name: "Etapas das vagas" });
+  const items = within(list)
+    .getAllByRole("listitem")
+    .filter((li) => li.getAttribute("aria-current") === "step");
+  return items.length === 1 ? items[0] : null;
+}
+
+const header = () => document.querySelector<HTMLElement>(".page-header__actions");
 
 const rows = () => screen.getAllByRole("button", { name: /^Vaga \d/ });
 
@@ -386,6 +409,111 @@ describe("JobsPage", () => {
         fireEvent.click(screen.getByRole("button", { name: "Avaliar melhores vagas" }));
       });
       expect(screen.getByRole("alert")).toHaveTextContent("Aguarde alguns segundos");
+    });
+  });
+
+  describe("cabeçalho e trilha", () => {
+    it("um único h1, também enquanto carrega", () => {
+      m.profile.mockReturnValue(new Promise(() => {}));
+      m.list.mockReturnValue(new Promise(() => {}));
+      render(<JobsPage />);
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      expect(screen.getByRole("heading", { level: 1, name: "Vagas" })).toBeInTheDocument();
+    });
+
+    it("Avaliar melhores vagas existe uma vez só, no cabeçalho, e dispara uma requisição por clique", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+      const buttons = screen.getAllByRole("button", { name: "Avaliar melhores vagas" });
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0].closest(".page-header__actions")).not.toBeNull();
+      let resolve!: () => void;
+      m.refresh.mockReturnValueOnce(
+        new Promise((r) => {
+          resolve = () => r({ requested: 30, created: 30, reset: 0, already_ok: 0, profile_version: 3 });
+        }),
+      );
+      fireEvent.click(buttons[0]);
+      // Enquanto avalia: desativado (mesma regra de antes), um segundo clique não repete.
+      expect(buttons[0]).toBeDisabled();
+      expect(buttons[0]).toHaveAttribute("aria-busy", "true");
+      fireEvent.click(buttons[0]);
+      await act(async () => resolve());
+      expect(m.refresh).toHaveBeenCalledTimes(1);
+      expect(screen.getByText("30 vagas na fila da IA.")).toBeInTheDocument();
+    });
+
+    it("Filtros abre o painel de filtros recolhido e foca o botão dele", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      await renderPage();
+      const toggle = screen.getByRole("button", { name: /^Filtros ·/ });
+      fireEvent.click(toggle);
+      expect(toggle).toHaveAttribute("aria-expanded", "false");
+      fireEvent.click(within(header()!).getByRole("button", { name: "Filtros" }));
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+      expect(toggle).toHaveFocus();
+      // Já aberto: continua aberto (não alterna).
+      fireEvent.click(within(header()!).getByRole("button", { name: "Filtros" }));
+      expect(toggle).toHaveAttribute("aria-expanded", "true");
+    });
+
+    it("sem perfil: sem Filtros, trilha bloqueada e um botão para /onboarding", async () => {
+      m.list.mockResolvedValue(matchPage([], { profile_version: null, vectorized: false, chunks_used: 0 }));
+      await renderPage();
+      expect(within(header()!).queryByRole("button", { name: "Filtros" })).toBeNull();
+      expect(currentStep()).toBeNull();
+      expect(screen.getByRole("list", { name: "Etapas das vagas" })).toHaveTextContent(/Filtrar.*bloqueado/);
+      const empty = document.querySelector<HTMLElement>(".matches__empty")!;
+      const actions = [...within(empty).queryAllByRole("button"), ...within(empty).queryAllByRole("link")];
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toHaveAttribute("href", "/onboarding");
+    });
+
+    it("sem vagas: passo Filtrar e um botão para /sources", async () => {
+      m.list.mockResolvedValue(matchPage([]));
+      await renderPage();
+      expect(currentStep()).toHaveTextContent("Filtrar");
+      const empty = document.querySelector<HTMLElement>(".matches__empty")!;
+      const actions = [...within(empty).queryAllByRole("button"), ...within(empty).queryAllByRole("link")];
+      expect(actions).toHaveLength(1);
+      expect(actions[0]).toHaveAttribute("href", "/sources");
+    });
+
+    it("trilha: Avaliar sem nota da IA, Ler com alguma nota", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      const view = await renderPage();
+      expect(currentStep()).toHaveTextContent("Avaliar");
+      view.unmount();
+      m.list.mockResolvedValue(matchPage([matchItem(1, { ai_score: 88, state: "ok" })]));
+      await renderPage();
+      expect(currentStep()).toHaveTextContent("Ler");
+    });
+
+    it("avaliar atualiza o resumo da casca (e de novo quando a fila esvazia)", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      const { refresh } = await renderWithOverview();
+      expect(refresh).not.toHaveBeenCalled();
+      m.refresh.mockResolvedValue({ requested: 1, created: 1, reset: 0, already_ok: 0, profile_version: 3 });
+      m.list.mockResolvedValue(matchPage([matchItem(1, { state: "pendente" })]));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Avaliar melhores vagas" }));
+      });
+      expect(m.refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      m.list.mockResolvedValue(matchPage([matchItem(1, { ai_score: 90, state: "ok" })]));
+      await tick(10_000);
+      expect(refresh).toHaveBeenCalledTimes(2);
+    });
+
+    it("avaliar com erro não atualiza o resumo", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      const { refresh } = await renderWithOverview();
+      m.refresh.mockRejectedValue(new ApiError(429, "Aguarde alguns segundos."));
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Avaliar melhores vagas" }));
+      });
+      expect(refresh).not.toHaveBeenCalled();
     });
   });
 });

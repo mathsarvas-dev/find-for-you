@@ -2,9 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useId, useState } from "react";
+import { onboardingSteps, type OnboardingStage } from "@/components/onboarding/onboardingSteps";
 import { ReviewStep } from "@/components/onboarding/ReviewStep";
 import { UploadStep } from "@/components/onboarding/UploadStep";
 import { VectorStatus } from "@/components/onboarding/VectorStatus";
+import { useRefreshOverview } from "@/components/shell/OverviewContext";
+import { PageHeader } from "@/components/shell/PageHeader";
+import { Stepper } from "@/components/stepper/Stepper";
 import {
   ApiError,
   confirmProfile,
@@ -32,18 +36,20 @@ type Phase =
   | { name: "review"; profile: CanonicalProfile; truncated: boolean }
   | { name: "vectors"; total: number; embedded: number; startedAt: number; error: string | null };
 
-const STEPS = ["Sobre você", "Leitura do currículo", "Revisão"] as const;
-
-function stepOf(phase: Phase): number | null {
+/** Estágio da trilha do cabeçalho; null enquanto não se sabe (carregando, erro ao carregar). */
+function stageOf(phase: Phase): OnboardingStage | null {
   switch (phase.name) {
     case "upload":
-      return 0;
+      return "upload";
     case "reading":
     case "read-error":
-      return 1;
+      return "reading";
     case "review":
+      return "review";
     case "vectors":
-      return 2;
+      return phase.embedded < phase.total ? "vectorizing" : "ready";
+    case "existing":
+      return phase.current.chunks_embedded < phase.current.chunks_total ? "vectorizing" : "ready";
     default:
       return null;
   }
@@ -67,6 +73,7 @@ export default function OnboardingPage() {
   const [now, setNow] = useState(0);
   const narrativeId = useId();
   const narrativeHintId = useId();
+  const refreshOverview = useRefreshOverview();
 
   const load = useCallback(async () => {
     setPhase({ name: "loading" });
@@ -149,6 +156,8 @@ export default function OnboardingPage() {
       try {
         const st = await getProfile();
         if (cancelled || !st) return;
+        // Vetores prontos: a casca passa a mostrar o perfil vetorizado.
+        if (st.chunks_embedded >= st.chunks_total) refreshOverview();
         setPhase((p) =>
           p.name === "vectors" ? { ...p, total: st.chunks_total, embedded: st.chunks_embedded } : p,
         );
@@ -161,7 +170,7 @@ export default function OnboardingPage() {
       clearTimeout(timer);
     };
     // Reagenda a cada resposta nova (embedded muda) ou ao retomar após erro.
-  }, [vectorsPending, phase]);
+  }, [vectorsPending, phase, refreshOverview]);
 
   async function retryRead() {
     if (phase.name !== "read-error") return;
@@ -184,6 +193,7 @@ export default function OnboardingPage() {
   async function confirm(profile: CanonicalProfile, text: string) {
     setNarrative(text);
     const result = await confirmProfile(profile, text);
+    refreshOverview();
     setNow(Date.now());
     setHasProfile(true);
     setPhase({
@@ -195,19 +205,39 @@ export default function OnboardingPage() {
     });
   }
 
-  const step = stepOf(phase);
+  const stage = stageOf(phase);
+  const startNew = () => setPhase({ name: "upload" });
 
   return (
     <main className="page page--narrow">
-      <div className="page-head">
-        <h1>Seu perfil</h1>
-        <p>
-          O Rumo lê seu currículo, você confere o que ele entendeu e o perfil passa a ser a base
-          para comparar vagas.
-        </p>
-      </div>
-
-      {step !== null && <Steps current={step} />}
+      <PageHeader
+        title="Seu perfil"
+        description="O Rumo lê seu currículo, você confere o que ele entendeu e o perfil passa a ser a base para comparar vagas."
+        actions={
+          phase.name === "existing" ? (
+            <>
+              <Link className="button" href="/onboarding/interview">
+                Continuar entrevista
+              </Link>
+              <button type="button" className="button button--secondary" onClick={startNew}>
+                Enviar currículo
+              </button>
+            </>
+          ) : hasProfile && phase.name !== "loading" ? (
+            <Link
+              className={stage === "ready" ? "button" : "button button--secondary"}
+              href="/onboarding/interview"
+            >
+              Continuar entrevista
+            </Link>
+          ) : undefined
+        }
+        stepper={
+          stage !== null && (
+            <Stepper steps={onboardingSteps(stage)} orientation="horizontal" label="Etapas do perfil" />
+          )
+        }
+      />
 
       {phase.name === "loading" && (
         <section className="panel" aria-busy="true" aria-label="Carregando perfil">
@@ -239,7 +269,7 @@ export default function OnboardingPage() {
         <ExistingProfile
           current={phase.current}
           onView={() => setPhase({ name: "review", profile: phase.current.profile, truncated: false })}
-          onNew={() => setPhase({ name: "upload" })}
+          onNew={startNew}
         />
       )}
 
@@ -403,31 +433,6 @@ export default function OnboardingPage() {
         </section>
       )}
     </main>
-  );
-}
-
-function Steps({ current }: { current: number }) {
-  return (
-    <nav className="steps" aria-label="Etapas">
-      <p className="steps__count mono">
-        Passo {current + 1} de {STEPS.length}
-      </p>
-      <ol className="steps__list">
-        {STEPS.map((label, i) => (
-          <li
-            key={label}
-            className="steps__item"
-            data-state={i < current ? "done" : i === current ? "current" : "todo"}
-            aria-current={i === current ? "step" : undefined}
-          >
-            <span className="mono steps__num" aria-hidden="true">
-              {i + 1}
-            </span>
-            {label}
-          </li>
-        ))}
-      </ol>
-    </nav>
   );
 }
 
