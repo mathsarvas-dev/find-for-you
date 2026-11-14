@@ -27,7 +27,9 @@ export type SearchFilters = {
   accept_no_salary: boolean;
 };
 
-export const DEFAULT_FILTERS: SearchFilters = {
+/** Filtros padrão novos (arrays não compartilhados). */
+export function defaultFilters(): SearchFilters {
+  return {
   countries: [],
   work_models: [],
   seniorities: [],
@@ -43,7 +45,16 @@ export const DEFAULT_FILTERS: SearchFilters = {
   salary_currency: null,
   include_unknown: true,
   accept_no_salary: true,
-};
+  };
+}
+
+function deepFreeze<T extends object>(o: T): T {
+  for (const v of Object.values(o)) if (v && typeof v === "object") deepFreeze(v);
+  return Object.freeze(o);
+}
+
+/** Constante congelada para leitura/comparação; para editar, use defaultFilters(). */
+export const DEFAULT_FILTERS: SearchFilters = deepFreeze(defaultFilters());
 
 export type UnknownField = "salary" | "work_model" | "country" | "seniority" | "language";
 

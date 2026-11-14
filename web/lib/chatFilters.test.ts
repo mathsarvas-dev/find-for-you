@@ -67,6 +67,19 @@ describe("filterChips", () => {
   });
 });
 
+describe("chips duplicados", () => {
+  it("um chip por valor equivalente e removeChip tira todas as ocorrências", () => {
+    const filters = f({ countries: ["BR", "br", "PT"], departments: ["Data", "data"] });
+    const chips = filterChips(filters, null);
+    expect(chips).toHaveLength(3);
+    expect(new Set(chips.map((c) => c.key)).size).toBe(3);
+    const br = chips.find((c) => c.value === "BR")!;
+    expect(removeChip(filters, null, br).filters.countries).toEqual(["PT"]);
+    const dep = chips.find((c) => c.field === "departments")!;
+    expect(removeChip(filters, null, dep).filters.departments).toEqual([]);
+  });
+});
+
 describe("removeChip", () => {
   it("remove só o termo de title_exclude", () => {
     const filters = f({ title_exclude: ["plantão", "estágio"] });
@@ -123,6 +136,34 @@ describe("mergeProposal", () => {
     expect(out2.filters.title_exclude).toHaveLength(10);
     const deps = Array.from({ length: 25 }, (_, i) => `d${i}`);
     expect(mergeProposal(f(), null, proposal({ departments: deps })).filters.departments).toHaveLength(20);
+  });
+
+  it("teto: valores da frase têm prioridade e saem os atuais mais antigos", () => {
+    const old = Array.from({ length: 10 }, (_, i) => `t${i}`);
+    const a = mergeProposal(f({ title_exclude: old }), null, proposal({ title_exclude: ["plantão"] }));
+    expect(a.filters.title_exclude).toHaveLength(10);
+    expect(a.filters.title_exclude).toContain("plantão");
+    expect(a.filters.title_exclude).not.toContain("t0");
+    expect(a.filters.title_exclude.slice(0, 9)).toEqual(old.slice(1));
+
+    const twenty = Array.from({ length: 20 }, (_, i) => `C${i}`);
+    const b = mergeProposal(f({ countries: twenty }), null, proposal({ countries: ["DE"] }));
+    expect(b.filters.countries).toHaveLength(20);
+    expect(b.filters.countries).toContain("DE");
+
+    const c = mergeProposal(
+      f({ countries: twenty, exclude_countries: ["DE"] }),
+      null,
+      proposal({ countries: ["DE"] }),
+    );
+    expect(c.filters.countries).toContain("DE");
+    expect(c.filters.countries).toHaveLength(20);
+    expect(c.filters.exclude_countries).not.toContain("DE");
+
+    const big = Array.from({ length: 30 }, (_, i) => `D${i}`);
+    const d = mergeProposal(f(), null, proposal({ departments: big, title_exclude: big }));
+    expect(d.filters.departments).toEqual(big.slice(0, 20));
+    expect(d.filters.title_exclude).toEqual(big.slice(0, 10));
   });
 
   it("departamentos comparam sem diferenciar caixa", () => {

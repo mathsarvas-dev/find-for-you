@@ -86,10 +86,10 @@ const amountFmt = new Intl.NumberFormat("pt-BR", { maximumFractionDigits: 0 });
 export function filterChips(f: SearchFilters, queryText: string | null): Chip[] {
   const chips: Chip[] = [];
   for (const [inc, exc] of PAIRS) {
-    for (const v of f[inc] as string[]) {
+    for (const v of dedupe(f[inc] as string[], normFor(inc))) {
       chips.push({ key: `${inc}:${v}`, kind: "include", field: inc, value: v, label: valueLabel(inc, v) });
     }
-    for (const v of f[exc] as string[]) {
+    for (const v of dedupe(f[exc] as string[], normFor(exc))) {
       chips.push({
         key: `${exc}:${v}`,
         kind: "exclude",
@@ -99,7 +99,7 @@ export function filterChips(f: SearchFilters, queryText: string | null): Chip[] 
       });
     }
   }
-  for (const v of f.title_exclude) {
+  for (const v of dedupe(f.title_exclude, normFor("title_exclude"))) {
     chips.push({ key: `title_exclude:${v}`, kind: "exclude", field: "title_exclude", value: v, label: `sem ${v}` });
   }
   if (f.salary_min !== null) {
@@ -128,8 +128,11 @@ export function removeChip(
     return { filters: { ...f, salary_min: null, salary_currency: null }, queryText };
   }
   const field = chip.field as ListField;
+  // Usa a mesma igualdade da fusão (normFor), não a exata: remove todas as ocorrências equivalentes.
+  const norm = normFor(field);
+  const target = norm(chip.value);
   const list = f[field] as string[];
-  return { filters: { ...f, [field]: list.filter((v) => v !== chip.value) }, queryText };
+  return { filters: { ...f, [field]: list.filter((v) => norm(v) !== target) }, queryText };
 }
 
 /* Fusão */
@@ -137,28 +140,35 @@ export function removeChip(
 const MAX_LIST = 20;
 const MAX_TITLE_EXCLUDE = 10;
 
-const normFor = (field: ListField): ((v: string) => string) => {
+function normFor(field: ListField): (v: string) => string {
   if (field.endsWith("departments") || field === "title_exclude") return (v) => v.trim().toLowerCase();
   if (field.endsWith("countries")) return (v) => v.trim().toUpperCase();
   return (v) => v;
-};
+}
 
-function union(a: string[], b: string[], norm: (v: string) => string, max: number): string[] {
+function dedupe(list: string[], norm: (v: string) => string): string[] {
   const seen = new Set<string>();
-  const out: string[] = [];
-  for (const v of [...a, ...b]) {
+  return list.filter((v) => {
     const k = norm(v);
-    if (seen.has(k)) continue;
+    if (seen.has(k)) return false;
     seen.add(k);
-    out.push(v);
-  }
-  return out.slice(0, max);
+    return true;
+  });
 }
 
 const without = (list: string[], drop: string[], norm: (v: string) => string) => {
   const d = new Set(drop.map(norm));
   return list.filter((v) => !d.has(norm(v)));
 };
+
+/** Valores atuais (menos os que a frase contradiz ou repete) e depois os da frase. */
+function combine(cur: string[], phrase: string[], drop: string[], norm: (v: string) => string): string[] {
+  const p = dedupe(phrase, norm);
+  return [...without(dedupe(cur, norm), [...drop, ...p], norm), ...p];
+}
+
+/** Sob o teto os valores da frase têm prioridade: descarta os mais antigos (início da lista). */
+const cap = (list: string[], max: number) => (list.length > max ? list.slice(list.length - max) : list);
 
 /** Aplica a proposta da frase sobre os filtros atuais; a frase vence nos conflitos. */
 export function mergeProposal(
@@ -169,21 +179,20 @@ export function mergeProposal(
   const next: SearchFilters = { ...current };
   for (const [inc, exc] of PAIRS) {
     const norm = normFor(inc);
-    const pInc = p.filters[inc] as string[];
-    const pExc = p.filters[exc] as string[];
-    const incAll = union(without(current[inc] as string[], pExc, norm), pInc, norm, Infinity);
-    const excAll = union(without(current[exc] as string[], pInc, norm), pExc, norm, Infinity);
-    // Rede de segurança: nunca devolve o mesmo valor nos dois lados.
+    const pInc = dedupe(p.filters[inc] as string[], norm).slice(0, MAX_LIST);
+    const pExc = dedupe(p.filters[exc] as string[], norm).slice(0, MAX_LIST);
+    const incAll = combine(current[inc] as string[], pInc, pExc, norm);
+    const excAll = combine(current[exc] as string[], pExc, pInc, norm);
+    // Rede de segurança (antes do teto): nunca o mesmo valor nos dois lados.
     const excClean = without(excAll, incAll, norm);
-    (next as Record<string, unknown>)[inc] = incAll.slice(0, MAX_LIST);
-    (next as Record<string, unknown>)[exc] = excClean.slice(0, MAX_LIST);
+    (next as Record<string, unknown>)[inc] = cap(incAll, MAX_LIST);
+    (next as Record<string, unknown>)[exc] = cap(excClean, MAX_LIST);
   }
-  next.title_exclude = union(
-    current.title_exclude,
-    p.filters.title_exclude,
-    normFor("title_exclude"),
-    MAX_TITLE_EXCLUDE,
-  );
+  {
+    const norm = normFor("title_exclude");
+    const pT = dedupe(p.filters.title_exclude, norm).slice(0, MAX_TITLE_EXCLUDE);
+    next.title_exclude = cap(combine(current.title_exclude, pT, [], norm), MAX_TITLE_EXCLUDE);
+  }
   if (p.filters.salary_min !== null) {
     next.salary_min = p.filters.salary_min;
     next.salary_currency = p.filters.salary_currency;

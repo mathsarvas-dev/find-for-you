@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "./profile";
 import {
   DEFAULT_FILTERS,
+  defaultFilters,
   formatSalary,
   getMatch,
   getSearchProfile,
@@ -76,6 +77,14 @@ describe("exclusões e consulta", () => {
       expect(DEFAULT_FILTERS[k]).toEqual([]);
       expect(isDefaultFilters({ ...DEFAULT_FILTERS, [k]: ["x"] })).toBe(false);
     }
+  });
+
+  it("defaultFilters devolve arrays novos e DEFAULT_FILTERS é congelado", () => {
+    const a = defaultFilters();
+    a.countries.push("BR");
+    expect(defaultFilters().countries).toEqual([]);
+    expect(Object.isFrozen(DEFAULT_FILTERS)).toBe(true);
+    expect(Object.isFrozen(DEFAULT_FILTERS.countries)).toBe(true);
   });
 
   it("PUT só envia query_text quando o argumento é passado", async () => {

@@ -10,7 +10,7 @@ import { useRefreshOverview } from "@/components/shell/OverviewContext";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Stepper } from "@/components/stepper/Stepper";
 import {
-  DEFAULT_FILTERS,
+  defaultFilters,
   getMatch,
   getSearchProfile,
   hasPending,
@@ -176,7 +176,7 @@ export default function JobsPage() {
   async function restoreDefaults() {
     setRestoring(true);
     try {
-      await putSearchProfile(DEFAULT_FILTERS);
+      await putSearchProfile(defaultFilters());
       if (!mounted.current) return;
       reboot();
     } catch (err) {
