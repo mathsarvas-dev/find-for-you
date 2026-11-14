@@ -6,6 +6,7 @@ jobs with `salary_known` and the same currency as the filter, annualised
 (year x1, month x12, hour x2080), using max if present else min.
 """
 
+import unicodedata
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -21,6 +22,8 @@ SALARY_MAX = 1e12
 
 _Str = Annotated[str, Field(max_length=255)]
 _List = Annotated[list[_Str], Field(max_length=20)]
+_TitleTerms = Annotated[list[_Str], Field(max_length=10)]
+TITLE_TERM_MAX = 60
 
 
 def _subset(values: list[str], allowed: set[str], name: str) -> list[str]:
@@ -28,6 +31,13 @@ def _subset(values: list[str], allowed: set[str], name: str) -> list[str]:
     if bad:
         raise ValueError(f"{name} inválido(s): {bad}")
     return values
+
+
+def fold_term(term: str) -> str:
+    """Accent-fold and lowercase a title term, escaping LIKE wildcards."""
+    decomposed = unicodedata.normalize("NFKD", term)
+    folded = "".join(ch for ch in decomposed if not unicodedata.combining(ch)).lower()
+    return folded.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
 class SearchFilters(BaseModel):
@@ -38,6 +48,12 @@ class SearchFilters(BaseModel):
     seniorities: _List = []
     languages: _List = []
     departments: _List = []
+    exclude_countries: _List = []
+    exclude_work_models: _List = []
+    exclude_seniorities: _List = []
+    exclude_languages: _List = []
+    exclude_departments: _List = []
+    title_exclude: _TitleTerms = []
     # finite (JSONB rejects Infinity/NaN) and within Numeric(14, 2)
     salary_min: float | None = Field(
         default=None, ge=0, le=SALARY_MAX, allow_inf_nan=False
@@ -46,7 +62,7 @@ class SearchFilters(BaseModel):
     include_unknown: bool = True
     accept_no_salary: bool = True
 
-    @field_validator("countries")
+    @field_validator("countries", "exclude_countries")
     @classmethod
     def _countries(cls, v):
         out = []
@@ -57,27 +73,42 @@ class SearchFilters(BaseModel):
             out.append(n)
         return out
 
-    @field_validator("work_models")
+    @field_validator("work_models", "exclude_work_models")
     @classmethod
     def _wm(cls, v):
         return _subset(v, WORK_MODELS, "work_models")
 
-    @field_validator("seniorities")
+    @field_validator("seniorities", "exclude_seniorities")
     @classmethod
     def _sen(cls, v):
         return _subset(v, SENIORITIES, "seniorities")
 
-    @field_validator("languages")
+    @field_validator("languages", "exclude_languages")
     @classmethod
     def _lang(cls, v):
         return _subset(v, LANGUAGES, "languages")
 
-    @field_validator("departments")
+    @field_validator("departments", "exclude_departments")
     @classmethod
     def _dep(cls, v):
         if any(not d.strip() for d in v):
             raise ValueError("Departamento vazio.")
         return v
+
+    @field_validator("title_exclude")
+    @classmethod
+    def _title_exclude(cls, v):
+        out = []
+        for t in v:
+            t = t.strip()
+            if not t:
+                raise ValueError("Termo de título vazio.")
+            if len(t) > TITLE_TERM_MAX:
+                raise ValueError(
+                    f"Termo de título muito longo (máx. {TITLE_TERM_MAX} caracteres)."
+                )
+            out.append(t)
+        return out
 
     @field_validator("salary_currency")
     @classmethod
@@ -86,6 +117,18 @@ class SearchFilters(BaseModel):
             return None
         v = v.strip().upper()
         return v or None
+
+    @model_validator(mode="after")
+    def _no_include_exclude_conflict(self):
+        for field in ("countries", "work_models", "seniorities", "languages", "departments"):
+            norm = (lambda x: x.strip().lower()) if field == "departments" else (lambda x: x)
+            excluded = {norm(x) for x in getattr(self, f"exclude_{field}")}
+            for value in getattr(self, field):
+                if norm(value) in excluded:
+                    raise ValueError(
+                        f"O valor '{value}' está em '{field}' e em 'exclude_{field}'."
+                    )
+        return self
 
     @model_validator(mode="after")
     def _salary_needs_currency(self):
@@ -130,6 +173,29 @@ def apply_filters(stmt: Select, filters: SearchFilters) -> Select:
         if keep_unknown:
             cond = or_(cond, Job.department.is_(None))
         stmt = stmt.where(cond)
+    # Exclusion removes only what matches for sure: unknown/NULL always stays.
+    if filters.exclude_countries:
+        stmt = stmt.where(
+            or_(Job.country.is_(None), Job.country.not_in(filters.exclude_countries))
+        )
+    for column, values in (
+        (Job.work_model, filters.exclude_work_models),
+        (Job.seniority, filters.exclude_seniorities),
+        (Job.language, filters.exclude_languages),
+    ):
+        if values:
+            stmt = stmt.where(or_(column.is_(None), column == "unknown", column.not_in(values)))
+    if filters.exclude_departments:
+        names = [d.strip().lower() for d in filters.exclude_departments]
+        stmt = stmt.where(
+            or_(Job.department.is_(None), func.lower(Job.department).not_in(names))
+        )
+    for term in filters.title_exclude:
+        stmt = stmt.where(
+            ~func.lower(func.unaccent(Job.title)).ilike(
+                f"%{fold_term(term)}%", escape="\\"
+            )
+        )
     if filters.salary_min is not None:
         comparable = and_(
             Job.salary_known.is_(True),
