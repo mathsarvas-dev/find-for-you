@@ -32,7 +32,19 @@ type Draft = {
   currency: string;
   include_unknown: boolean;
   accept_no_salary: boolean;
+  /** Exclusões: a UI nova (Task 11) as edita; por ora só são preservadas. */
+  exclusions: Exclusions;
 };
+
+type Exclusions = Pick<
+  SearchFilters,
+  | "exclude_countries"
+  | "exclude_work_models"
+  | "exclude_seniorities"
+  | "exclude_languages"
+  | "exclude_departments"
+  | "title_exclude"
+>;
 
 function toDraft(f: SearchFilters): Draft {
   return {
@@ -45,6 +57,14 @@ function toDraft(f: SearchFilters): Draft {
     currency: f.salary_currency ?? "",
     include_unknown: f.include_unknown,
     accept_no_salary: f.accept_no_salary,
+    exclusions: {
+      exclude_countries: f.exclude_countries,
+      exclude_work_models: f.exclude_work_models,
+      exclude_seniorities: f.exclude_seniorities,
+      exclude_languages: f.exclude_languages,
+      exclude_departments: f.exclude_departments,
+      title_exclude: f.title_exclude,
+    },
   };
 }
 
@@ -85,6 +105,7 @@ function parse(d: Draft): Parsed {
       seniorities: d.seniorities,
       languages: d.languages,
       departments: splitList(d.departments),
+      ...d.exclusions,
       salary_min: salary,
       salary_currency: currency,
       include_unknown: d.include_unknown,

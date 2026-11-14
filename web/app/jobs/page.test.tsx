@@ -10,6 +10,8 @@ import {
   putSearchProfile,
   refreshMatches,
   type MatchPage,
+  type SearchFilters,
+  type SearchProfile,
 } from "@/lib/matching";
 import { matchDetail, matchItem, matchPage } from "@/components/jobs/fixtures";
 import JobsPage from "./page";
@@ -30,6 +32,8 @@ const m = {
   get: vi.mocked(getMatch),
   refresh: vi.mocked(refreshMatches),
 };
+
+const sp = (filters: SearchFilters): SearchProfile => ({ filters, query_text: null, query_pending: false });
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
 
@@ -72,8 +76,8 @@ const rows = () => screen.getAllByRole("button", { name: /^Vaga \d/ });
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(NOW);
-  m.profile.mockResolvedValue(DEFAULT_FILTERS);
-  m.put.mockImplementation(async (f) => f);
+  m.profile.mockResolvedValue(sp(DEFAULT_FILTERS));
+  m.put.mockImplementation(async (f) => sp(f));
   m.get.mockImplementation(async (id) => matchDetail(id));
 });
 
@@ -130,7 +134,7 @@ describe("JobsPage", () => {
     });
 
     it("sem resultado para os filtros", async () => {
-      m.profile.mockResolvedValue({ ...DEFAULT_FILTERS, work_models: ["onsite"] });
+      m.profile.mockResolvedValue(sp({ ...DEFAULT_FILTERS, work_models: ["onsite"] }));
       m.list.mockResolvedValue(matchPage([]));
       await renderPage();
       expect(screen.getByText("Nenhuma vaga passa nesses filtros.")).toBeInTheDocument();
@@ -286,7 +290,7 @@ describe("JobsPage", () => {
       m.list.mockRejectedValueOnce(new ApiError(null, "Sem resposta."));
       await tick(10_000);
       expect(screen.getByText("Perdemos contato com a API.")).toBeInTheDocument();
-      let resolvePut!: (f: typeof DEFAULT_FILTERS) => void;
+      let resolvePut!: (f: SearchProfile) => void;
       m.put.mockReturnValueOnce(new Promise((r) => (resolvePut = r)));
       fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
       await tick(300);
@@ -294,7 +298,7 @@ describe("JobsPage", () => {
       await act(async () => {
         fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
       });
-      await act(async () => resolvePut({ ...DEFAULT_FILTERS, work_models: ["remote"] }));
+      await act(async () => resolvePut(sp({ ...DEFAULT_FILTERS, work_models: ["remote"] })));
       expect(screen.queryByText("salvando…")).toBeNull();
       // O último salvamento recarrega a lista com os filtros novos.
       expect(m.list.mock.calls.length).toBeGreaterThanOrEqual(4);
@@ -305,14 +309,14 @@ describe("JobsPage", () => {
       await renderPage();
       const evaluate = () => screen.getByRole("button", { name: "Avaliar melhores vagas" });
       expect(evaluate()).toBeEnabled();
-      let resolvePut!: (f: typeof DEFAULT_FILTERS) => void;
+      let resolvePut!: (f: SearchProfile) => void;
       m.put.mockReturnValueOnce(new Promise((r) => (resolvePut = r)));
       fireEvent.click(screen.getByRole("checkbox", { name: "remoto" }));
       await tick(0);
       expect(evaluate()).toBeDisabled();
       await tick(300);
       expect(evaluate()).toBeDisabled();
-      await act(async () => resolvePut({ ...DEFAULT_FILTERS, work_models: ["remote"] }));
+      await act(async () => resolvePut(sp({ ...DEFAULT_FILTERS, work_models: ["remote"] })));
       expect(evaluate()).toBeEnabled();
     });
 

@@ -50,6 +50,7 @@ export function matchPage(items: MatchItem[], extra: Partial<MatchPage> = {}): M
     vectorized: true,
     missing_embeddings: 0,
     chunks_used: 3,
+    query_used: false,
     items,
     ...extra,
   };

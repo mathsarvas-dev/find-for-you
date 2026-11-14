@@ -114,7 +114,7 @@ export default function JobsPage() {
     ])
       .then(([saved, page]) => {
         if (cancelled || id !== latest.current) return;
-        setFilters(saved);
+        setFilters(saved.filters);
         apply(page);
         setPhase({ name: "ready" });
       })
@@ -160,7 +160,7 @@ export default function JobsPage() {
       try {
         const saved = await putSearchProfile(next);
         if (!mounted.current || saveId !== saveSeq.current) return;
-        setFilters(saved);
+        setFilters(saved.filters);
         await reloadList();
       } catch (err) {
         if (mounted.current && saveId === saveSeq.current) setSaveError(message(err));
