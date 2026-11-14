@@ -29,12 +29,18 @@ ALLOWED_LIMIT = 100
 EMPTY_NOTE = "não encontrei filtros nessa frase"
 NEGATION_MESSAGE = "A consulta de gosto não pode ter negações; use os filtros de exclusão."
 
-_NEGATION = re.compile(r"(?<!\w)(sem|nao|no|without|ohne)\s+\w")
+_NEGATION = re.compile(r"(?<!\w)(sem|nao|no|without|ohne)[\W_]+\w")
 
 
 def _fold(text: str) -> str:
     decomposed = unicodedata.normalize("NFKD", text)
-    return "".join(ch for ch in decomposed if not unicodedata.combining(ch)).lower()
+    return "".join(
+        ch
+        for ch in decomposed
+        if not unicodedata.combining(ch)
+        and (unicodedata.category(ch) != "Cf")
+        and (unicodedata.category(ch) != "Cc" or ch.isspace())
+    ).lower()
 
 
 def check_query_text(text: str | None) -> str | None:
@@ -118,7 +124,7 @@ vira title_exclude: ["plantão"].
 - Um valor sem número (ex.: "ótimo salário") não vira filtro: registre em `notes`.
 - Use apenas valores permitidos. O que não couber vira uma nota curta em `notes` \
 (no máximo {max_notes} notas, cada uma com até {note_max} caracteres).
-- Parta dos filtros atuais e ajuste só o que a frase pedir.
+- Devolva só o que a frase pede; os filtros atuais são apenas contexto — não os repita.
 """
 
 
@@ -184,12 +190,15 @@ async def parse_query(
     text = (text or "").strip()
     if not text:
         return ParsedQuery(notes=[EMPTY_NOTE])
+    if len(text) > MAX_TEXT:
+        raise ValueError(f"A frase é longa demais (máx. {MAX_TEXT} caracteres).")
     messages = build_messages(text, current, allowed)
-    last: Exception | None = None
+    last: str = "resposta inválida"
     for _ in range(MAX_ATTEMPTS):
         try:
             raw = await llm.complete_json(messages, _RawParsed)
             return _validate(raw, current, allowed)
         except (ValidationError, ValueError, LLMInvalidResponse) as exc:
-            last = exc
-    raise ParseInvalid(f"Não consegui interpretar a frase: {last}") from last
+            last = type(exc).__name__
+    # fixed message: never carries model output
+    raise ParseInvalid(f"Não consegui interpretar a frase ({last}).") from None

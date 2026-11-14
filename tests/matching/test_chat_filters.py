@@ -102,9 +102,14 @@ async def test_rate_limit_propagates():
 
 def test_check_query_text():
     assert check_query_text("algo com dados") == "algo com dados"
-    for bad in ("Não quero plantão", "without on-call", "ohne Schicht", "no plantão", "x" * 301):
+    for bad in (
+        "Não quero plantão", "without on-call", "ohne Schicht", "no plantão", "x" * 301,
+        "sem-plantão", "sem, plantão", "sem_plantão", "s​em plantão", "sem​ plantão",
+    ):
         with pytest.raises(ValueError):
             check_query_text(bad)
+    assert check_query_text("semana de dados") == "semana de dados"
+    assert check_query_text("dados sem") == "dados sem"
     assert check_query_text("  ") is None
     assert check_query_text(None) is None
 
@@ -157,3 +162,27 @@ def test_allowed_values_distinct_open_sorted():
                 s.execute(delete(Company).where(Company.user_id == u.id))
                 s.execute(delete(User).where(User.id == u.id))
             s.commit()
+
+
+async def test_empty_answer_with_non_default_current_is_empty_proposal():
+    current = SearchFilters(work_models=["remote"], include_unknown=False)
+    llm = FakeLLM([{}])
+    out = await parse_query(llm, "blá", current, ALLOWED)
+    assert out.notes == [EMPTY_NOTE]
+    assert out.filters.work_models == []
+    msgs = build_messages("blá", current, ALLOWED)
+    assert "não os repita" in msgs[0]["content"]
+
+
+async def test_parse_invalid_message_has_no_model_output():
+    bad = {"filters": {"departments": ["SEGREDO-DO-MODELO"]}}
+    with pytest.raises(ParseInvalid) as exc:
+        await parse_query(FakeLLM([bad, bad]), "x", SearchFilters(), ALLOWED)
+    assert "SEGREDO" not in str(exc.value)
+
+
+async def test_overlong_phrase_rejected_without_llm():
+    llm = FakeLLM([])
+    with pytest.raises(ValueError):
+        await parse_query(llm, "x" * 301, SearchFilters(), ALLOWED)
+    assert llm.calls == []
