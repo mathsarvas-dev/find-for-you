@@ -741,6 +741,94 @@ a.summary-card:hover .summary-card__label {
   }
 }
 
+/* Configurações: três seções com âncoras (#conta, #descoberta, #sistema) */
+
+.settings__toc ul {
+  list-style: none;
+  margin: calc(-1 * var(--space-2)) 0 var(--space-5);
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 var(--space-4);
+  font-size: var(--text-sm);
+}
+
+.settings__toc a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.settings__section + .settings__section {
+  margin-top: var(--space-5);
+}
+
+/* A âncora da descoberta é o h2 dentro do painel: desce a borda do painel junto. */
+.settings #descoberta {
+  scroll-margin-top: calc(var(--space-3) + 1px);
+}
+
+.settings__account {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.settings__who {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.settings__value {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings__name {
+  font-size: var(--text-xl);
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.settings__detail {
+  font-size: var(--text-md);
+  color: var(--muted);
+}
+
+.settings__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr));
+  gap: var(--space-3) var(--space-5);
+  margin: 0;
+}
+
+.settings__facts dt {
+  font-size: var(--text-sm);
+  font-weight: 500;
+  color: var(--muted);
+}
+
+.settings__facts dd {
+  margin: 2px 0 0;
+  font-size: var(--text-md);
+}
+
+.settings__note {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-field);
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.settings__actions .actions {
+  margin-left: auto;
+}
+
 
 /* Página */
 

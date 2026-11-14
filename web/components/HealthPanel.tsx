@@ -8,19 +8,21 @@ import { checkHealth, type HealthReport } from "@/lib/health";
  * <Suspense fallback={<HealthPanelLoading />}> (Configurações, seção Estado do sistema).
  */
 
-export function PanelHead({ target }: { target: string }) {
+const DEFAULT_TITLE = "Serviços";
+
+export function PanelHead({ target, title = DEFAULT_TITLE }: { target: string; title?: string }) {
   return (
     <div className="panel__head">
-      <h2 id="servicos">Serviços</h2>
+      <h2 id="servicos">{title}</h2>
       <span className="mono">{target}</span>
     </div>
   );
 }
 
-export function HealthPanelLoading() {
+export function HealthPanelLoading({ title }: { title?: string } = {}) {
   return (
     <section className="panel" aria-labelledby="servicos">
-      <PanelHead target="GET /health" />
+      <PanelHead target="GET /health" title={title} />
       <ul className="status-list">
         <StatusRow label="API" state="loading" />
         <StatusRow label="Banco de dados" state="loading" />
@@ -35,9 +37,11 @@ export function HealthPanelLoading() {
 type HealthPanelProps = {
   /** Onde "Verificar de novo" recarrega a página (a rota que monta o painel). */
   recheckHref?: string;
+  /** Título do painel (h2); "Serviços" por padrão. */
+  title?: string;
 };
 
-export async function HealthPanel({ recheckHref = "/settings#sistema" }: HealthPanelProps = {}) {
+export async function HealthPanel({ recheckHref = "/settings#sistema", title }: HealthPanelProps = {}) {
   await connection();
   const report = await checkHealth();
   const time = new Intl.DateTimeFormat("pt-BR", {
@@ -48,7 +52,7 @@ export async function HealthPanel({ recheckHref = "/settings#sistema" }: HealthP
 
   return (
     <section className="panel" aria-labelledby="servicos">
-      <PanelHead target={`${report.apiUrl}/health`} />
+      <PanelHead target={`${report.apiUrl}/health`} title={title} />
       <ul className="status-list">
         <StatusRow label="API" state={report.api} detail={report.apiDetail} />
         <StatusRow label="Banco de dados" state={report.db} detail={report.dbDetail} />
