@@ -157,6 +157,10 @@ code,
   --topbar-h: 52px;
 }
 
+html {
+  scroll-padding-top: calc(var(--topbar-h) + var(--space-2));
+}
+
 .skip-link {
   position: absolute;
   left: var(--space-2);
@@ -518,6 +522,16 @@ code,
 @media (max-width: 859.98px) {
   .sidebar {
     display: none;
+  }
+
+  .topbar__root {
+    display: inline-flex;
+    align-items: center;
+    min-height: 40px;
+  }
+
+  .topbar__crumbs {
+    align-items: center;
   }
 
   .shell__main {
@@ -1929,9 +1943,11 @@ select.input {
   margin: 0;
 }
 
-/* Telas médias: a tabela tem largura para 5 colunas só a partir de ~860 px */
+/* Telas médias: a tabela tem largura para 5 colunas só a partir de ~860 px de conteúdo */
 
-@media (max-width: 860px) {
+/* Pontos de quebra do CONTEÚDO: a lateral (232 px) só existe a partir de 860 px de janela,
+ * então "conteúdo até 860 px" = janela até 1091.98 px (abaixo de 860 o conteúdo é a janela). */
+@media (max-width: 1091.98px) {
   .jobs thead {
     position: absolute;
     width: 1px;
@@ -2027,7 +2043,7 @@ select.input {
   }
 }
 
-@media (min-width: 561px) and (max-width: 860px) {
+@media (min-width: 561px) and (max-width: 1091.98px) {
   .jobs__filters {
     grid-template-columns: 1fr 9rem;
   }
@@ -2547,9 +2563,9 @@ select.input {
   color: var(--muted);
 }
 
-/* Até 860 px: uma coluna; o painel vira uma folha fixa embaixo (não modal) */
+/* Conteúdo até 860 px: uma coluna; o painel vira uma folha fixa embaixo (não modal) */
 
-@media (max-width: 860px) {
+@media (max-width: 1091.98px) {
   .filters__fields {
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   }
@@ -2582,6 +2598,12 @@ select.input {
     border-radius: var(--radius-card) var(--radius-card) 0 0;
     border-color: var(--border-strong);
     border-bottom: 0;
+  }
+}
+
+@media (min-width: 860px) and (max-width: 1091.98px) {
+  .matches__panel {
+    left: var(--sidebar-w);
   }
 }
 
@@ -2871,7 +2893,7 @@ select.input {
   margin: 0;
 }
 
-@media (max-width: 860px) {
+@media (max-width: 1091.98px) {
   .discovery__body {
     grid-template-columns: 1fr;
   }

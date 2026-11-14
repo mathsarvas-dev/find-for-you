@@ -1,0 +1,74 @@
+"use client";
+
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
+import { getOverview, type Overview } from "@/lib/overview";
+
+/** "loading": nenhuma resposta ainda; "ok": a última busca respondeu; "down": a última busca falhou. */
+export type OverviewStatus = "loading" | "ok" | "down";
+
+export type OverviewState = {
+  /** Último overview recebido (mantido quando uma busca posterior falha); null até o primeiro. */
+  overview: Overview | null;
+  status: OverviewStatus;
+  /** Busca de novo (ex.: depois de confirmar o perfil ou cadastrar uma empresa). */
+  refresh: () => void;
+};
+
+const noop = () => {};
+
+export const OverviewContext = createContext<OverviewState>({
+  overview: null,
+  status: "loading",
+  refresh: noop,
+});
+
+/** Estado do overview da casca. Fora da casca: vazio, e refresh() não faz nada. */
+export function useOverview(): OverviewState {
+  return useContext(OverviewContext);
+}
+
+/**
+ * Carrega o overview para a casca, de novo a cada mudança de `key` (a rota) e em refresh().
+ * Só a busca mais recente pode atualizar o estado: a anterior é abortada e, se ainda
+ * assim responder, é ignorada (número de sequência). Nada é atualizado depois de desmontar.
+ * Falhas são silenciosas: viram status "down".
+ */
+export function useOverviewLoader(key: string): OverviewState {
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [status, setStatus] = useState<OverviewStatus>("loading");
+  const seq = useRef(0);
+  const controller = useRef<AbortController | null>(null);
+
+  const load = useCallback(() => {
+    controller.current?.abort();
+    const current = new AbortController();
+    controller.current = current;
+    const id = ++seq.current;
+    const fresh = () => id === seq.current && !current.signal.aborted;
+    getOverview(current.signal).then(
+      (data) => {
+        if (!fresh()) return;
+        setOverview(data);
+        setStatus("ok");
+      },
+      () => {
+        if (fresh()) setStatus("down");
+      },
+    );
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [key, load]);
+
+  // Ao desmontar: aborta e invalida qualquer resposta pendente.
+  useEffect(
+    () => () => {
+      seq.current += 1;
+      controller.current?.abort();
+    },
+    [],
+  );
+
+  return { overview, status, refresh: load };
+}

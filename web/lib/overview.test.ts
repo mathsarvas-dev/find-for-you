@@ -53,6 +53,24 @@ describe("getOverview", () => {
     expect(await getOverview()).toEqual(emptyOverview());
   });
 
+  it("nome/e-mail que não são texto viram null (a casca nunca quebra)", async () => {
+    const bad = { profile: { confirmed: true, version: 1, vectorized: true, name: 42, email: { x: 1 } } };
+    vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(200, bad)));
+    const o = await getOverview();
+    expect(o.profile.name).toBeNull();
+    expect(o.profile.email).toBeNull();
+    expect(o.profile.confirmed).toBe(true);
+  });
+
+  it("repassa o AbortSignal ao fetch", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse(200, sample));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await getOverview(controller.signal);
+    const [, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
+    expect(init.signal).toBe(controller.signal);
+  });
+
   it("erro com `detail` vira ApiError com a mensagem do servidor", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(500, { detail: "Banco indisponível." })));
     const err = await getOverview().catch((e) => e);

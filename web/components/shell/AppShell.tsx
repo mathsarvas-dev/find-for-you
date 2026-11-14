@@ -1,11 +1,11 @@
 "use client";
 
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { getOverview, type Overview } from "@/lib/overview";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CloseIcon } from "./icons";
+import { OverviewContext, useOverviewLoader } from "./OverviewContext";
 import { PageTitleContext } from "./PageHeader";
-import { Sidebar, type ApiStatus } from "./Sidebar";
+import { Sidebar } from "./Sidebar";
 import { Topbar, titleForPath } from "./Topbar";
 
 const DRAWER_ID = "nav-drawer";
@@ -18,37 +18,22 @@ const FOCUSABLE = "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname() ?? "/";
-  const [overview, setOverview] = useState<Overview | null>(null);
-  const [apiStatus, setApiStatus] = useState<ApiStatus>("loading");
+  // Refaz a cada navegação: as pendências acompanham o que a pessoa acabou de fazer.
+  const { overview, status: apiStatus, refresh } = useOverviewLoader(pathname);
+  const overviewValue = useMemo(() => ({ overview, status: apiStatus, refresh }), [overview, apiStatus, refresh]);
   const [pageTitle, setPageTitle] = useState<string | null>(null);
-  const [drawerOpen, setDrawerOpen] = useState(false);
+  // A gaveta fica aberta só na rota em que foi aberta: qualquer navegação
+  // (link, voltar/avançar do navegador) a fecha sem precisar de efeito.
+  const [drawerPath, setDrawerPath] = useState<string | null>(null);
+  const drawerOpen = drawerPath === pathname;
   const menuButtonRef = useRef<HTMLButtonElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
 
-  // Refaz a cada navegação: as pendências acompanham o que a pessoa acabou de fazer.
-  useEffect(() => {
-    let alive = true;
-    getOverview().then(
-      (data) => {
-        if (!alive) return;
-        setOverview(data);
-        setApiStatus("ok");
-      },
-      () => {
-        if (alive) setApiStatus("down");
-      },
-    );
-    return () => {
-      alive = false;
-    };
-  }, [pathname]);
-
-  const closeDrawer = useCallback(() => {
-    setDrawerOpen(false);
-    menuButtonRef.current?.focus();
-  }, []);
+  const closeDrawer = () => setDrawerPath(null);
 
   // Gaveta aberta: foco no primeiro controle, sem rolagem do fundo e fecha ao virar desktop.
+  // Ao fechar (por qualquer motivo) o foco não fica perdido no <body>.
   useEffect(() => {
     if (!drawerOpen) return;
     panelRef.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
@@ -57,12 +42,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     body.style.overflow = "hidden";
     const wide = typeof window.matchMedia === "function" ? window.matchMedia("(min-width: 860px)") : null;
     const onWide = (event: MediaQueryListEvent) => {
-      if (event.matches) setDrawerOpen(false);
+      if (event.matches) setDrawerPath(null);
     };
     wide?.addEventListener("change", onWide);
+    const menuButton = menuButtonRef.current;
+    const content = contentRef.current;
     return () => {
       body.style.overflow = previous;
       wide?.removeEventListener("change", onWide);
+      const active = document.activeElement;
+      if (active && active !== body && active.isConnected) return;
+      if (menuButton?.isConnected && getComputedStyle(menuButton).display !== "none") menuButton.focus();
+      else content?.focus();
     };
   }, [drawerOpen]);
 
@@ -88,57 +79,59 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <PageTitleContext.Provider value={setPageTitle}>
-      <div className="shell">
-        <a className="skip-link" href="#conteudo">
-          Pular para o conteúdo
-        </a>
-        <aside className="sidebar">
-          <Sidebar pathname={pathname} overview={overview} apiStatus={apiStatus} />
-        </aside>
-        {drawerOpen && (
-          <div className="drawer">
-            <div className="drawer__overlay" aria-hidden="true" onClick={closeDrawer} />
-            <div
-              ref={panelRef}
-              id={DRAWER_ID}
-              className="drawer__panel"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Navegação"
-              onKeyDown={onDrawerKeyDown}
-            >
-              <button
-                type="button"
-                className="drawer__close"
-                aria-label="Fechar navegação"
-                onClick={closeDrawer}
+    <OverviewContext.Provider value={overviewValue}>
+      <PageTitleContext.Provider value={setPageTitle}>
+        <div className="shell">
+          <a className="skip-link" href="#conteudo">
+            Pular para o conteúdo
+          </a>
+          <aside className="sidebar">
+            <Sidebar pathname={pathname} overview={overview} apiStatus={apiStatus} />
+          </aside>
+          {drawerOpen && (
+            <div className="drawer">
+              <div className="drawer__overlay" aria-hidden="true" onClick={closeDrawer} />
+              <div
+                ref={panelRef}
+                id={DRAWER_ID}
+                className="drawer__panel"
+                role="dialog"
+                aria-modal="true"
+                aria-label="Navegação"
+                onKeyDown={onDrawerKeyDown}
               >
-                <CloseIcon />
-              </button>
-              <Sidebar
-                pathname={pathname}
-                overview={overview}
-                apiStatus={apiStatus}
-                onNavigate={() => setDrawerOpen(false)}
-              />
+                <button
+                  type="button"
+                  className="drawer__close"
+                  aria-label="Fechar navegação"
+                  onClick={closeDrawer}
+                >
+                  <CloseIcon />
+                </button>
+                <Sidebar
+                  pathname={pathname}
+                  overview={overview}
+                  apiStatus={apiStatus}
+                  onNavigate={closeDrawer}
+                />
+              </div>
+            </div>
+          )}
+          <div className="shell__main">
+            <Topbar
+              title={pageTitle ?? titleForPath(pathname)}
+              overview={overview}
+              drawerOpen={drawerOpen}
+              drawerId={DRAWER_ID}
+              onOpenDrawer={() => setDrawerPath(pathname)}
+              menuButtonRef={menuButtonRef}
+            />
+            <div className="shell__content" id="conteudo" tabIndex={-1} ref={contentRef}>
+              {children}
             </div>
           </div>
-        )}
-        <div className="shell__main">
-          <Topbar
-            title={pageTitle ?? titleForPath(pathname)}
-            overview={overview}
-            drawerOpen={drawerOpen}
-            drawerId={DRAWER_ID}
-            onOpenDrawer={() => setDrawerOpen(true)}
-            menuButtonRef={menuButtonRef}
-          />
-          <div className="shell__content" id="conteudo" tabIndex={-1}>
-            {children}
-          </div>
         </div>
-      </div>
-    </PageTitleContext.Provider>
+      </PageTitleContext.Provider>
+    </OverviewContext.Provider>
   );
 }

@@ -5,9 +5,11 @@ import { useEffect, useId, useRef, useState } from "react";
 
 const LETTER = /[\p{L}\p{N}]/u;
 
-/** Iniciais do primeiro e do último nome (só letras/dígitos); "V" (Você) sem nome. */
+const asText = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+/** Iniciais do primeiro e do último nome (só letras/dígitos); "V" (Você) sem nome. Nunca lança. */
 export function initials(name: string | null): string {
-  const firsts = (name ?? "")
+  const firsts = asText(name)
     .trim()
     .split(/\s+/)
     .map((word) => word.match(LETTER)?.[0])
@@ -37,8 +39,12 @@ export function UserMenu({ name, email, confirmed }: Props) {
   const id = useId();
   const menuId = `${id}-menu`;
 
-  const displayName = confirmed && name?.trim() ? name.trim() : "Você";
-  const detail = confirmed ? email?.trim() || "Sem e-mail no perfil" : "Perfil não confirmado";
+  // Só texto chega à tela: qualquer outro tipo (payload malformado) cai no padrão.
+  const cleanName = asText(name);
+  const displayName = confirmed && cleanName ? cleanName : "Você";
+  const detail = confirmed ? asText(email) || "Sem e-mail no perfil" : "Perfil não confirmado";
+  const nameId = `${id}-name`;
+  const detailId = `${id}-detail`;
 
   function items(): HTMLElement[] {
     return Array.from(menuRef.current?.querySelectorAll<HTMLElement>("[role='menuitem']") ?? []);
@@ -98,6 +104,11 @@ export function UserMenu({ name, email, confirmed }: Props) {
   }
 
   function onButtonKeyDown(event: React.KeyboardEvent) {
+    if (event.key === "Escape" && open) {
+      event.preventDefault();
+      close(true);
+      return;
+    }
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       setOpen(true);
@@ -123,20 +134,26 @@ export function UserMenu({ name, email, confirmed }: Props) {
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onButtonKeyDown}
       >
-        <span aria-hidden="true">{initials(confirmed ? name : null)}</span>
+        <span aria-hidden="true">{initials(confirmed ? cleanName : null)}</span>
       </button>
       {open && (
         <div className="user-menu__panel">
+          {/* O menu é nomeado pelo nome e descrito pelo e-mail: o leitor de tela anuncia os dois. */}
           <div className="user-menu__who">
-            <p className="user-menu__name">{displayName}</p>
-            <p className="user-menu__email">{detail}</p>
+            <p className="user-menu__name" id={nameId}>
+              {displayName}
+            </p>
+            <p className="user-menu__email" id={detailId}>
+              {detail}
+            </p>
           </div>
           <ul
             ref={menuRef}
             id={menuId}
             className="user-menu__list"
             role="menu"
-            aria-label="Perfil"
+            aria-labelledby={nameId}
+            aria-describedby={detailId}
             onKeyDown={onMenuKeyDown}
           >
             {ITEMS.map((item) => (

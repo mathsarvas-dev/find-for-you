@@ -23,6 +23,11 @@ describe("initials", () => {
   ])("%j → %s", (name, expected) => {
     expect(initials(name)).toBe(expected);
   });
+
+  it("nunca quebra com valor que não é texto", () => {
+    expect(initials(42 as unknown as string)).toBe("V");
+    expect(initials({} as unknown as string)).toBe("V");
+  });
 });
 
 describe("UserMenu", () => {
@@ -33,6 +38,29 @@ describe("UserMenu", () => {
     open();
     expect(screen.getByText("Você")).toBeInTheDocument();
     expect(screen.getByText("Perfil não confirmado")).toBeInTheDocument();
+  });
+
+  it("nome e e-mail fazem parte da semântica do menu", () => {
+    render(<UserMenu name="Ana Souza" email="ana@example.com" confirmed />);
+    const menu = open();
+    expect(menu).toHaveAccessibleName("Ana Souza");
+    expect(menu).toHaveAccessibleDescription("ana@example.com");
+  });
+
+  it("valores que não são texto não derrubam o menu", () => {
+    render(<UserMenu name={42 as unknown as string} email={[] as unknown as string} confirmed />);
+    expect(button()).toHaveTextContent("V");
+    open();
+    expect(screen.getByText("Você")).toBeInTheDocument();
+  });
+
+  it("Escape com o foco de volta no botão também fecha", () => {
+    render(<UserMenu name={null} email={null} confirmed={false} />);
+    open();
+    button().focus();
+    fireEvent.keyDown(button(), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(button()).toHaveFocus();
   });
 
   it("perfil confirmado mostra nome e e-mail e as iniciais", () => {

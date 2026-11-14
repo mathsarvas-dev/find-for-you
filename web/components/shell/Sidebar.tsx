@@ -43,7 +43,8 @@ export function pendingFor(href: string, overview: Overview): string | null {
     case "/onboarding":
       return overview.profile.confirmed ? null : "perfil não confirmado";
     case "/sources":
-      return overview.companies.total > 0 ? null : "nenhuma empresa cadastrada";
+      // Igual à trilha: o passo "Fontes de vagas" exige ao menos uma empresa ativa.
+      return overview.companies.active > 0 ? null : "nenhuma empresa ativa";
     case "/jobs":
       return overview.jobs.open > 0 && overview.matches.scored === 0 ? "nenhuma vaga avaliada" : null;
     default:

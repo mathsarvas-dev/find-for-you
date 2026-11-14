@@ -76,7 +76,7 @@ describe("Sidebar", () => {
     const perfil = within(nav()).getByRole("link", { name: /Perfil/ });
     expect(perfil).toHaveAccessibleName("Perfil (perfil não confirmado)");
     expect(within(nav()).getByRole("link", { name: /Fontes/ })).toHaveAccessibleName(
-      "Fontes (nenhuma empresa cadastrada)",
+      "Fontes (nenhuma empresa ativa)",
     );
     expect(within(nav()).getByRole("link", { name: /Vagas/ })).toHaveAccessibleName(
       "Vagas (nenhuma vaga avaliada)",
@@ -88,11 +88,19 @@ describe("Sidebar", () => {
     const o = withOverview((x) => {
       x.profile.confirmed = true;
       x.companies.total = 3;
+      x.companies.active = 1;
       x.jobs.open = 5;
       x.matches.scored = 2;
     });
     const { container } = render(<Sidebar pathname="/" overview={o} apiStatus="ok" />);
     expect(container.querySelector(".nav-item__dot")).toBeNull();
+  });
+
+  it("Fontes só com empresas pausadas fica pendente (igual à trilha)", () => {
+    const o = withOverview((x) => {
+      x.companies.total = 2;
+    });
+    expect(pendingFor("/sources", o)).toBe("nenhuma empresa ativa");
   });
 
   it("Vagas sem vagas abertas não fica pendente", () => {

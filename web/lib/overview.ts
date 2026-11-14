@@ -48,12 +48,20 @@ function section<T extends object>(fallback: T, value: unknown): T {
     : fallback;
 }
 
+const text = (value: unknown): string | null => (typeof value === "string" ? value : null);
+
+/** name/email vão direto para a casca (iniciais, menu): o que não é texto vira null. */
+function profileSection(fallback: ProfileOverview, value: unknown): ProfileOverview {
+  const merged = section(fallback, value);
+  return { ...merged, confirmed: merged.confirmed === true, name: text(merged.name), email: text(merged.email) };
+}
+
 /** Cada seção é mesclada com o padrão seguro: uma seção ausente não derruba a trilha. */
 export function normalizeOverview(body: unknown): Overview {
   const base = emptyOverview();
   const raw = (body !== null && typeof body === "object" ? body : {}) as Record<string, unknown>;
   return {
-    profile: section(base.profile, raw.profile),
+    profile: profileSection(base.profile, raw.profile),
     interview: section(base.interview, raw.interview),
     companies: section(base.companies, raw.companies),
     jobs: section(base.jobs, raw.jobs),
@@ -61,6 +69,7 @@ export function normalizeOverview(body: unknown): Overview {
   };
 }
 
-export async function getOverview(): Promise<Overview> {
-  return normalizeOverview((await request<unknown>("/overview")).body);
+/** `signal` permite abortar a busca (a casca cancela a anterior ao refazer). */
+export async function getOverview(signal?: AbortSignal): Promise<Overview> {
+  return normalizeOverview((await request<unknown>("/overview", signal ? { signal } : undefined)).body);
 }
