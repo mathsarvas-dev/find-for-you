@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from rumo_core.matching.filters import SearchFilters
 from rumo_core.matching.ranking import (
     rank_jobs,
+    top_candidate_ids,
     usable_profile,
     usable_query_embedding,
 )
@@ -64,7 +65,13 @@ def get_seed(session: Session, user_id: int) -> int:
 
 
 def new_seed(session: Session, user_id: int) -> int:
+    """Replace the seed (always a different value); labels are untouched."""
+    old = session.scalar(
+        select(UserPreference.quality_seed).where(UserPreference.user_id == user_id)
+    )
     new = secrets.randbelow(_SEED_MAX)
+    if new == old:
+        new = (new + 1) % _SEED_MAX
     stmt = pg_insert(UserPreference).values(user_id=user_id, quality_seed=new)
     stmt = stmt.on_conflict_do_update(
         index_elements=[UserPreference.user_id], set_={"quality_seed": new}
@@ -76,16 +83,25 @@ def new_seed(session: Session, user_id: int) -> int:
 
 def build_sample(session: Session, user_id: int, *, model_version: str,
                  n: int = SAMPLE_SIZE) -> list[int]:
+    """Deterministic (per seed) sample of open, vectorized jobs: n//2 from the
+    TOP_POOL best in the current order, n//2 from the rest (a half with too few
+    jobs is not topped up from the other). An odd n yields n//2 per half."""
+    if n < 0:
+        raise ValueError("n deve ser >= 0.")
     version, used = usable_profile(session, user_id, model_version)
     if version is None or used == 0:
         return []
     seed = get_seed(session, user_id)
     qe = usable_query_embedding(session, user_id, model_version)
+    # Full rows only for the top pool; the rest is an id-only query.
     page = rank_jobs(session, user_id, SearchFilters(), model_version=model_version,
-                     status="open", limit=1_000_000, query_embedding=qe)
-    ids = [it.job.id for it in page.items]
-    top = sorted(ids[:TOP_POOL])
-    rest = sorted(ids[TOP_POOL:])
+                     status="open", limit=TOP_POOL, query_embedding=qe)
+    top = sorted(it.job.id for it in page.items)
+    top_set = set(top)
+    every = top_candidate_ids(session, user_id, SearchFilters(),
+                              model_version=model_version, n=2**31 - 1,
+                              status="open", query_embedding=qe)
+    rest = sorted(jid for jid, _ in every if jid not in top_set)
     rng = random.Random(seed)
     half = n // 2
     picked = rng.sample(top, min(half, len(top)))
@@ -121,6 +137,8 @@ def _plural(n: int, one: str, many: str) -> str:
 
 
 def evaluate(session: Session, user_id: int, *, model_version: str) -> QualityReport:
+    # Labeled jobs that are not ranked (no embedding, or status 'duplicate')
+    # count as `unranked`, not toward the minimums.
     labels = {
         jid: lab for jid, lab in session.execute(
             select(JobLabel.job_id, JobLabel.label).where(JobLabel.user_id == user_id)

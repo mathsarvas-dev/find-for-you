@@ -143,9 +143,10 @@ def test_seed_upsert_keeps_other_columns(env):
 def test_sample_small_dataset(env):
     s, new_user, _, _ = env
     uid, cid = new_user()
-    ranked_jobs(env, uid, cid, 30)
+    ids = ranked_jobs(env, uid, cid, 30)
     a = build_sample(s, uid, model_version=MV)
     assert len(a) == 20
+    assert set(a) <= set(ids)
 
 
 @db
@@ -203,15 +204,16 @@ def test_report_known_case(env):
 def test_report_ties_by_job_id(env):
     s, uid, ids = _known_case(env)
     _, _, add_job, label = env
-    a = add_job(uid, s.scalar(select(Job.company_id).where(Job.id == ids[0])), t=0.999)
-    b = add_job(uid, s.scalar(select(Job.company_id).where(Job.id == ids[0])), t=0.999)
-    label(uid, b, "good")
-    label(uid, a, "bad")
+    cid = s.scalar(select(Job.company_id).where(Job.id == ids[0]))
+    # tied pair between v9 and v10 (t=0.950 / 0.945): lower id must rank first
+    a = add_job(uid, cid, t=0.9475)
+    b = add_job(uid, cid, t=0.9475)
+    label(uid, a, "good")
+    label(uid, b, "bad")
     r = evaluate(s, uid, model_version=MV)
-    pos = {m.job_id: m.position for m in r.misranked}
-    # a (lower id) comes first: bad in top 10 at position 1; b second, good
-    assert pos[a] == 1
-    assert b not in pos
+    # funnel top 10: v1..v9 (3 bad, 6 good) + a (good) = 0.7; b first would be 0.6
+    assert r.precision_vec_at_10 == 0.7
+    assert r.precision_at_10 == 0.7
 
 
 @db
@@ -252,3 +254,61 @@ def test_report_scoped_by_user(env):
     r = evaluate(s, uid, model_version=MV)
     assert r.labeled == 0
     assert r.status == "insuficiente"
+
+
+@db
+def test_sample_loads_only_top_pool_rows(env, monkeypatch):
+    from rumo_core.matching import quality
+    s, new_user, _, _ = env
+    uid, cid = new_user()
+    ranked_jobs(env, uid, cid, 80)
+    limits = []
+    real = quality.rank_jobs
+
+    def spy(*a, **kw):
+        limits.append(kw.get("limit"))
+        return real(*a, **kw)
+
+    monkeypatch.setattr(quality, "rank_jobs", spy)
+    assert len(build_sample(s, uid, model_version=MV)) == 40
+    assert limits == [50]
+
+
+@db
+def test_build_sample_validates_n(env):
+    s, new_user, _, _ = env
+    uid, cid = new_user()
+    ranked_jobs(env, uid, cid, 10)
+    with pytest.raises(ValueError):
+        build_sample(s, uid, model_version=MV, n=-1)
+    assert len(build_sample(s, uid, model_version=MV, n=5)) == 2
+
+
+@db
+def test_stale_or_old_version_match_ignored_in_current_order(env):
+    s, uid, ids = _known_case(env)
+    s.add(Match(user_id=uid, job_id=ids[19], profile_version=1, vec_score=0.0,
+                ai_score=99, content_hash="OLD", state="ok"))
+    s.add(Match(user_id=uid, job_id=ids[20], profile_version=0, vec_score=0.0,
+                ai_score=98, content_hash="h", state="ok"))
+    s.commit()
+    r = evaluate(s, uid, model_version=MV)
+    assert r.precision_at_10 == r.precision_vec_at_10 == 0.7
+
+
+@db
+def test_singular_missing_strings(env):
+    s, new_user, _, label = env
+    uid, cid = new_user()
+    ids = ranked_jobs(env, uid, cid, 29)
+    for i, j in enumerate(ids):
+        label(uid, j, "good" if i < 9 else "bad")
+    r = evaluate(s, uid, model_version=MV)
+    assert "falta 1 rótulo" in r.missing
+    assert "falta 1 vaga boa" in r.missing
+    uid2, cid2 = new_user()
+    ids2 = ranked_jobs(env, uid2, cid2, 29)
+    for i, j in enumerate(ids2):
+        label(uid2, j, "good" if i < 20 else "bad")
+    r2 = evaluate(s, uid2, model_version=MV)
+    assert "falta 1 vaga ruim" in r2.missing
