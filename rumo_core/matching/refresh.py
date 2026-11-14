@@ -48,14 +48,16 @@ def _reset(m: Match, vec_score: float, content_hash: str) -> None:
 
 
 def mark_pending(session: Session, user_id: int, filters: SearchFilters, *,
-                 model_version: str, n: int) -> RefreshResult:
+                 model_version: str, n: int,
+                 query_embedding: list[float] | None = None) -> RefreshResult:
     """Create/reset pendente rows for the top `n` candidates; commits."""
     profile = get_current_profile(session, user_id)
     if profile is None:
         return RefreshResult(0, 0, 0, 0, None)
     version = profile.version
     candidates = top_candidate_ids(session, user_id, filters,
-                                   model_version=model_version, n=n)
+                                   model_version=model_version, n=n,
+                                   query_embedding=query_embedding)
     if not candidates:
         return RefreshResult(0, 0, 0, 0, version)
     ids = [job_id for job_id, _ in candidates]
