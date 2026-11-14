@@ -89,7 +89,7 @@ def test_title_exclude_limits():
 
 def test_fold_term_escapes_wildcards():
     assert fold_term("Plantão") == "plantao"
-    assert fold_term("100%_x\\") == "100\%\_x\\\\"
+    assert fold_term("100%_x\\") == r"100\%\_x\\"
 
 
 @pytest.fixture
@@ -283,3 +283,13 @@ def test_exclusions_combined_with_inclusions(env):
         countries=["BR", "PT"], exclude_seniorities=["intern"], include_unknown=False
     )
     assert run(f) == {br, pt}
+
+
+@db
+def test_title_exclude_folds_like_postgres_unaccent(env):
+    add, run = env
+    add(title="Auxiliar Außendienst")
+    keep = add(title="Data Engineer")
+    assert run(SearchFilters(title_exclude=["Außendienst"])) == {keep}
+    assert run(SearchFilters(title_exclude=["aussendienst"])) == {keep}
+    assert run(SearchFilters(title_exclude=["AUSSENDIENST"])) == {keep}

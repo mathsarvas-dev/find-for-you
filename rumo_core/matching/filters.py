@@ -193,7 +193,10 @@ def apply_filters(stmt: Select, filters: SearchFilters) -> Select:
     for term in filters.title_exclude:
         stmt = stmt.where(
             ~func.lower(func.unaccent(Job.title)).ilike(
-                f"%{fold_term(term)}%", escape="\\"
+                # unaccent/lower again on the DB side so the term folds exactly
+                # like the title (e.g. ß -> ss); unaccent leaves \ % _ intact.
+                func.concat("%", func.lower(func.unaccent(fold_term(term))), "%"),
+                escape="\\",
             )
         )
     if filters.salary_min is not None:
