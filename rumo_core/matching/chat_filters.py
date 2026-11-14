@@ -43,12 +43,24 @@ def _fold(text: str) -> str:
     ).lower()
 
 
+INVALID_CHARS_MESSAGE = "O texto contém caracteres inválidos."
+
+
+def _check_chars(text: str) -> None:
+    """Reject control (except ordinary whitespace), format/bidi and surrogate chars."""
+    for ch in text:
+        cat = unicodedata.category(ch)
+        if cat in ("Cf", "Cs") or (cat == "Cc" and not ch.isspace()):
+            raise ValueError(INVALID_CHARS_MESSAGE)
+
+
 def check_query_text(text: str | None) -> str | None:
     if text is None:
         return None
     text = text.strip()
-    if not text:
+    if not text:  # whitespace-only clears the query
         return None
+    _check_chars(text)
     if len(text) > MAX_TEXT:
         raise ValueError(f"A consulta de gosto é longa demais (máx. {MAX_TEXT} caracteres).")
     if _NEGATION.search(_fold(text)):
@@ -192,6 +204,7 @@ async def parse_query(
         return ParsedQuery(notes=[EMPTY_NOTE])
     if len(text) > MAX_TEXT:
         raise ValueError(f"A frase é longa demais (máx. {MAX_TEXT} caracteres).")
+    _check_chars(text)
     messages = build_messages(text, current, allowed)
     last: str = "resposta inválida"
     for _ in range(MAX_ATTEMPTS):

@@ -117,7 +117,9 @@ class SearchProfileIn(SearchFilters):
     """Filters plus the free-text taste query. `query_text` is only touched
     when the key is present in the body (`model_fields_set`)."""
 
-    query_text: str | None = Field(default=None, max_length=300)
+    # generous pre-strip cap; the real 300 limit applies after stripping.
+    # Whitespace-only text becomes None, which clears the query (text + vector).
+    query_text: str | None = Field(default=None, max_length=1000)
 
     @field_validator("query_text")
     @classmethod

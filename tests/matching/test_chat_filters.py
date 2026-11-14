@@ -186,3 +186,21 @@ async def test_overlong_phrase_rejected_without_llm():
     with pytest.raises(ValueError):
         await parse_query(llm, "x" * 301, SearchFilters(), ALLOWED)
     assert llm.calls == []
+
+
+@pytest.mark.parametrize("bad", ["da\x00dos", "da​dos", "da\ud800dos", "dados\x07"])
+def test_check_query_text_rejects_control_format_surrogate(bad):
+    with pytest.raises(ValueError):
+        check_query_text(bad)
+
+
+def test_check_query_text_accepts_accents_emoji_whitespace():
+    assert check_query_text("  engenharia de dados ção 🚀\nremoto ") == "engenharia de dados ção 🚀\nremoto"
+
+
+@pytest.mark.parametrize("bad", ["da\x00dos", "da​dos", "da\ud800dos"])
+async def test_parse_query_rejects_bad_chars_before_llm(bad):
+    llm = FakeLLM([])
+    with pytest.raises(ValueError):
+        await parse_query(llm, bad, SearchFilters(), ALLOWED)
+    assert llm.calls == []

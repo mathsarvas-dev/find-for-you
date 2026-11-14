@@ -612,6 +612,7 @@ def test_matches_use_query_embedding(env, as_user, monkeypatch):
     body = c.get("/matches").json()
     assert [i["job"]["id"] for i in body["items"]] == [a, b]  # no vector yet
     assert body["query_used"] is False
+    assert c.get(f"/matches/{b}").json()["vec_score"] == pytest.approx(0.5, abs=1e-6)
     with SessionLocal() as s:
         s.execute(update(SearchProfile).where(SearchProfile.user_id == uid)
                   .values(query_embedding=e(1), query_model_version=MODEL_VERSION))
@@ -619,8 +620,72 @@ def test_matches_use_query_embedding(env, as_user, monkeypatch):
     body = c.get("/matches").json()
     assert [i["job"]["id"] for i in body["items"]] == [b, a]
     assert body["query_used"] is True
-    assert c.get(f"/matches/{b}").json()["vec_score"] is not None
+    # vec_score is rescaled cosine (cos+1)/2: b=(1*.5+3*1)/4, a=(1*1+3*.5)/4
+    assert c.get(f"/matches/{b}").json()["vec_score"] == pytest.approx(0.875, abs=1e-6)
+    assert c.get(f"/matches/{a}").json()["vec_score"] == pytest.approx(0.625, abs=1e-6)
+
+
+@pytest.mark.db
+def test_refresh_uses_query_embedding(env, as_user, monkeypatch):
+    new_user, add_job, add_profile = env
+    uid, cid = new_user()
+    add_profile(uid, emb=e(0))
+    add_job(uid, cid, e(0))
+    b = add_job(uid, cid, e(1))
+    _weight_query(monkeypatch)
+    c = as_user(uid)
+    c.put("/search-profile", json={"query_text": "dados"})
+    with SessionLocal() as s:
+        s.execute(update(SearchProfile).where(SearchProfile.user_id == uid)
+                  .values(query_embedding=e(1), query_model_version=MODEL_VERSION))
+        s.commit()
+    monkeypatch.setattr(api_matching, "get_settings",
+                        lambda: type("S", (), {"match_top_n": 1})())
     assert c.post("/matches/refresh").status_code == 200
+    with SessionLocal() as s:
+        ids = s.scalars(select(Match.job_id).where(Match.user_id == uid)).all()
+    assert ids == [b]
+
+
+@pytest.mark.db
+def test_whitespace_only_query_clears_text_and_vector(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    c.put("/search-profile", json={"query_text": "dados"})
+    with SessionLocal() as s:
+        s.execute(update(SearchProfile).where(SearchProfile.user_id == uid)
+                  .values(query_embedding=e(1), query_model_version=MODEL_VERSION))
+        s.commit()
+    r = c.put("/search-profile", json={"query_text": "   "})
+    assert r.status_code == 200 and r.json()["query_text"] is None
+    row = _sp_row(uid)
+    assert row.query_text is None and row.query_embedding is None
+    assert row.query_model_version is None
+
+
+@pytest.mark.db
+def test_put_query_with_bad_chars_422_not_logged(env, as_user, caplog):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    for bad in ("segredo\\u0000xyz", "segredo\\ud800xyz"):
+        r = c.put("/search-profile", content=('{"query_text": "%s"}' % bad).encode(),
+                  headers={"content-type": "application/json"})
+        assert r.status_code == 422, r.text
+    assert "segredo" not in caplog.text
+    with SessionLocal() as s:
+        assert s.scalars(select(SearchProfile).where(SearchProfile.user_id == uid)).all() == []
+
+
+@pytest.mark.db
+def test_put_query_pre_strip_cap(env, as_user):
+    new_user, _, _ = env
+    uid, _ = new_user()
+    c = as_user(uid)
+    r = c.put("/search-profile", json={"query_text": "  " + "a" * 290 + "  "})
+    assert r.status_code == 200 and len(r.json()["query_text"]) == 290
+    assert c.put("/search-profile", json={"query_text": "a" * 301}).status_code == 422
 
 
 @pytest.mark.db
