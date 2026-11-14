@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { isValidElement, Suspense, type ReactElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { checkHealth, type HealthReport } from "@/lib/health";
 import { HealthPanel, HealthPanelLoading } from "@/components/HealthPanel";
 import { SystemSection } from "./SystemSection";
 
 vi.mock("next/server", () => ({ connection: vi.fn(async () => {}) }));
+const { refresh } = vi.hoisted(() => ({ refresh: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh }) }));
 
 vi.mock("@/lib/health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/health")>()),
@@ -62,7 +64,6 @@ describe("SystemSection", () => {
     expect(suspense.type).toBe(Suspense);
     expect((suspense.props.fallback as El).type).toBe(HealthPanelLoading);
     expect(panel.type).toBe(HealthPanel);
-    expect(panel.props.recheckHref).toBe("/settings#sistema");
   });
 
   it("esqueleto: título da seção e API/banco em verificação", () => {
@@ -72,17 +73,17 @@ describe("SystemSection", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(2);
   });
 
-  it("API ok: estados, sem aviso, Verificar de novo volta para #sistema", async () => {
+  it("API ok: estados, sem aviso; Verificar de novo refaz a checagem com router.refresh()", async () => {
     vi.mocked(checkHealth).mockResolvedValue(healthy);
     await renderResolved();
     expect(checkHealth).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("heading", { level: 2, name: "Estado do sistema" })).toBeInTheDocument();
     expect(screen.getByText("SELECT 1 ok")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("link", { name: "Verificar de novo" })).toHaveAttribute(
-      "href",
-      "/settings#sistema",
-    );
+    // Não é um link só de âncora (em /settings isso não recarregaria nada).
+    expect(screen.queryByRole("link", { name: "Verificar de novo" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Verificar de novo" }));
+    expect(refresh).toHaveBeenCalledTimes(1);
   });
 
   it("API fora: aviso específico e Verificar de novo", async () => {
@@ -90,6 +91,6 @@ describe("SystemSection", () => {
     await renderResolved();
     expect(screen.getByRole("alert")).toHaveTextContent("A API não respondeu.");
     expect(screen.getByText("sem conexão")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Verificar de novo" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Verificar de novo" })).toBeEnabled();
   });
 });

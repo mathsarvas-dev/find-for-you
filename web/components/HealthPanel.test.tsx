@@ -4,6 +4,7 @@ import { checkHealth, type HealthReport } from "@/lib/health";
 import { HealthPanel, HealthPanelLoading, PanelHead, ProblemNotice } from "./HealthPanel";
 
 vi.mock("next/server", () => ({ connection: vi.fn(async () => {}) }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 vi.mock("@/lib/health", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/health")>()),
@@ -48,16 +49,9 @@ describe("HealthPanel", () => {
     expect(within(rows[1]).getByText("SELECT 1 ok")).toBeInTheDocument();
     expect(screen.getByText("09:05:07")).toBeInTheDocument();
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(screen.getByRole("link", { name: "Verificar de novo" })).toHaveAttribute(
-      "href",
-      "/settings#sistema",
-    );
-  });
-
-  it("Verificar de novo recarrega a rota informada", async () => {
-    vi.mocked(checkHealth).mockResolvedValue(healthy);
-    render(await HealthPanel({ recheckHref: "/settings" }));
-    expect(screen.getByRole("link", { name: "Verificar de novo" })).toHaveAttribute("href", "/settings");
+    // Botão de cliente que refaz a checagem com router.refresh(), não um link.
+    expect(screen.getByRole("button", { name: "Verificar de novo" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Verificar de novo" })).toBeNull();
   });
 
   it.each([

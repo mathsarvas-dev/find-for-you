@@ -56,14 +56,18 @@ describe("AccountSection", () => {
 
   it("entrevista concluída: sem Continuar entrevista", () => {
     renderWith({ overview: withProfile({}, "done") });
-    expect(screen.queryByRole("link", { name: "Continuar entrevista" })).toBeNull();
+    expect(screen.queryByRole("link", { name: /entrevista/ })).toBeNull();
     expect(screen.getByText("Concluída")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Editar perfil" })).toBeInTheDocument();
   });
 
-  it("entrevista não iniciada com perfil: oferece Continuar entrevista", () => {
+  it("entrevista não iniciada com perfil: oferece Começar entrevista", () => {
     renderWith({ overview: withProfile({}, "none") });
-    expect(screen.getByRole("link", { name: "Continuar entrevista" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Começar entrevista" })).toHaveAttribute(
+      "href",
+      "/onboarding/interview",
+    );
+    expect(screen.queryByRole("link", { name: "Continuar entrevista" })).toBeNull();
     expect(screen.getByText("Não iniciada")).toBeInTheDocument();
   });
 
@@ -87,7 +91,7 @@ describe("AccountSection", () => {
     expect(screen.getByText("Você")).toBeInTheDocument();
     expect(screen.getByText("Perfil não confirmado")).toBeInTheDocument();
     expect(screen.getByText("Versão 1 · não confirmado")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Continuar entrevista" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Começar entrevista" })).toBeInTheDocument();
   });
 
   it("dados hostis aparecem como texto literal, sem virar HTML", () => {

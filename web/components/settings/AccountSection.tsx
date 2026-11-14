@@ -110,7 +110,7 @@ export function AccountSection() {
         <div className="actions">
           {showInterview && (
             <Link className="button button--secondary" href="/onboarding/interview">
-              Continuar entrevista
+              {interview === "none" ? "Começar entrevista" : "Continuar entrevista"}
             </Link>
           )}
           <Link className="button" href="/onboarding">

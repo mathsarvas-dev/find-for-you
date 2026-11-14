@@ -1,4 +1,6 @@
+import "server-only";
 import { connection } from "next/server";
+import { RecheckButton } from "@/components/RecheckButton";
 import { StatusRow } from "@/components/StatusRow";
 import { checkHealth, type HealthReport } from "@/lib/health";
 
@@ -6,6 +8,7 @@ import { checkHealth, type HealthReport } from "@/lib/health";
  * Painel "Serviços" (API e banco), vindo da antiga página inicial. Componente de
  * servidor: checa GET /health a cada requisição. Monte dentro de
  * <Suspense fallback={<HealthPanelLoading />}> (Configurações, seção Estado do sistema).
+ * "Verificar de novo" (RecheckButton, cliente) refaz a checagem com router.refresh().
  */
 
 const DEFAULT_TITLE = "Serviços";
@@ -35,13 +38,11 @@ export function HealthPanelLoading({ title }: { title?: string } = {}) {
 }
 
 type HealthPanelProps = {
-  /** Onde "Verificar de novo" recarrega a página (a rota que monta o painel). */
-  recheckHref?: string;
   /** Título do painel (h2); "Serviços" por padrão. */
   title?: string;
 };
 
-export async function HealthPanel({ recheckHref = "/settings#sistema", title }: HealthPanelProps = {}) {
+export async function HealthPanel({ title }: HealthPanelProps = {}) {
   await connection();
   const report = await checkHealth();
   const time = new Intl.DateTimeFormat("pt-BR", {
@@ -62,10 +63,7 @@ export async function HealthPanel({ recheckHref = "/settings#sistema", title }: 
         <span>
           Verificado às <span className="mono">{time}</span>
         </span>
-        {/* Recarga completa de propósito: refaz a checagem no servidor. */}
-        <a className="button" href={recheckHref}>
-          Verificar de novo
-        </a>
+        <RecheckButton />
       </div>
     </section>
   );

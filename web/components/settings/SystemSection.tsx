@@ -12,7 +12,7 @@ export function SystemSection() {
   return (
     <div id="sistema" className="settings__section">
       <Suspense fallback={<HealthPanelLoading title={TITLE} />}>
-        <HealthPanel recheckHref="/settings#sistema" title={TITLE} />
+        <HealthPanel title={TITLE} />
       </Suspense>
     </div>
   );
