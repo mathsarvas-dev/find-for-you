@@ -70,3 +70,7 @@
 
 ## Modelo do Groq
 - O modelo padrão mudou para `openai/gpt-oss-120b` (o `llama-3.3-70b-versatile` foi removido); o preenchimento de vagas mostra falhas ocasionais `LLMInvalidResponse` com o modelo novo — observar a taxa e, se alta, ajustar o prompt ou usar o `qwen/qwen3.8-27b`.
+
+## Marco 3b — fontes não verificadas
+- **Workable:** fora de escopo pela spec §1; a API oficial exige token.
+- **Gupy:** fora de escopo pela spec §1; a API oficial exige token.
