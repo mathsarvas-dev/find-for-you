@@ -31,7 +31,7 @@ Fora de escopo: foto e data de nascimento no currículo alemão (o modelo tem s�
 - **Privacidade:** ao Groq vão o texto da vaga, os itens relevantes do perfil e (nas perguntas) o enunciado; nunca o e-mail, o telefone ou a lista completa de pessoas/empresas do perfil além do que o item citado contém. Nenhuma ação sai do computador: o app nunca abre, preenche ou envia o formulário da empresa.
 - **Perfil mudou depois de gerar:** a candidatura guarda `profile_version`; se a versão atual for outra, a tela mostra "o perfil mudou desde esta versão" com o botão "Gerar de novo" (não regenera sozinha).
 
-## 3. Dados (migração 0008, depois da 0007 do marco 4b)
+## 3. Dados (migração 0009, depois da 0007 do 4b e da 0008 do 3b)
 - `applications` (UserScopedMixin + TimestampMixin): `id, job_id FK jobs ON DELETE CASCADE, profile_version int, job_content_hash str(64), state str(16) ('draft'|'generating'|'ready'|'error'|'applied'), locale str(8), template str(8), requirements JSONB, coverage JSONB, error text NULL, attempts int default 0, applied_at timestamptz NULL`. Único `(user_id, job_id)`; índice `(user_id, state)`.
 - `application_documents`: `id, application_id FK ON DELETE CASCADE, kind str(16) ('resume'|'cover_letter'), lines JSONB, status str(16) ('valid'|'needs_fix'), version int` (a nova geração substitui o documento do mesmo `kind`; `needs_fix` quando uma edição manual falha no validador).
 - `application_questions`: `id, application_id FK ON DELETE CASCADE, position int, source str(8) ('api'|'pasted'), label text, kind str(16) ('text'|'choice'|'bool'|'file'), options JSONB, required bool, sensitive bool, answer text NULL, answer_state str(8) ('empty'|'draft'|'edited'|'final'), bank_key str(64) NULL`.
@@ -77,4 +77,4 @@ Fora de escopo: foto e data de nascimento no currículo alemão (o modelo tem s�
 - **Cobertura declarada pelo LLM:** conferida pelo validador (termo ou sinônimo do perfil); ainda é heurística e é apresentada como tal.
 - **Respostas sensíveis:** lista conservadora; na dúvida, "responda você".
 - **Quota do Groq:** teto diário e o portão da entrevista; a fila anda 1 por vez.
-- **Conflito de arquivos com o 4b** em `web/app/jobs/page.tsx`: o 4b executa primeiro; o 5 parte da versão mesclada e a migração é a 0008.
+- **Conflito de arquivos com o 4b** em `web/app/jobs/page.tsx`: o 4b executa primeiro; o 5 parte da versão mesclada e a migração é a 0009 (a 0008 é do marco 3b, que executa antes do 5).

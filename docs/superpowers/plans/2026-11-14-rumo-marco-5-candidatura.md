@@ -11,7 +11,7 @@
 **Spec:** `docs/superpowers/specs/2026-11-14-rumo-marco-5-candidatura-design.md` (autoridade; este plano argumenta a partir dela) e `docs/superpowers/specs/2026-11-11-rumo-design.md` §5.5, §9.
 
 ## Global Constraints
-- Ordem: executa **depois** do marco 4b (`docs/superpowers/plans/2026-11-14-rumo-marco-4b-filtros-chat.md`), que cria `alembic/versions/0007_chat_filters.py` (`revision = "0007"`) e mexe em `web/app/jobs/page.tsx`; este plano parte da versão mesclada. Migração `0008` com `down_revision = "0007"`.
+- Ordem: executa **depois** do marco 4b (`docs/superpowers/plans/2026-11-14-rumo-marco-4b-filtros-chat.md`), que cria `alembic/versions/0007_chat_filters.py` (`revision = "0007"`) e mexe em `web/app/jobs/page.tsx`; este plano parte da versão mesclada. Migração `0009` com `down_revision = "0008"` (a `0008` é do marco 3b, que executa antes do 5; se o 3b ainda não tiver sido mesclado, confirmar a cadeia com `alembic heads` antes de criar a migração).
 - **Tarefa 0 é um portão:** se o build Docker com WeasyPrint ou o teste de fumaça do PDF falhar, PARE e devolva a decisão à pessoa (plano B: Chromium, mais pesado). Nenhuma tarefa de PDF começa antes.
 - Todas as tabelas novas com `user_id` (`UserScopedMixin`) e toda consulta escopada por `user_id` (`api.deps.current_user_id`); recurso de outro usuário → 404.
 - O LLM só é chamado no worker, via o `GroqProvider`/limitador compartilhado; nunca na API. Timeout de 25 s por chamada (`application_call_timeout`), `application_max_attempts = 3`, `application_daily_limit = 5` (gerações de currículo em 24 h corridas, todos os usuários — mesmo critério do `match_daily_limit`), pausa enquanto qualquer entrevista estiver `generating`/`working` (`INTERVIEW_LLM_STATES` de `worker/match_jobs.py`), pausa de 60 s em `LLMRateLimited`/timeout sem contar tentativa.
@@ -61,10 +61,10 @@
 
 ## Fatia 1 — dados, requisitos, cobertura
 
-### Task 1: Migração 0008, modelos e configurações
+### Task 1: Migração 0009, modelos e configurações
 
 **Files:**
-- Create: `alembic/versions/0008_applications.py`, `tests/test_applications_models.py`
+- Create: `alembic/versions/0009_applications.py`, `tests/test_applications_models.py`
 - Modify: `rumo_core/models.py`, `rumo_core/config.py`, `.env.example`
 
 **Interfaces:**
@@ -77,9 +77,9 @@
 
 - [ ] **Step 1: Write failing tests** (`db`, usuário descartável): `test_application_unique_per_user_job`, `test_application_rejects_bad_state_and_template` (`state='x'`, `template='fr'` → `IntegrityError`), `test_application_defaults` (`state=='draft'`, `attempts==0`, `tasks==[]`), `test_documents_and_questions_cascade_with_job` (apagar a vaga apaga candidatura, documentos, perguntas), `test_document_version_unique_per_kind`, `test_answer_bank_lang_defaults_to_pt` (item inserido sem `lang` → `'pt'`), `test_settings_application_defaults` (5, 3, 25, 10).
 - [ ] **Step 2: Run** `pytest tests/test_applications_models.py -v` → FAIL.
-- [ ] **Step 3: Implement** modelos, settings, `.env.example` (`APPLICATION_DAILY_LIMIT=5` com comentário "gerações de currículo em 24 h, todos os usuários") e a migração `0008` (`revision = "0008"`, `down_revision = "0007"`; `downgrade` remove tabelas e a coluna `lang`). Conferir `alembic downgrade -1 && alembic upgrade head`.
+- [ ] **Step 3: Implement** modelos, settings, `.env.example` (`APPLICATION_DAILY_LIMIT=5` com comentário "gerações de currículo em 24 h, todos os usuários") e a migração `0009` (`revision = "0009"`, `down_revision = "0008"`; `downgrade` remove tabelas e a coluna `lang`). Conferir `alembic downgrade -1 && alembic upgrade head`.
 - [ ] **Step 4: Run** `pytest tests/test_applications_models.py tests/test_config.py tests/test_interview_models.py -v` → PASS.
-- [ ] **Step 5: Commit** `feat(applications): applications, documents and questions tables (migration 0008)`.
+- [ ] **Step 5: Commit** `feat(applications): applications, documents and questions tables (migration 0009)`.
 
 ### Task 2: Índice do perfil, extração de requisitos e seleção de evidências
 
