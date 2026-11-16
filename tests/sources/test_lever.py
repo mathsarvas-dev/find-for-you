@@ -18,8 +18,12 @@ async def _resolve(host, port):
     return [PUBLIC]
 
 
+async def _no_sleep(seconds):
+    return None
+
+
 def _client(handler):
-    return SafeClient(httpx.MockTransport(handler), resolve=_resolve)
+    return SafeClient(httpx.MockTransport(handler), resolve=_resolve, sleep=_no_sleep)
 
 
 def _json_handler(payload, status=200, seen=None):
