@@ -12,8 +12,10 @@ import { Stepper } from "@/components/stepper/Stepper";
 import {
   ApiError,
   confirmProfile,
+  continueWithoutExtraction,
   getImport,
   getProfile,
+  retryCountdown,
   uploadResume,
   type CanonicalProfile,
   type ImportStatus,
@@ -69,6 +71,8 @@ export default function OnboardingPage() {
   const [narrative, setNarrative] = useState("");
   const [lastFile, setLastFile] = useState<File | null>(null);
   const [importStatus, setImportStatus] = useState<ImportStatus>("pending");
+  const [retryAt, setRetryAt] = useState<string | null>(null);
+  const [skipError, setSkipError] = useState<string | null>(null);
   // Só lido em handlers e efeitos: Date.now() no render quebra o prerender.
   const [now, setNow] = useState(0);
   const narrativeId = useId();
@@ -98,6 +102,8 @@ export default function OnboardingPage() {
 
   const startReading = useCallback((importId: number) => {
     setImportStatus("pending");
+    setRetryAt(null);
+    setSkipError(null);
     setNow(Date.now());
     setPhase({ name: "reading", importId, startedAt: Date.now() });
   }, []);
@@ -131,6 +137,7 @@ export default function OnboardingPage() {
           });
         } else {
           setImportStatus(st.status);
+          setRetryAt(st.retry_at ?? null);
           timer = setTimeout(poll, POLL_MS);
         }
       } catch (err) {
@@ -187,6 +194,28 @@ export default function OnboardingPage() {
       startReading(id);
     } catch (err) {
       setPhase({ ...phase, message: message(err) });
+    }
+  }
+
+  async function skipExtraction(importId: number) {
+    setSkipError(null);
+    try {
+      await continueWithoutExtraction(importId);
+      refreshOverview();
+      await load();
+    } catch (err) {
+      setSkipError(message(err));
+    }
+  }
+
+  async function reviewExtracted(importId: number) {
+    try {
+      const st = await getImport(importId);
+      if (st.status === "ready" && st.profile) {
+        setPhase({ name: "review", profile: st.profile, truncated: st.truncated });
+      }
+    } catch (err) {
+      setPhase({ name: "load-error", message: message(err) });
     }
   }
 
@@ -268,6 +297,8 @@ export default function OnboardingPage() {
       {phase.name === "existing" && (
         <ExistingProfile
           current={phase.current}
+          now={now}
+          onReviewExtracted={(id) => void reviewExtracted(id)}
           onView={() => setPhase({ name: "review", profile: phase.current.profile, truncated: false })}
           onNew={startNew}
         />
@@ -326,8 +357,15 @@ export default function OnboardingPage() {
             <p aria-live="polite">
               {importStatus === "extracting"
                 ? "Extraindo os dados: cargos, datas, conquistas e habilidades."
-                : "Na fila para leitura. Começa em instantes."}
+                : retryAt
+                  ? `O limite do serviço de leitura foi atingido; ${retryCountdown(retryAt, now)}.`
+                  : "Na fila para leitura. Começa em instantes."}
             </p>
+            {skipError && (
+              <div className="notice" role="alert">
+                <p>{skipError}</p>
+              </div>
+            )}
             {importStatus === "pending" && now - phase.startedAt >= PENDING_SLOW_MS && (
               <div className="notice notice--warn notice--flush" role="status" aria-live="polite">
                 <strong>A leitura não começou.</strong>
@@ -345,6 +383,13 @@ export default function OnboardingPage() {
           <div className="panel__foot">
             <button type="button" className="link-button" onClick={() => setPhase({ name: "upload" })}>
               ← Voltar e escolher outro arquivo
+            </button>
+            <button
+              type="button"
+              className="button button--secondary"
+              onClick={() => void skipExtraction(phase.importId)}
+            >
+              Continuar sem extrair
             </button>
             <span className="mono">importação #{phase.importId}</span>
           </div>
@@ -367,6 +412,15 @@ export default function OnboardingPage() {
             <button type="button" className="link-button" onClick={() => setPhase({ name: "upload" })}>
               ← Escolher outro arquivo
             </button>
+            {phase.kind === "import" && (
+              <button
+                type="button"
+                className="button button--secondary"
+                onClick={() => void skipExtraction(phase.importId)}
+              >
+                Continuar sem extrair
+              </button>
+            )}
             <button type="button" className="button" onClick={() => void retryRead()}>
               Tentar de novo
             </button>
@@ -438,10 +492,14 @@ export default function OnboardingPage() {
 
 function ExistingProfile({
   current,
+  now,
+  onReviewExtracted,
   onView,
   onNew,
 }: {
   current: ProfileState;
+  now: number;
+  onReviewExtracted: (importId: number) => void;
   onView: () => void;
   onNew: () => void;
 }) {
@@ -453,6 +511,7 @@ function ExistingProfile({
         <span className="mono">versão {current.version}</span>
       </div>
       <div className="panel__body stack">
+        {current.provisional && <ProvisionalNotice current={current} now={now} onReview={onReviewExtracted} />}
         <div>
           <p className="existing__name">{basics.name || "Sem nome"}</p>
           {basics.headline && <p className="muted">{basics.headline}</p>}
@@ -491,5 +550,42 @@ function ExistingProfile({
         </button>
       </div>
     </section>
+  );
+}
+
+function ProvisionalNotice({
+  current,
+  now,
+  onReview,
+}: {
+  current: ProfileState;
+  now: number;
+  onReview: (importId: number) => void;
+}) {
+  const imp = current.import;
+  if (imp?.status === "ready") {
+    return (
+      <div className="notice notice--warn notice--flush" role="status">
+        <strong>Dados extraídos — revise.</strong>
+        <p>Confirmar troca o perfil provisório pelo perfil estruturado.</p>
+        <button type="button" className="button" onClick={() => onReview(imp.id)}>
+          Revisar dados extraídos
+        </button>
+      </div>
+    );
+  }
+  const countdown = imp?.status === "pending" ? retryCountdown(imp.retry_at, now) : null;
+  return (
+    <div className="notice notice--warn notice--flush" role="status">
+      <strong>Perfil provisório (sem extração).</strong>
+      <p>
+        A coleta e o ranking já usam o texto do currículo; candidaturas só depois da revisão.{" "}
+        {imp?.status === "error"
+          ? "A extração falhou; envie o currículo de novo."
+          : countdown
+            ? `A extração segue na fila: ${countdown}.`
+            : "A extração segue na fila."}
+      </p>
+    </div>
   );
 }

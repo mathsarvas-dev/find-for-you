@@ -61,6 +61,8 @@ export type ImportState = {
   error: string | null;
   truncated: boolean;
   profile: CanonicalProfile | null;
+  /** ISO: próxima tentativa automática após limite de cota do LLM (status segue "pending"). */
+  retry_at?: string | null;
 };
 
 export type ConfirmResult = {
@@ -72,7 +74,19 @@ export type ConfirmResult = {
 export type ProfileState = ConfirmResult & {
   profile: CanonicalProfile;
   narrative: string | null;
+  /** Perfil criado do texto bruto, sem LLM; não habilita candidaturas. */
+  provisional?: boolean;
+  /** Última importação, só informada enquanto o perfil é provisório. */
+  import?: { id: number; status: ImportStatus; retry_at: string | null } | null;
 };
+
+/** "tentando de novo em ~N min" até `retryAt` (ISO), ou null se não há contagem. */
+export function retryCountdown(retryAt: string | null | undefined, nowMs: number): string | null {
+  if (!retryAt) return null;
+  const ms = Date.parse(retryAt) - nowMs;
+  if (Number.isNaN(ms)) return null;
+  return `tentando de novo em ~${Math.max(1, Math.ceil(ms / 60_000))} min`;
+}
 
 export function emptyProfile(): CanonicalProfile {
   return {
@@ -140,6 +154,14 @@ export async function uploadResume(file: File): Promise<{ id: number }> {
 
 export async function getImport(id: number): Promise<ImportState> {
   return (await request<ImportState>(`/profile/imports/${id}`)).body;
+}
+
+/** "Continuar sem extrair": perfil provisório do texto bruto (a vetorização roda no worker). */
+export async function continueWithoutExtraction(importId: number): Promise<ConfirmResult> {
+  const { body } = await request<ConfirmResult>(`/profile/imports/${importId}/provisional`, {
+    method: "POST",
+  });
+  return body;
 }
 
 export async function confirmProfile(

@@ -52,7 +52,9 @@ export function computeSteps(o: Overview): Step[] {
       title: "Confirmar e vetorizar",
       detail: !profile.confirmed
         ? "Confirme o perfil para preparar a busca"
-        : profile.vectorized
+        : profile.provisional
+          ? "Perfil provisório (sem extração) · revise quando a extração terminar"
+          : profile.vectorized
           ? "Perfil confirmado · vetores prontos"
           : "Perfil confirmado · vetores em preparo",
       done: profile.confirmed && profile.vectorized,

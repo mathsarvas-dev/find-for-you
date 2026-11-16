@@ -7,6 +7,8 @@ export type ProfileOverview = {
   version: number | null;
   /** Pelo menos um trecho do perfil atual vetorizado no modelo ativo. */
   vectorized: boolean;
+  /** Perfil montado do texto bruto, sem extração: ranking funciona, candidatura não. */
+  provisional?: boolean;
   name: string | null;
   email: string | null;
 };

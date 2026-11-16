@@ -36,7 +36,9 @@ function cardsFor({ profile, companies, jobs, matches }: Overview): Card[] {
           : "Confirmado",
       detail: !profile.confirmed
         ? "Envie o currículo e confirme"
-        : profile.vectorized
+        : profile.provisional
+          ? "Provisório (sem extração) · já ranqueia"
+          : profile.vectorized
           ? "Confirmado · vetores prontos"
           : "Confirmado · vetores em preparo",
       href: "/onboarding",

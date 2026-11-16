@@ -4,6 +4,7 @@ import { OverviewContext, type OverviewState } from "@/components/shell/Overview
 import {
   ApiError,
   confirmProfile,
+  continueWithoutExtraction,
   emptyProfile,
   getImport,
   getProfile,
@@ -18,6 +19,7 @@ vi.mock("@/lib/profile", async (importOriginal) => ({
   uploadResume: vi.fn(),
   getImport: vi.fn(),
   confirmProfile: vi.fn(),
+  continueWithoutExtraction: vi.fn(),
   getProfile: vi.fn(),
 }));
 
@@ -25,6 +27,7 @@ const m = {
   upload: vi.mocked(uploadResume),
   getImport: vi.mocked(getImport),
   confirm: vi.mocked(confirmProfile),
+  skip: vi.mocked(continueWithoutExtraction),
   getProfile: vi.mocked(getProfile),
 };
 
@@ -160,6 +163,29 @@ describe("OnboardingPage", () => {
     expect(notice).toHaveTextContent("A leitura não começou.");
     expect(notice).toHaveTextContent("docker compose logs worker");
     expect(notice).toHaveTextContent("GROQ_API_KEY");
+  });
+
+  it("import pending com retry_at: mostra a contagem e permite continuar sem extrair", async () => {
+    const retryAt = new Date(Date.now() + 14 * 60_000).toISOString();
+    m.getProfile.mockResolvedValueOnce(null);
+    m.getImport.mockResolvedValue(importState("pending", { retry_at: retryAt }));
+    render(<OnboardingPage />);
+    await uploadFile();
+    expect(await screen.findByText(/tentando de novo em ~1[45] min/)).toBeInTheDocument();
+    m.skip.mockResolvedValue({ version: 1, chunks_total: 3, chunks_embedded: 0 });
+    m.getProfile.mockResolvedValue({ ...stored(0, 3), provisional: true, import: { id: 9, status: "pending", retry_at: retryAt } });
+    fireEvent.click(screen.getByRole("button", { name: "Continuar sem extrair" }));
+    expect(m.skip).toHaveBeenCalledWith(9);
+    expect(await screen.findByText("Perfil provisório (sem extração).")).toBeInTheDocument();
+  });
+
+  it("perfil provisório com extração pronta: mostra Dados extraídos e abre a revisão", async () => {
+    m.getProfile.mockResolvedValue({ ...stored(3, 3), provisional: true, import: { id: 9, status: "ready", retry_at: null } });
+    m.getImport.mockResolvedValue(importState("ready"));
+    render(<OnboardingPage />);
+    expect(await screen.findByText("Dados extraídos — revise.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Revisar dados extraídos" }));
+    expect(await screen.findByText(/Corrija o que estiver errado/)).toBeInTheDocument();
   });
 
   it("import com status error: mostra o erro legível e para", async () => {
