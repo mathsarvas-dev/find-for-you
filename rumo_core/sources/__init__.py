@@ -20,6 +20,7 @@ from rumo_core.sources.base import (
     SourceUnavailable,
 )
 from rumo_core.sources.ashby import AshbySource
+from rumo_core.sources.breezy import BreezySource
 from rumo_core.sources.greenhouse import GreenhouseSource
 from rumo_core.sources.http import SafeClient
 from rumo_core.sources.lever import LeverSource
@@ -111,6 +112,15 @@ def _smartrecruiters_factory() -> Source:
 
 register_source("smartrecruiters", _smartrecruiters_factory)
 
+
+def _breezy_factory() -> Source:
+    from rumo_core.config import get_settings
+
+    return BreezySource(shared_client(), max_bytes=get_settings().fetch_max_bytes)
+
+
+register_source("breezy", _breezy_factory)
+
 __all__ = [
     "RawJob",
     "Source",
@@ -122,6 +132,7 @@ __all__ = [
     "LeverSource",
     "AshbySource",
     "SmartRecruitersSource",
+    "BreezySource",
     "get_source",
     "shared_client",
     "register_source",
