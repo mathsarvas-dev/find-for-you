@@ -441,7 +441,8 @@ def test_job_registered_after_collect():
     }
     reg = build_registry(s, sf, None, object())
     names = list(reg._jobs)
-    assert names[names.index("collect_companies") + 1] == "discover_companies"
+    assert names[names.index("collect_companies") + 1] == "collect_feeds"
+    assert names[names.index("collect_feeds") + 1] == "discover_companies"
     assert reg._jobs["discover_companies"][1] == 60
 
 

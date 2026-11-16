@@ -70,6 +70,24 @@ def build_collect_job(settings, session_factory):
     )
 
 
+def build_collect_feeds_job(settings, session_factory):
+    """collect_feeds bound to the settings (behind the compliance gate, see worker.collect_feeds)."""
+    from functools import partial
+
+    from worker.collect_feeds import collect_feeds
+
+    return partial(
+        collect_feeds,
+        session_factory,
+        interval_hours=settings.collect_interval_hours,
+        delay_seconds=settings.collect_delay_seconds,
+        ttl_days=settings.feed_job_ttl_days,
+        max_feeds=settings.collect_feeds_max_per_run,
+        max_seconds=settings.collect_max_seconds,
+        settings=settings,
+    )
+
+
 def build_discover_job(settings, session_factory):
     """discover_companies bound to the discovery_* settings. The pause between
     board fetches reuses collect_delay_seconds (same Greenhouse host)."""
@@ -170,6 +188,8 @@ def build_registry(settings, session_factory, llm, embedder, fill_llm=None) -> J
     )
     # every 60 s; per-company next_run_at governs the real collection frequency
     registry.register("collect_companies", build_collect_job(settings, session_factory), 60)
+    # same queue and fairness as the companies: feeds are gated and rate limited per host
+    registry.register("collect_feeds", build_collect_feeds_job(settings, session_factory), 60)
     # right after the collection: new auto companies get next_run_at=now and
     # are collected on the next tick
     registry.register("discover_companies", build_discover_job(settings, session_factory), 60)
