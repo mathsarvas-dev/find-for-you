@@ -20,13 +20,12 @@ from rumo_core.matching.ai_score import JobView, MatchInvalid, score_job
 from rumo_core.models import Company, InterviewSession, Job, Match, Profile
 from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import get_current_profile
+from worker.llm_priority import INTERVIEW_LLM_STATES, interactive_llm_busy  # noqa: F401
 
 logger = logging.getLogger("worker.match_jobs")
 
 RATE_LIMIT_PAUSE_SECONDS = 60.0
 CAP_LOG_EVERY_SECONDS = 3600.0
-# interview states in which the interview job is about to call / calling the LLM
-INTERVIEW_LLM_STATES = ("generating", "working")
 
 _warned_no_llm = False
 _pause_until = 0.0
@@ -51,9 +50,8 @@ def _utcnow() -> datetime:
 
 
 def _interview_needs_llm(session_factory) -> bool:
-    with session_factory() as s:
-        return bool(s.scalar(select(exists().where(
-            InterviewSession.state.in_(INTERVIEW_LLM_STATES)))))
+    """Interview turns and resume imports keep the Groq budget (see llm_priority)."""
+    return interactive_llm_busy(session_factory)
 
 
 def _scored_last_24h(session_factory) -> int:

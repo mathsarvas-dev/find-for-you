@@ -22,6 +22,7 @@ from rumo_core.sources.fill import JobView, fill_fields, validate_fill
 from rumo_core.sources.ingest import SuspiciousEmptyResult, ingest_jobs
 from rumo_core.sources.normalize import has_pay_context
 from worker import jobs as _chunk_jobs
+from worker.llm_priority import interactive_llm_busy
 
 logger = logging.getLogger("worker.collect_jobs")
 
@@ -437,6 +438,8 @@ async def fill_missing_job_fields(
         return 0
     if clock() < _fill_pause_until:
         return 0
+    if interactive_llm_busy(session_factory):
+        return 0  # a resume import / interview turn keeps the Groq budget
     picked, skipped = _select_fill_candidates(session_factory, batch, user_id)
     if skipped:
         logger.info("fill: %d jobs settled without the LLM", skipped)

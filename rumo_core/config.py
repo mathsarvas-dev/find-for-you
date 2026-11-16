@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     database_url: str
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+    # background LLM work (job field fill) uses its own model, so its token quota
+    # (Groq counts tokens per day per model) never starves resume import,
+    # interview and matching, which keep `groq_model`. Empty = same as groq_model.
+    groq_fill_model: str = "openai/gpt-oss-20b"
     groq_max_per_minute: int = Field(25, gt=0)
     default_user_id: int = 1
     upload_max_bytes: int = Field(5_000_000, gt=0)

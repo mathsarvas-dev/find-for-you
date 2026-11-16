@@ -60,3 +60,20 @@ def test_collect_delay_may_be_zero(monkeypatch):
 def test_match_weight_query_default():
     s = Settings(_env_file=None, database_url="x")
     assert s.match_weight_query == 0.5
+
+
+def test_groq_fill_model_default_is_separate_from_main_model():
+    s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@h/db")
+    assert s.groq_fill_model == "openai/gpt-oss-20b"
+    assert s.groq_fill_model != s.groq_model
+
+
+def test_build_llm_model_override_keeps_main_model_untouched():
+    from worker.main import build_llm
+
+    s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@h/db", groq_api_key="k")
+    main, fill = build_llm(s), build_llm(s, model=s.groq_fill_model)
+    assert main._settings.groq_model == "openai/gpt-oss-120b"
+    assert fill._settings.groq_model == "openai/gpt-oss-20b"
+    assert s.groq_model == "openai/gpt-oss-120b"
+    assert build_llm(Settings(_env_file=None, database_url="postgresql+psycopg://u:p@h/db")) is None

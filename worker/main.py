@@ -35,8 +35,9 @@ async def heartbeat() -> None:
     logger.info("heartbeat")
 
 
-def build_llm(settings):
-    """Real Groq provider, or None when no API key is configured."""
+def build_llm(settings, *, model: str | None = None):
+    """Real Groq provider, or None when no API key is configured. `model`
+    overrides settings.groq_model (a separate model has its own token quota)."""
     if not settings.groq_api_key:
         return None
     import httpx
@@ -44,6 +45,8 @@ def build_llm(settings):
     from rumo_core.llm.groq import GroqProvider
     from rumo_core.llm.ratelimit import RateLimiter
 
+    if model:
+        settings = settings.model_copy(update={"groq_model": model})
     return GroqProvider(
         settings, httpx.AsyncClient(timeout=60), RateLimiter(settings.groq_max_per_minute)
     )
@@ -114,7 +117,7 @@ def build_score_matches_job(settings, session_factory, llm):
     )
 
 
-def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
+def build_registry(settings, session_factory, llm, embedder, fill_llm=None) -> JobRegistry:
     """All worker jobs, in priority order (run_due runs them in this order)."""
     from functools import partial
 
@@ -137,7 +140,10 @@ def build_registry(settings, session_factory, llm, embedder) -> JobRegistry:
     # interview, whose turns keep priority (registered after interview_turns)
     registry.register(
         "fill_missing_job_fields",
-        partial(fill_missing_job_fields, session_factory, llm, batch=settings.llm_fill_batch),
+        partial(
+            fill_missing_job_fields, session_factory,
+            fill_llm if fill_llm is not None else llm, batch=settings.llm_fill_batch,
+        ),
         60,
     )
     # same limiter, after the field fill (filters use the filled fields)
@@ -214,7 +220,8 @@ async def main() -> None:
         logger.info("reset %d working interview sessions to generating", reset_iv)
     llm = build_llm(settings)
     embedder = BgeM3Embedder()  # model loads lazily, only when chunks are pending
-    registry = build_registry(settings, SessionLocal, llm, embedder)
+    fill_llm = build_llm(settings, model=settings.groq_fill_model or None)
+    registry = build_registry(settings, SessionLocal, llm, embedder, fill_llm)
     logger.info("worker started")
     try:
         while True:

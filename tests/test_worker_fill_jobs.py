@@ -368,3 +368,29 @@ async def test_long_description_prompt_truncated_but_validated_against_full_text
     # the salary is backed by the full stored text; the negation there still applies
     assert j.salary_known and j.salary_min == Decimal(120000)
     assert j.work_model == "unknown"
+
+
+def test_fill_waits_while_a_resume_import_needs_the_llm(uid):
+    """A pending/extracting resume import keeps the Groq budget: no fill call."""
+    from rumo_core.models import ProfileImport
+
+    _job(uid)
+    with SessionLocal() as s:
+        s.add(ProfileImport(user_id=uid, filename="r.pdf", content_type="application/pdf",
+                            raw_text="x", status="pending"))
+        s.commit()
+    llm = FakeLLM()
+    try:
+        done = asyncio.run(fill_missing_job_fields(SessionLocal, llm, batch=3, user_id=uid))
+        assert done == 0 and llm.calls == []
+        with SessionLocal() as s:
+            s.execute(update(ProfileImport).where(ProfileImport.user_id == uid)
+                      .values(status="ready"))
+            s.commit()
+        cj._reset_fill_state()
+        done = asyncio.run(fill_missing_job_fields(SessionLocal, llm, batch=3, user_id=uid))
+        assert done == 1 and len(llm.calls) == 1
+    finally:
+        with SessionLocal() as s:
+            s.execute(delete(ProfileImport).where(ProfileImport.user_id == uid))
+            s.commit()
