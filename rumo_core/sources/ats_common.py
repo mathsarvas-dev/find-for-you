@@ -65,6 +65,18 @@ def from_epoch_ms(value) -> datetime | None:
         return None
 
 
+def from_epoch_s(value) -> datetime | None:
+    """Unix seconds as an int, or as a string of digits (some feeds send both)."""
+    if isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    try:
+        return datetime.fromtimestamp(value, tz=UTC)
+    except (OverflowError, OSError, ValueError):
+        return None
+
+
 def from_iso(value) -> datetime | None:
     if not isinstance(value, str) or not value.strip():
         return None
