@@ -20,7 +20,12 @@ from rumo_core.sources.base import (
     SourceUnavailable,
 )
 from rumo_core.sources.ashby import AshbySource
+from rumo_core.sources.bamboohr import BambooHRSource
 from rumo_core.sources.breezy import BreezySource
+from rumo_core.sources.personio import PersonioSource
+from rumo_core.sources.pinpoint import PinpointSource
+from rumo_core.sources.recruitee import RecruiteeSource
+from rumo_core.sources.teamtailor import TeamtailorSource
 from rumo_core.sources.greenhouse import GreenhouseSource
 from rumo_core.sources.http import SafeClient
 from rumo_core.sources.lever import LeverSource
@@ -120,6 +125,22 @@ def _breezy_factory() -> Source:
 
 
 register_source("breezy", _breezy_factory)
+
+
+def _settings_factory(cls):
+    def build() -> Source:
+        from rumo_core.config import get_settings
+
+        return cls(shared_client(), max_bytes=get_settings().fetch_max_bytes)
+
+    return build
+
+
+register_source("recruitee", _settings_factory(RecruiteeSource))
+register_source("personio", _settings_factory(PersonioSource))
+register_source("teamtailor", _settings_factory(TeamtailorSource))
+register_source("bamboohr", _settings_factory(BambooHRSource))
+register_source("pinpoint", _settings_factory(PinpointSource))
 
 __all__ = [
     "RawJob",
