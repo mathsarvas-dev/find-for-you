@@ -28,6 +28,7 @@ class ProfileOverview(BaseModel):
     confirmed: bool = False
     version: int | None = None
     vectorized: bool = False
+    provisional: bool = False
     name: str | None = None
     email: str | None = None
 
@@ -84,7 +85,7 @@ def _profile(session: Session, user_id: int, current) -> ProfileOverview:
     name, email = _basics(current.data)
     return ProfileOverview(
         confirmed=True, version=current.version, vectorized=used > 0,
-        name=name, email=email,
+        name=name, email=email, provisional=current.provisional,
     )
 
 

@@ -109,7 +109,7 @@ def test_overview_empty_user_defaults(env, as_user):
     r = as_user(uid).get("/overview")
     assert r.status_code == 200, r.text
     assert r.json() == {
-        "profile": {"confirmed": False, "version": None, "vectorized": False,
+        "profile": {"confirmed": False, "version": None, "vectorized": False, "provisional": False,
                     "name": None, "email": None},
         "interview": {"state": "none"},
         "companies": {"total": 0, "active": 0, "auto": 0},
@@ -263,7 +263,7 @@ def test_overview_has_no_job_text(env, as_user):
     r = as_user(uid).get("/overview")
     b = r.json()
     assert set(b) == CONTRACT_KEYS
-    assert set(b["profile"]) == {"confirmed", "version", "vectorized", "name", "email"}
+    assert set(b["profile"]) == {"confirmed", "version", "vectorized", "provisional", "name", "email"}
     assert set(b["interview"]) == {"state"}
     assert set(b["companies"]) == {"total", "active", "auto"}
     assert set(b["jobs"]) == {"open"}

@@ -68,7 +68,7 @@ def test_upload_pdf_creates_pending_import(client, uids):
     assert g.status_code == 200
     assert g.json() == {
         "id": body["id"], "status": "pending", "error": None,
-        "truncated": False, "profile": None,
+        "truncated": False, "profile": None, "retry_at": None,
     }
 
 
@@ -166,3 +166,60 @@ def test_operational_error_on_other_route_not_health_body(client):
     r = client.get("/profile")
     assert r.status_code == 503
     assert r.json() == {"detail": "Banco de dados indisponível"}
+
+
+def _import_with_text(uid, text):
+    with SessionLocal() as s:
+        imp = ProfileImport(
+            user_id=uid, filename="cv.txt", content_type="text/plain",
+            raw_text=text, status="pending",
+        )
+        s.add(imp)
+        s.commit()
+        return imp.id
+
+
+def test_import_exposes_retry_at(client, uids):
+    from datetime import datetime, timezone
+
+    iid = _import_with_text(uids[0], "Ana")
+    with SessionLocal() as s:
+        s.execute(update(ProfileImport).where(ProfileImport.id == iid).values(
+            retry_at=datetime(2030, 1, 1, tzinfo=timezone.utc)))
+        s.commit()
+    body = client.get(f"/profile/imports/{iid}").json()
+    assert body["status"] == "pending" and body["retry_at"].startswith("2030-01-01")
+
+
+def test_continue_without_extraction_creates_provisional(client, uids):
+    iid = _import_with_text(uids[0], "Ana Silva Dev Python"
+        " Acme\n\nExperiencia\n\nAcme 2020")
+    r = client.post(f"/profile/imports/{iid}/provisional")
+    assert r.status_code == 201
+    assert r.json()["chunks_total"] >= 1 and r.json()["chunks_embedded"] == 0
+    g = client.get("/profile").json()
+    assert g["provisional"] is True
+    assert g["import"]["id"] == iid and g["import"]["status"] == "pending"
+    with SessionLocal() as s:
+        kinds = set(s.scalars(select(ProfileChunk.kind).where(ProfileChunk.user_id == uids[0])))
+    assert kinds == {"raw"}
+    ov = client.get("/overview").json()["profile"]
+    assert ov["confirmed"] is True and ov["provisional"] is True
+    # idempotent
+    assert client.post(f"/profile/imports/{iid}/provisional").json()["version"] == 1
+
+
+def test_confirm_replaces_provisional(client, uids):
+    iid = _import_with_text(uids[0], "Ana Silva Dev Python")
+    client.post(f"/profile/imports/{iid}/provisional")
+    r = client.post("/profile/confirm", json={"profile": PROFILE})
+    assert r.status_code == 200 and r.json()["version"] == 2
+    g = client.get("/profile").json()
+    assert g["provisional"] is False and g["import"] is None
+    # a structured profile blocks a new provisional one
+    assert client.post(f"/profile/imports/{iid}/provisional").status_code == 409
+
+
+def test_provisional_is_user_scoped(client, uids):
+    iid = _import_with_text(uids[1], "Outro usuario")
+    assert client.post(f"/profile/imports/{iid}/provisional").status_code == 404
