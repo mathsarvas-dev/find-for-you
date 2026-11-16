@@ -5,13 +5,15 @@ serialised as JSON numbers (float), converted explicitly from Decimal.
 """
 
 import asyncio
+import time
+from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -27,11 +29,24 @@ from rumo_core.sources import (
     SourceNotFound,
     SourceUnavailable,
     get_source,
+    shared_client,
+)
+from rumo_core.sources.http import SafeClient, UnsafeURL
+from rumo_core.sources.link_import import (
+    NeedsPastedText,
+    pasted_raw,
+    read_link,
+    save_imported_job,
 )
 
 router = APIRouter(tags=["sources"])
 
 FETCH_TIMEOUT_SECONDS = 15.0
+IMPORT_FETCH_TIMEOUT_SECONDS = 25.0
+IMPORT_LIMIT = 20  # imports per user per window (per process)
+IMPORT_WINDOW_SECONDS = 3600.0
+_IMPORTS: dict[int, deque[float]] = {}
+MSG_NEEDS_TEXT = "Não consegui ler esta vaga automaticamente. Cole o título e a descrição."
 
 
 def source_getter() -> Callable[[str], Source]:
@@ -261,6 +276,77 @@ def collect_now(
     session.commit()
     session.refresh(row)
     return _company_out(row)
+
+
+def safe_client() -> SafeClient:
+    """Dependency: the process-wide SafeClient (overridden in tests)."""
+    return shared_client()
+
+
+class ImportLinkIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(max_length=2048)
+    title: str | None = Field(default=None, max_length=300)
+    description: str | None = Field(default=None, max_length=50_000)
+
+
+def _import_allowed(user_id: int, now: float) -> bool:
+    window = _IMPORTS.setdefault(user_id, deque())
+    while window and now - window[0] >= IMPORT_WINDOW_SECONDS:
+        window.popleft()
+    if len(window) >= IMPORT_LIMIT:
+        return False
+    window.append(now)
+    return True
+
+
+def _save_import(session: Session, user_id: int, url: str, raw) -> tuple[int, bool]:
+    try:
+        job, created = save_imported_job(session, user_id, url, raw, now=_now())
+        session.commit()
+    except IntegrityError:
+        session.rollback()
+        raise HTTPException(409, "Essa vaga está sendo importada agora. Tente de novo.") from None
+    return job.id, created
+
+
+@router.post("/jobs/import-link")
+async def import_link(
+    body: ImportLinkIn,
+    response: Response,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+    client: SafeClient = Depends(safe_client),
+):
+    """Import one job by link. Reads the page's JobPosting, or uses the pasted text.
+
+    201 when the job is new, 200 when it was already imported. The URL is never logged.
+    """
+    if (body.title is None) != (body.description is None):
+        raise HTTPException(422, "Informe o título e a descrição juntos.")
+    if not _import_allowed(user_id, time.monotonic()):
+        raise HTTPException(429, "Muitas importações em pouco tempo. Tente de novo mais tarde.")
+    try:
+        if body.title is not None:
+            raw = pasted_raw(body.url, body.title, body.description or "")
+        else:
+            raw = await asyncio.wait_for(
+                read_link(client, body.url), IMPORT_FETCH_TIMEOUT_SECONDS
+            )
+    except asyncio.TimeoutError:
+        raise HTTPException(504, "A página demorou demais para responder.") from None
+    except UnsafeURL:
+        raise HTTPException(422, "Endereço não permitido.") from None
+    except NeedsPastedText as exc:
+        raise HTTPException(422, {
+            "code": "needs_text", "reason": exc.reason, "message": MSG_NEEDS_TEXT,
+        }) from None
+    except SourceUnavailable:
+        raise HTTPException(503, "Fonte indisponível no momento.") from None
+    job_id, created = await run_in_threadpool(_save_import, session, user_id, body.url, raw)
+    response.status_code = 201 if created else 200
+    return {"job_id": job_id, "created": created}
 
 
 _ITEM_COLS = (

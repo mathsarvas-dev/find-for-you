@@ -80,6 +80,10 @@ class HostCapReached(SourceUnavailable):
     """The daily request budget for this host is used up."""
 
 
+class SiteRefused(SourceUnavailable):
+    """The site answered 403/429 once: not blocked yet, but it refused this request."""
+
+
 # consecutive 403/429 answers from one host before we stop asking (no retries, no workarounds)
 BLOCK_AFTER = 2
 # longest wait a single request may spend sleeping for a host's interval
@@ -388,7 +392,7 @@ class SafeClient:
                         strikes = self._limits.strike(host)
                         if strikes >= BLOCK_AFTER:
                             raise SourceBlocked(host)
-                        raise SourceUnavailable(f"o site respondeu HTTP {status}")
+                        raise SiteRefused(f"o site respondeu HTTP {status}")
                     if 200 <= status < 300:
                         self._limits.clear_strikes(host)
                     if status in (301, 302, 303, 307, 308):
