@@ -28,6 +28,28 @@ class GateResult:
     restored: int
 
 
+def _restore_gated(session: Session, user_id: int, job_ids: Collection[int] | None) -> int:
+    stmt = (
+        select(Job)
+        .join(Company, Company.id == Job.company_id)
+        .where(
+            Job.user_id == user_id, Job.status == "open", Job.intake == "gated",
+            Company.collect_mode == "funnel",
+        )
+        .options(defer(Job.embedding), defer(Job.raw), defer(Job.description))
+    )
+    if job_ids is not None:
+        stmt = stmt.where(Job.id.in_(list(job_ids)))
+    restored = 0
+    for job in session.scalars(stmt):
+        job.intake = "full"
+        job.llm_filled_at = None
+        job.fill_attempts = 0
+        restored += 1
+    session.flush()
+    return restored
+
+
 def apply_vec_gate(
     session: Session, user_id: int, *, model_version: str, floor: float | None,
     job_ids: Collection[int] | None = None,
@@ -40,6 +62,9 @@ def apply_vec_gate(
     """
     if job_ids is not None and not job_ids:
         return GateResult(0, 0)
+    if floor is None:
+        # Cut switched off: every gated job returns, with or without a profile.
+        return GateResult(0, _restore_gated(session, user_id, job_ids))
     version, used = usable_profile(session, user_id, model_version)
     if version is None or used == 0:
         return GateResult(0, 0)

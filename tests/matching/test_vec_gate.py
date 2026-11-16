@@ -110,6 +110,22 @@ def test_gate_skips_collect_mode_all(world):
     assert res.gated == 0
 
 
+def test_cut_off_restores_gated_without_profile(world):
+    uid, _ = world
+    ids = _add(world, ("b", e(1), {}))
+    with SessionLocal() as s:
+        apply_vec_gate(s, uid, model_version=MV, floor=0.75)
+        s.commit()
+    with SessionLocal() as s:
+        s.execute(delete(ProfileChunk).where(ProfileChunk.user_id == uid))
+        s.commit()
+    with SessionLocal() as s:
+        res = apply_vec_gate(s, uid, model_version=MV, floor=None)
+        s.commit()
+    assert res.restored == 1
+    assert _state(uid, ids)["b"] == ("full", False)
+
+
 def test_gate_without_profile_does_nothing(world):
     uid, _ = world
     _add(world, ("b", e(1), {}))

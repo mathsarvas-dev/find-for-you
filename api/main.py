@@ -12,9 +12,12 @@ from sqlalchemy.orm import Session
 from api.chat_filters import router as chat_filters_router
 from api.deps import current_user_id
 from api.discovery import router as discovery_router
+from api.feeds import router as feeds_router
+from api.funnel import router as funnel_router
 from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
+from api.portals import router as portals_router
 from api.profile import router as profile_router
 from api.quality import router as quality_router
 from api.sources import router as sources_router
@@ -47,6 +50,9 @@ app.include_router(discovery_router)
 app.include_router(overview_router)
 app.include_router(chat_filters_router)
 app.include_router(quality_router)
+app.include_router(feeds_router)
+app.include_router(portals_router)
+app.include_router(funnel_router)
 
 
 def _json_safe(value):
