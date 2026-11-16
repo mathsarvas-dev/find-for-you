@@ -62,6 +62,9 @@ from rumo_core.sources.normalize import NormalizedJob, normalize_job
 logger = logging.getLogger("rumo_core.sources.ingest")
 
 SUSPICIOUS_EMPTY_MIN_OPEN = 5
+# synthetic feed company for jobs whose employer name is missing or only legal suffixes:
+# its jobs never dedupe against each other or against any other company
+UNKNOWN_EMPLOYER = "_desconhecida"
 _MAX_EXTERNAL_ID = 255  # Job.external_id column size
 _MAX_CITY = 255  # Job.city column size
 _MAX_COUNTRY = 64  # Job.country column size
@@ -235,11 +238,13 @@ def _ingest(
             job.status = "open"
             job.closed_at = None
     res.stubs = sum(1 for j in present if j.intake == "stub")
-    # one survivor per fingerprint among the present full/gated jobs
+    # one survivor per fingerprint among the present full/gated jobs; the unknown-employer
+    # feed company groups by external_id instead (different employers must not merge)
+    unknown = company.origin == "feed" and company.identifier == UNKNOWN_EMPLOYER
     groups: dict[str, list[Job]] = {}
     for job in present:
         if job.intake != "stub":
-            groups.setdefault(job.fingerprint, []).append(job)
+            groups.setdefault(job.external_id if unknown else job.fingerprint, []).append(job)
     for members in groups.values():
         survivor = min(
             members,
@@ -285,6 +290,8 @@ def _cross_source(
     fps = {j.fingerprint for j in present if j.status != "stub"}
     if key is None or not fps:
         return
+    if company.origin == "feed" and company.identifier == UNKNOWN_EMPLOYER:
+        return  # the name of this company is a placeholder, not an employer
     rank = policy.source_rank
     # (1) a better-ranked open job of the same employer already has the fingerprint
     better = session.execute(
