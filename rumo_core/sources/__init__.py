@@ -12,6 +12,7 @@ from collections.abc import Callable
 import httpx
 
 from rumo_core.sources.base import (
+    ATS_SOURCES,
     RawJob,
     Source,
     SourceBadResponse,
@@ -142,7 +143,66 @@ register_source("teamtailor", _settings_factory(TeamtailorSource))
 register_source("bamboohr", _settings_factory(BambooHRSource))
 register_source("pinpoint", _settings_factory(PinpointSource))
 
+# Hosts that belong to each ATS: a URL is only read by a connector when its host
+# is one of these (or a subdomain of one), so `evil.test/?x=greenhouse.io` never matches.
+ATS_HOSTS: dict[str, tuple[str, ...]] = {
+    "greenhouse": ("greenhouse.io",),
+    "lever": ("lever.co",),
+    "ashby": ("ashbyhq.com",),
+    "smartrecruiters": ("smartrecruiters.com",),
+    "breezy": ("breezy.hr",),
+    "recruitee": ("recruitee.com",),
+    "personio": ("jobs.personio.de",),
+    "teamtailor": ("teamtailor.com",),
+    "bamboohr": ("bamboohr.com",),
+    "pinpoint": ("pinpointhq.com",),
+}
+
+_ATS_CLASSES = {
+    "greenhouse": GreenhouseSource,
+    "lever": LeverSource,
+    "ashby": AshbySource,
+    "smartrecruiters": SmartRecruitersSource,
+    "breezy": BreezySource,
+    "recruitee": RecruiteeSource,
+    "personio": PersonioSource,
+    "teamtailor": TeamtailorSource,
+    "bamboohr": BambooHRSource,
+    "pinpoint": PinpointSource,
+}
+
+
+def ats_from_url(url: str) -> tuple[str, str] | None:
+    """(source, identifier) when `url` is a public page of a supported ATS, else None.
+
+    Pure: no request is made. Only the connector's own URL rules are used.
+    """
+    from urllib.parse import urlsplit
+
+    try:
+        host = (urlsplit(url or "").hostname or "").lower()
+    except ValueError:
+        return None
+    if not host:
+        return None
+    for name in sorted(ATS_SOURCES):
+        domains = ATS_HOSTS.get(name, ())
+        if not any(host == d or host.endswith("." + d) for d in domains):
+            continue
+        cls = _ATS_CLASSES.get(name)
+        if cls is None:
+            continue
+        try:
+            identifier = cls(None, max_bytes=1).normalize_identifier(url)
+        except ValueError:
+            continue
+        return name, identifier
+    return None
+
+
 __all__ = [
+    "ats_from_url",
+    "ATS_HOSTS",
     "RawJob",
     "Source",
     "SourceError",
