@@ -14,6 +14,23 @@ _WORD = re.compile(r"[a-z0-9]+")
 _SA = re.compile(r"(?<![a-z0-9])s\s?[./]\s?a(?![a-z0-9])")
 
 
+def employer_key(name: str | None) -> str | None:
+    """Comparable key for an employer: lowercase words without legal suffixes.
+
+    None when the name is empty or only legal suffixes: such employers are
+    never matched with another company (no cross-company dedupe).
+    """
+    if not isinstance(name, str) or not name or len(name) > MAX_NAME_LEN:
+        return None
+    folded = unicodedata.normalize("NFKD", name)
+    folded = "".join(c for c in folded if not unicodedata.combining(c)).lower()
+    folded = _SA.sub("sa", folded)
+    core = _WORD.findall(folded)
+    while core and core[-1] in LEGAL_SUFFIXES:
+        core.pop()
+    return "".join(core) or None
+
+
 def token_variants(name: str) -> list[str]:
     if not isinstance(name, str) or not name or len(name) > MAX_NAME_LEN:
         return []

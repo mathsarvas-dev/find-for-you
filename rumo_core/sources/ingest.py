@@ -53,6 +53,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import DataError
 from sqlalchemy.orm import Session, defer
 
+from rumo_core.discovery.names import employer_key
 from rumo_core.models import Company, Job
 from rumo_core.sources.base import RawJob
 from rumo_core.sources.normalize import NormalizedJob, normalize_job
@@ -78,6 +79,27 @@ class IngestResult:
     reopened: int = 0
     duplicates: int = 0
     skipped: int = 0  # jobs the DB rejected (left as they were / not created)
+    outranked: int = 0  # jobs made duplicate by a better-ranked source of the same employer
+    stubs: int = 0
+    promoted: int = 0
+
+
+@dataclass(frozen=True)
+class IngestPolicy:
+    """How one fetch is stored: origin, source rank, closing and funnel filters.
+
+    `close_missing=False`: nothing closes for absence (feeds show only part of
+    the market). `listed_ids`: jobs known to still be on the board although
+    they were not in this fetch (paginated listings); they keep their status.
+    `filters`/`keywords` take effect with the funnel (marco 3b, Task 47).
+    """
+
+    origin: str = "ats"
+    source_rank: int = 0
+    close_missing: bool = True
+    listed_ids: frozenset[str] = frozenset()
+    filters: object | None = None
+    keywords: tuple[str, ...] = ()
 
 
 def _strip_nul(value):
@@ -127,7 +149,8 @@ def _apply(job: Job, raw: RawJob, n: NormalizedJob) -> None:
 
 
 def ingest_jobs(
-    session: Session, user_id: int, company: Company, raws: list[RawJob], *, now: datetime
+    session: Session, user_id: int, company: Company, raws: list[RawJob], *, now: datetime,
+    policy: IngestPolicy = IngestPolicy(),
 ) -> IngestResult:
     # last occurrence of a repeated external_id wins
     by_id: dict[str, RawJob] = {}
@@ -139,7 +162,7 @@ def ingest_jobs(
         by_id[r.external_id] = r
 
     # guard on the EFFECTIVE list: "every item filtered out" counts as empty
-    if not by_id:
+    if not by_id and policy.close_missing:
         open_count = session.scalar(
             select(func.count()).select_from(Job).where(
                 Job.user_id == user_id, Job.company_id == company.id, Job.status == "open"
@@ -153,17 +176,17 @@ def ingest_jobs(
 
     try:
         with session.begin_nested():
-            return _ingest(session, user_id, company, by_id, now, isolate=False)
+            return _ingest(session, user_id, company, by_id, now, policy, isolate=False)
     except DataError:
         # the savepoint rollback expunged the new jobs and expired the changed
         # ones: redo the pass job by job to find and skip the rejected ones
         logger.warning("company %s: bulk ingest rejected; retrying job by job", company.id)
-    return _ingest(session, user_id, company, by_id, now, isolate=True)
+    return _ingest(session, user_id, company, by_id, now, policy, isolate=True)
 
 
 def _ingest(
     session: Session, user_id: int, company: Company, by_id: dict[str, RawJob],
-    now: datetime, *, isolate: bool,
+    now: datetime, policy: IngestPolicy, *, isolate: bool,
 ) -> IngestResult:
     existing: dict[str, Job] = {
         j.external_id: j
@@ -182,12 +205,14 @@ def _ingest(
     for eid, r in by_id.items():
         n = normalize_job(r)
         if not isolate:
-            _upsert(session, user_id, company, existing, eid, r, n, now, res, present, incumbent)
+            _upsert(session, user_id, company, existing, eid, r, n, now, res, present,
+                    incumbent, policy)
             continue
         counts, saved, inc = dataclasses.replace(res), [], set()
         try:
             with session.begin_nested():
-                _upsert(session, user_id, company, existing, eid, r, n, now, counts, saved, inc)
+                _upsert(session, user_id, company, existing, eid, r, n, now, counts, saved, inc,
+                        policy)
                 session.flush()
         except DataError:
             # rolled back: a new job was expunged, a changed one reverted to its row
@@ -221,20 +246,79 @@ def _ingest(
                 res.duplicates += 1
 
     for eid, job in existing.items():
-        if eid not in by_id and job.status in ("open", "duplicate"):
+        if eid in by_id or job.status not in ("open", "duplicate"):
+            continue
+        if eid in policy.listed_ids:
+            job.last_seen_at = now  # still on the board, just not in this page
+        elif policy.close_missing:
             job.status = "closed"
             job.closed_at = now
             res.closed += 1
 
+    _cross_source(session, user_id, company, present, policy, res)
     company.open_jobs = sum(1 for j in existing.values() if j.status == "open")
     session.flush()
     return res
 
 
+def _cross_source(
+    session: Session, user_id: int, company: Company, present: list[Job],
+    policy: IngestPolicy, res: IngestResult,
+) -> None:
+    """Dedupe across companies of the same employer: lower source_rank wins.
+
+    Only open, non-stub jobs take part. Equal ranks never dedupe.
+    """
+    key = employer_key(company.name)
+    fps = {j.fingerprint for j in present if j.status != "stub"}
+    if key is None or not fps:
+        return
+    rank = policy.source_rank
+    # (1) a better-ranked open job of the same employer already has the fingerprint
+    better = session.execute(
+        select(Job.fingerprint, Company.name)
+        .join(Company, Company.id == Job.company_id)
+        .where(
+            Job.user_id == user_id, Job.company_id != company.id,
+            Job.fingerprint.in_(fps), Job.status == "open",
+            Job.intake != "stub", Job.source_rank < rank,
+        )
+    ).all()
+    outranked = {fp for fp, name in better if employer_key(name) == key}
+    if outranked:
+        for job in present:
+            if job.fingerprint in outranked and job.status == "open":
+                job.status = "duplicate"
+                res.outranked += 1
+    # (2) worse-ranked open jobs of the same employer lose their slot to ours
+    worse = session.execute(
+        select(Job, Company.name)
+        .join(Company, Company.id == Job.company_id)
+        .where(
+            Job.user_id == user_id, Job.company_id != company.id,
+            Job.fingerprint.in_(fps), Job.status == "open",
+            Job.intake != "stub", Job.source_rank > rank,
+        )
+    ).all()
+    touched: dict[int, Company] = {}
+    for job, name in worse:
+        if employer_key(name) != key:
+            continue
+        job.status = "duplicate"
+        res.outranked += 1
+        touched[job.company_id] = session.get(Company, job.company_id)
+    for other in touched.values():
+        other.open_jobs = session.scalar(
+            select(func.count()).select_from(Job).where(
+                Job.company_id == other.id, Job.status == "open"
+            )
+        )
+
+
 def _upsert(
     session: Session, user_id: int, company: Company, existing: dict[str, Job], eid: str,
     r: RawJob, n: NormalizedJob, now: datetime, res: IngestResult, present: list[Job],
-    incumbent: set[str],
+    incumbent: set[str], policy: IngestPolicy,
 ) -> None:
     job = existing.get(eid)
     if job is None:
@@ -243,17 +327,23 @@ def _upsert(
             status="open", first_seen_at=now, last_seen_at=now, fill_attempts=0,
         )
         _apply(job, r, n)
+        job.origin = policy.origin
+        job.source_rank = policy.source_rank
         session.add(job)
         existing[eid] = job
         res.created += 1
     elif job.content_hash == n.content_hash:
         job.last_seen_at = now
+        job.origin = policy.origin
+        job.source_rank = policy.source_rank
         res.unchanged += 1
         if job.status == "open":
             incumbent.add(eid)
     else:
         same_fp = job.fingerprint == n.fingerprint
         _apply(job, r, n)
+        job.origin = policy.origin
+        job.source_rank = policy.source_rank
         job.embedding = None
         job.model_version = None
         job.llm_filled_at = None
