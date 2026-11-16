@@ -23,6 +23,7 @@ from rumo_core.sources.ashby import AshbySource
 from rumo_core.sources.greenhouse import GreenhouseSource
 from rumo_core.sources.http import SafeClient
 from rumo_core.sources.lever import LeverSource
+from rumo_core.sources.smartrecruiters import SmartRecruitersSource
 
 _REGISTRY: dict[str, Callable[[], Source]] = {}
 _CACHE: dict[str, Source] = {}
@@ -101,6 +102,15 @@ def _ashby_factory() -> Source:
 
 register_source("ashby", _ashby_factory)
 
+
+def _smartrecruiters_factory() -> Source:
+    from rumo_core.config import get_settings
+
+    return SmartRecruitersSource(shared_client(), max_bytes=get_settings().fetch_max_bytes)
+
+
+register_source("smartrecruiters", _smartrecruiters_factory)
+
 __all__ = [
     "RawJob",
     "Source",
@@ -111,6 +121,7 @@ __all__ = [
     "GreenhouseSource",
     "LeverSource",
     "AshbySource",
+    "SmartRecruitersSource",
     "get_source",
     "shared_client",
     "register_source",
