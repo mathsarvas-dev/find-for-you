@@ -79,7 +79,8 @@ def allowed_values(session: Session, user_id: int) -> AllowedValues:
     def distinct(column) -> list[str]:
         stmt = (
             select(column)
-            .where(Job.user_id == user_id, Job.status == "open", column.is_not(None))
+            .where(Job.user_id == user_id, Job.status == "open", Job.intake != "stub",
+                   column.is_not(None))
             .distinct()
             .order_by(column)
             .limit(ALLOWED_LIMIT)

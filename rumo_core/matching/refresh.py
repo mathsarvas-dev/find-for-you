@@ -57,7 +57,8 @@ def mark_pending(session: Session, user_id: int, filters: SearchFilters, *,
     version = profile.version
     candidates = top_candidate_ids(session, user_id, filters,
                                    model_version=model_version, n=n,
-                                   query_embedding=query_embedding)
+                                   query_embedding=query_embedding,
+                                   intakes=("full",))
     if not candidates:
         return RefreshResult(0, 0, 0, 0, version)
     ids = [job_id for job_id, _ in candidates]

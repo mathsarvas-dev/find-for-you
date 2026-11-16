@@ -298,7 +298,7 @@ def test_jobs_list_excludes_description_and_raw(client, uids):
     assert set(item) == {
         "id", "company_id", "company_name", "title", "url", "location_text", "country",
         "city", "work_model", "seniority", "language", "department", "salary_known",
-        "status", "first_seen_at", "posted_at"}
+        "status", "first_seen_at", "posted_at", "origin", "source", "attribution"}
 
 
 @pytest.mark.db

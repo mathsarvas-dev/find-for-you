@@ -45,6 +45,8 @@ class CompaniesOverview(BaseModel):
 
 class JobsOverview(BaseModel):
     open: int = 0
+    # open jobs stored as stubs: they fail the user's filters
+    outside_filters: int = 0
 
 
 class MatchesOverview(BaseModel):
@@ -128,9 +130,13 @@ def _companies(session: Session, user_id: int) -> CompaniesOverview:
 def _jobs(session: Session, user_id: int) -> JobsOverview:
     n = session.scalar(
         select(func.count(Job.id))
-        .where(Job.user_id == user_id, Job.status == "open")
+        .where(Job.user_id == user_id, Job.status == "open", Job.intake != "stub")
     )
-    return JobsOverview(open=n or 0)
+    outside = session.scalar(
+        select(func.count(Job.id))
+        .where(Job.user_id == user_id, Job.status == "open", Job.intake == "stub")
+    )
+    return JobsOverview(open=n or 0, outside_filters=outside or 0)
 
 
 def _matches(session: Session, user_id: int, current) -> MatchesOverview:

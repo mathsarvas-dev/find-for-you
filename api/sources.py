@@ -92,10 +92,18 @@ class CompanyOut(BaseModel):
     origin: str
 
 
+class Attribution(BaseModel):
+    label: str
+    url: str
+
+
 class JobItem(BaseModel):
     id: int
     company_id: int
     company_name: str
+    origin: str = "ats"
+    source: str = ""
+    attribution: Attribution | None = None
     title: str
     url: str
     location_text: str
@@ -259,7 +267,7 @@ _ITEM_COLS = (
     Job.id, Job.company_id, Company.name.label("company_name"), Job.title, Job.url,
     Job.location_text, Job.country, Job.city, Job.work_model, Job.seniority,
     Job.language, Job.department, Job.salary_known, Job.status, Job.first_seen_at,
-    Job.posted_at,
+    Job.posted_at, Job.origin, Company.source.label("source"),
 )
 
 
@@ -268,7 +276,7 @@ def _item_fields(r) -> dict:
         k: getattr(r, k) for k in (
             "id", "company_id", "company_name", "title", "url", "location_text",
             "country", "city", "work_model", "seniority", "language", "department",
-            "salary_known", "status", "first_seen_at", "posted_at",
+            "salary_known", "status", "first_seen_at", "posted_at", "origin", "source",
         )
     }
 
@@ -287,7 +295,8 @@ def list_jobs(
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
 ):
-    conds = [Job.user_id == user_id, Company.user_id == user_id]
+    # stubs (filtered out at intake) are never listed
+    conds = [Job.user_id == user_id, Company.user_id == user_id, Job.intake != "stub"]
     if status != "all":
         conds.append(Job.status == status)
     if company_id is not None:
@@ -321,7 +330,8 @@ def job_detail(
             Job.salary_currency, Job.salary_period, Job.last_seen_at, Job.closed_at,
         )
         .join(Company, Company.id == Job.company_id)
-        .where(Job.id == job_id, Job.user_id == user_id, Company.user_id == user_id)
+        .where(Job.id == job_id, Job.user_id == user_id, Company.user_id == user_id,
+               Job.intake != "stub")
     ).first()
     if r is None:
         raise HTTPException(404, "Vaga não encontrada.")

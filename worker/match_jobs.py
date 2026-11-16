@@ -90,6 +90,7 @@ def _select_candidates(session_factory, batch: int, max_attempts: int,
                 Match.state == "pendente",
                 Match.attempts < max_attempts,
                 Job.status == "open",
+                Job.intake == "full",
                 Job.user_id == Match.user_id,
                 Match.profile_version == _current_version(Match.user_id),
             )
@@ -129,7 +130,7 @@ def _load(session_factory, p: _Picked) -> _Work | None:
         if row is None:
             return None
         job, company_name = row
-        if job.status != "open" or job.content_hash != p.content_hash:
+        if job.status != "open" or job.intake != "full" or job.content_hash != p.content_hash:
             return None
         prof = s.execute(
             select(Profile).where(
@@ -159,7 +160,8 @@ def _write(session_factory, match_id: int, content_hash: str, result) -> bool:
         ).scalar_one_or_none()
         current = get_current_profile(s, m.user_id)
         if (
-            job is None or job.status != "open" or job.content_hash != content_hash
+            job is None or job.status != "open" or job.intake != "full"
+            or job.content_hash != content_hash
             or current is None or current.version != m.profile_version
         ):
             s.rollback()

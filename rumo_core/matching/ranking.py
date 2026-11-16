@@ -80,9 +80,14 @@ def _job_embedded(model_version: str):
     )
 
 
+# stubs (filtered out at intake) never reach ranking; gated jobs keep their vector
+VISIBLE_INTAKES = ("full", "gated")
+
+
 def _base_jobs(user_id: int, filters: SearchFilters, status: str, stmt: Select,
-               only_ids: Collection[int] | None = None) -> Select:
-    stmt = stmt.where(Job.user_id == user_id, _status_cond(status))
+               only_ids: Collection[int] | None = None,
+               intakes: Collection[str] = VISIBLE_INTAKES) -> Select:
+    stmt = stmt.where(Job.user_id == user_id, _status_cond(status), Job.intake.in_(list(intakes)))
     if only_ids is not None:
         stmt = stmt.where(Job.id.in_(list(only_ids)))
     return apply_filters(stmt, filters)
@@ -125,7 +130,8 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
             model_version: str, status: str,
             query_embedding: list[float] | None = None,
             weights: tuple[float, float] | None = None,
-            only_ids: Collection[int] | None = None):
+            only_ids: Collection[int] | None = None,
+            intakes: Collection[str] = VISIBLE_INTAKES):
     """Subquery (job_id, vec_score) for the filtered, embedded jobs."""
     dist = ProfileChunk.embedding.cosine_distance(Job.embedding)
     top = (
@@ -152,16 +158,17 @@ def _scores(user_id: int, version: int, filters: SearchFilters, *,
         .where(_job_embedded(model_version))
         .group_by(Job.id)
     )
-    return _base_jobs(user_id, filters, status, stmt, only_ids).subquery("scores")
+    return _base_jobs(user_id, filters, status, stmt, only_ids, intakes).subquery("scores")
 
 
 def _missing(session: Session, user_id: int, filters: SearchFilters, *,
              model_version: str, status: str,
-             only_ids: Collection[int] | None = None) -> int:
+             only_ids: Collection[int] | None = None,
+             intakes: Collection[str] = VISIBLE_INTAKES) -> int:
     stmt = select(func.count(Job.id)).where(
         func.coalesce(_job_embedded(model_version), False).is_(False)
     )
-    return session.scalar(_base_jobs(user_id, filters, status, stmt, only_ids)) or 0
+    return session.scalar(_base_jobs(user_id, filters, status, stmt, only_ids, intakes)) or 0
 
 
 def _usable(session: Session, user_id: int, model_version: str):
@@ -220,12 +227,13 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
               limit: int = 50, offset: int = 0,
               query_embedding: list[float] | None = None,
               weights: tuple[float, float] | None = None,
-              only_ids: Collection[int] | None = None) -> RankPage:
+              only_ids: Collection[int] | None = None,
+              intakes: Collection[str] = VISIBLE_INTAKES) -> RankPage:
     _status_cond(status)
     _check_page(limit, offset)
     missing = _missing(session, user_id, filters,
                        model_version=model_version, status=status,
-                       only_ids=only_ids)
+                       only_ids=only_ids, intakes=intakes)
     version, used = _usable(session, user_id, model_version)
     if version is None or used == 0:
         return RankPage(total=0, items=[], profile_version=version,
@@ -236,7 +244,7 @@ def rank_jobs(session: Session, user_id: int, filters: SearchFilters, *,
     scores = _scores(user_id, version, filters,
                      model_version=model_version, status=status,
                      query_embedding=query_embedding, weights=weights,
-                     only_ids=only_ids)
+                     only_ids=only_ids, intakes=intakes)
     total = session.scalar(select(func.count()).select_from(scores)) or 0
     rows = session.execute(
         select(Job, scores.c.vec_score, Match)
@@ -268,6 +276,8 @@ def top_candidate_ids(session: Session, user_id: int, filters: SearchFilters, *,
                       status: str = "open",
                       query_embedding: list[float] | None = None,
                       weights: tuple[float, float] | None = None,
+                      intakes: Collection[str] = VISIBLE_INTAKES,
+                      only_ids: Collection[int] | None = None,
                       ) -> list[tuple[int, float]]:
     """The `n` best (job_id, vec_score) by vec_score only, same filters."""
     _status_cond(status)
@@ -278,7 +288,8 @@ def top_candidate_ids(session: Session, user_id: int, filters: SearchFilters, *,
         return []
     scores = _scores(user_id, version, filters,
                      model_version=model_version, status=status,
-                     query_embedding=query_embedding, weights=weights)
+                     query_embedding=query_embedding, weights=weights,
+                     only_ids=only_ids, intakes=intakes)
     rows = session.execute(
         select(scores.c.job_id, scores.c.vec_score)
         .order_by(scores.c.vec_score.desc(), scores.c.job_id.asc())

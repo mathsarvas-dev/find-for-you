@@ -113,7 +113,7 @@ def test_overview_empty_user_defaults(env, as_user):
                     "name": None, "email": None},
         "interview": {"state": "none"},
         "companies": {"total": 0, "active": 0, "auto": 0},
-        "jobs": {"open": 0},
+        "jobs": {"open": 0, "outside_filters": 0},
         "matches": {"scored": 0, "pending": 0},
     }
 
@@ -164,7 +164,7 @@ def test_companies_and_jobs_counts_scoped_by_user(env, as_user):
     add_job(u2, c_other)
     b = as_user(u1).get("/overview").json()
     assert b["companies"] == {"total": 3, "active": 2, "auto": 1}
-    assert b["jobs"] == {"open": 2}
+    assert b["jobs"] == {"open": 2, "outside_filters": 0}
 
 
 @pytest.mark.db
@@ -266,6 +266,6 @@ def test_overview_has_no_job_text(env, as_user):
     assert set(b["profile"]) == {"confirmed", "version", "vectorized", "provisional", "name", "email"}
     assert set(b["interview"]) == {"state"}
     assert set(b["companies"]) == {"total", "active", "auto"}
-    assert set(b["jobs"]) == {"open"}
+    assert set(b["jobs"]) == {"open", "outside_filters"}
     assert set(b["matches"]) == {"scored", "pending"}
     assert "SECRET" not in r.text

@@ -242,6 +242,7 @@ def pending_jobs_stmt(model_version: str, user_id: int | None = None):
         .join(Company, Company.id == Job.company_id)
         .where(
             Job.status == "open",
+            Job.intake != "stub",
             or_(Job.embedding.is_(None), Job.model_version.is_distinct_from(model_version)),
         )
     )
@@ -355,6 +356,7 @@ def _select_fill_candidates(
         with session_factory() as s:
             stmt = select(Job).where(
                 Job.status == "open",
+                Job.intake == "full",
                 Job.llm_filled_at.is_(None),
                 Job.fill_attempts < MAX_FILL_ATTEMPTS,
                 or_(Job.work_model == "unknown", Job.salary_known.is_(False)),
@@ -386,7 +388,8 @@ def _load_fill_view(session_factory, job_id: int, content_hash: str) -> JobView 
     with session_factory() as s:
         job = s.get(Job, job_id)
         if (
-            job is None or job.status != "open" or job.llm_filled_at is not None
+            job is None or job.status != "open" or job.intake != "full"
+            or job.llm_filled_at is not None
             or job.fill_attempts >= MAX_FILL_ATTEMPTS or job.content_hash != content_hash
         ):
             return None
@@ -400,7 +403,8 @@ def _write_fill(session_factory, job_id: int, content_hash: str, result) -> bool
         job = s.execute(
             select(Job).where(Job.id == job_id).with_for_update()
         ).scalar_one_or_none()
-        if job is None or job.content_hash != content_hash or job.status != "open":
+        if (job is None or job.content_hash != content_hash or job.status != "open"
+                or job.intake != "full"):
             s.rollback()
             return False
         validated = validate_fill(result, job.description, _view(job))
