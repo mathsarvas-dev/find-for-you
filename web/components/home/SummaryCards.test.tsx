@@ -38,7 +38,7 @@ describe("SummaryCards", () => {
     const o = overview((o) => {
       o.profile = { ...o.profile, confirmed: true, version: 2, vectorized: true };
       o.companies = { total: 4, active: 3, auto: 1 };
-      o.jobs = { open: 1234 };
+      o.jobs = { open: 1234, outside_filters: 0 };
       o.matches = { scored: 0, pending: 0 };
     });
     render(<SummaryCards overview={o} />);
@@ -55,7 +55,7 @@ describe("SummaryCards", () => {
     const o = overview((o) => {
       o.profile = { ...o.profile, confirmed: true, version: 1, vectorized: false };
       o.companies = { total: 1, active: 1, auto: 0 };
-      o.jobs = { open: 1 };
+      o.jobs = { open: 1, outside_filters: 0 };
       o.matches = { scored: 1, pending: 1 };
     });
     render(<SummaryCards overview={o} />);
@@ -70,7 +70,7 @@ describe("SummaryCards", () => {
   it("plural com várias automáticas e fila", () => {
     const o = overview((o) => {
       o.companies = { total: 5, active: 5, auto: 2 };
-      o.jobs = { open: 0 };
+      o.jobs = { open: 0, outside_filters: 0 };
       o.matches = { scored: 7, pending: 3 };
     });
     render(<SummaryCards overview={o} />);

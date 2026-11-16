@@ -25,6 +25,8 @@ const created: Company = {
   consecutive_failures: 0,
   open_jobs: 0,
   origin: "manual",
+  collect_mode: "funnel",
+  stub_jobs: 0,
 };
 
 afterEach(() => add.mockReset());

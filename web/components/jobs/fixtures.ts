@@ -52,6 +52,9 @@ export function matchJob(id: number, extra: Partial<MatchJob> = {}): MatchJob {
     salary_max: null,
     salary_currency: null,
     salary_period: null,
+    origin: "ats",
+    source: "greenhouse",
+    attribution: null,
     ...extra,
   };
 }

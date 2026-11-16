@@ -20,10 +20,17 @@ export type InterviewOverview = { state: InterviewState };
 
 export type CompaniesOverview = { total: number; active: number; auto: number };
 
-export type JobsOverview = { open: number };
+export type JobsOverview = {
+  open: number;
+  /** Vagas abertas guardadas como stub (fora dos filtros). */
+  outside_filters: number;
+};
 
 /** Só vagas abertas, na versão atual do perfil. */
 export type MatchesOverview = { scored: number; pending: number };
+
+/** Feeds de agregadores ativos. */
+export type FeedsOverview = { active: number };
 
 export type Overview = {
   profile: ProfileOverview;
@@ -31,6 +38,7 @@ export type Overview = {
   companies: CompaniesOverview;
   jobs: JobsOverview;
   matches: MatchesOverview;
+  feeds: FeedsOverview;
 };
 
 /** Mesmos padrões seguros da API (usuário sem nada). */
@@ -39,8 +47,9 @@ export function emptyOverview(): Overview {
     profile: { confirmed: false, version: null, vectorized: false, name: null, email: null },
     interview: { state: "none" },
     companies: { total: 0, active: 0, auto: 0 },
-    jobs: { open: 0 },
+    jobs: { open: 0, outside_filters: 0 },
     matches: { scored: 0, pending: 0 },
+    feeds: { active: 0 },
   };
 }
 
@@ -68,6 +77,7 @@ export function normalizeOverview(body: unknown): Overview {
     companies: section(base.companies, raw.companies),
     jobs: section(base.jobs, raw.jobs),
     matches: section(base.matches, raw.matches),
+    feeds: section(base.feeds, raw.feeds),
   };
 }
 

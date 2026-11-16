@@ -25,7 +25,7 @@ function midJourney() {
   const o = emptyOverview();
   o.profile = { ...o.profile, confirmed: true, version: 2, vectorized: true, name: "Ana Souza" };
   o.companies = { total: 3, active: 3, auto: 1 };
-  o.jobs = { open: 42 };
+  o.jobs = { open: 42, outside_filters: 0 };
   return o;
 }
 

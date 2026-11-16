@@ -14,7 +14,7 @@ function midJourney(): Overview {
   const o = emptyOverview();
   o.profile = { ...o.profile, confirmed: true, version: 2, vectorized: true, name: "Ana Souza" };
   o.companies = { total: 3, active: 3, auto: 1 };
-  o.jobs = { open: 42 };
+  o.jobs = { open: 42, outside_filters: 0 };
   return o;
 }
 
@@ -113,7 +113,7 @@ describe("JourneyPanel", () => {
   it("fontes como passo atual: CTA Adicionar empresas → /sources", () => {
     const o = midJourney();
     o.companies = { total: 0, active: 0, auto: 0 };
-    o.jobs = { open: 0 };
+    o.jobs = { open: 0, outside_filters: 0 };
     const { container } = renderPanel({ overview: o, status: "ok" });
     const cta = within(headerActions(container)!).getByRole("link");
     expect(cta).toHaveTextContent("Adicionar empresas");

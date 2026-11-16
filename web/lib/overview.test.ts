@@ -18,8 +18,9 @@ const sample: Overview = {
   profile: { confirmed: true, version: 3, vectorized: true, name: "Ana", email: "ana@example.com" },
   interview: { state: "in_progress" },
   companies: { total: 12, active: 10, auto: 4 },
-  jobs: { open: 340 },
+  jobs: { open: 340, outside_filters: 12 },
   matches: { scored: 25, pending: 5 },
+  feeds: { active: 2 },
 };
 
 describe("getOverview", () => {
@@ -43,6 +44,7 @@ describe("getOverview", () => {
     const o = await getOverview();
     expect(o.interview).toEqual({ state: "none" });
     expect(o.matches).toEqual({ scored: 0, pending: 0 });
+    expect(o.feeds).toEqual({ active: 0 });
     expect(o.profile).toEqual({ confirmed: true, version: 2, vectorized: true, name: null, email: null });
     expect(o.companies).toEqual({ total: 3, active: 2, auto: 0 });
     expect(() => computeSteps(o)).not.toThrow();
@@ -93,8 +95,9 @@ describe("emptyOverview", () => {
       profile: { confirmed: false, version: null, vectorized: false, name: null, email: null },
       interview: { state: "none" },
       companies: { total: 0, active: 0, auto: 0 },
-      jobs: { open: 0 },
+      jobs: { open: 0, outside_filters: 0 },
       matches: { scored: 0, pending: 0 },
+      feeds: { active: 0 },
     });
   });
 });

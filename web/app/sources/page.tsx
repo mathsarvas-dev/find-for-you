@@ -24,7 +24,7 @@ const SLOW_MS = 300_000;
 /** Atualiza os tempos relativos ("há 5 min") e percebe coletas que venceram. */
 const CLOCK_MS = 30_000;
 
-type OriginFilter = "all" | CompanyOrigin;
+type OriginFilter = "all" | "manual" | "auto";
 
 const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
   { value: "all", label: "todas" },
@@ -32,7 +32,7 @@ const ORIGIN_FILTERS: { value: OriginFilter; label: string }[] = [
   { value: "auto", label: "automáticas" },
 ];
 
-const EMPTY_FILTERED: Record<CompanyOrigin, string> = {
+const EMPTY_FILTERED: Record<"manual" | "auto", string> = {
   manual: "Nenhuma empresa cadastrada à mão. Cole acima o token de um quadro do Greenhouse.",
   auto: "Nenhuma empresa automática ainda. A descoberta abaixo adiciona as que tiverem vagas.",
 };

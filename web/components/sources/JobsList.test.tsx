@@ -27,6 +27,8 @@ const companies: Company[] = [
     consecutive_failures: 0,
     open_jobs: 2,
     origin: "manual",
+    collect_mode: "funnel",
+    stub_jobs: 0,
   },
   {
     id: 2,
@@ -42,6 +44,8 @@ const companies: Company[] = [
     consecutive_failures: 0,
     open_jobs: 0,
     origin: "manual",
+    collect_mode: "funnel",
+    stub_jobs: 0,
   },
 ];
 
@@ -63,6 +67,9 @@ function job(id: number, extra: Partial<JobItem> = {}): JobItem {
     status: "open",
     first_seen_at: "2026-11-12T11:00:00Z",
     posted_at: "2026-11-12T09:00:00Z",
+    origin: "ats",
+    source: "greenhouse",
+    attribution: null,
     ...extra,
   };
 }

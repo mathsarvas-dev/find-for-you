@@ -15,20 +15,36 @@ export type Company = {
   last_error: string | null;
   consecutive_failures: number;
   open_jobs: number;
-  /** "auto": adicionada pela descoberta automática. */
+  /** "auto": adicionada pela descoberta; "feed"/"link": sintética (não listada aqui). */
   origin: CompanyOrigin;
+  /** "funnel": filtros da pessoa; "all": ignora os filtros só para esta empresa. */
+  collect_mode: CollectMode;
+  /** Vagas abertas que ficaram fora dos filtros (guardadas como stub). */
+  stub_jobs: number;
 };
 
-export type CompanyOrigin = "manual" | "auto";
+export type CompanyOrigin = "manual" | "auto" | "feed" | "link";
+
+export type CollectMode = "funnel" | "all";
+
+/** Fontes de quadro (ATS) verificadas, mais "site" (página de carreira). */
+export type CompanySource = "greenhouse" | "lever" | "ashby" | "smartrecruiters" | "breezy" | "site" | string;
 
 export type NewCompany = {
-  source: "greenhouse";
+  /** Sem fonte: a API detecta pela URL (ou usa "site" para outra URL http(s)). */
+  source?: CompanySource;
   identifier: string;
   name?: string;
   country?: string;
+  collect_mode?: CollectMode;
 };
 
-export type CompanyPatch = { active?: boolean; name?: string; country?: string | null };
+export type CompanyPatch = {
+  active?: boolean;
+  name?: string;
+  country?: string | null;
+  collect_mode?: CollectMode;
+};
 
 /** onsite | hybrid | remote | unknown */
 export type WorkModel = string;
@@ -50,6 +66,11 @@ export type JobItem = {
   status: string;
   first_seen_at: string;
   posted_at: string | null;
+  /** "feed": vaga vinda de um agregador (com crédito obrigatório). */
+  origin: string;
+  /** Fonte da empresa (ex.: "greenhouse", "remotive"). */
+  source: string;
+  attribution: { label: string; url: string } | null;
 };
 
 export type JobDetail = JobItem & {
@@ -76,6 +97,20 @@ export type JobQuery = {
 
 /** Mesmo limite de `q` na API. */
 export const MAX_QUERY_CHARS = 100;
+
+const SOURCE_LABELS: Record<string, string> = {
+  greenhouse: "Greenhouse",
+  lever: "Lever",
+  ashby: "Ashby",
+  smartrecruiters: "SmartRecruiters",
+  breezy: "Breezy",
+  site: "Página de carreira",
+};
+
+/** Nome de exibição de uma fonte; fonte desconhecida mostra o próprio nome. */
+export function sourceLabel(source: string): string {
+  return SOURCE_LABELS[source] ?? source;
+}
 
 /* Cliente */
 

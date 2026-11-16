@@ -57,6 +57,8 @@ const collected: Company = {
   consecutive_failures: 0,
   open_jobs: 3,
   origin: "manual",
+  collect_mode: "funnel",
+  stub_jobs: 0,
 };
 
 const pending: Company = {
@@ -69,6 +71,8 @@ const pending: Company = {
   next_run_at: "2026-11-12T11:59:00Z",
   open_jobs: 0,
   origin: "manual",
+  collect_mode: "funnel",
+  stub_jobs: 0,
 };
 
 async function tick(ms: number) {

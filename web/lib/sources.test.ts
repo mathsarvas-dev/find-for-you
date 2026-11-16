@@ -10,6 +10,7 @@ import {
   patchCompany,
   relativeTime,
   safeJobUrl,
+  sourceLabel,
   workModelLabel,
   type Company,
 } from "./sources";
@@ -45,7 +46,18 @@ const company: Company = {
   consecutive_failures: 0,
   open_jobs: 0,
   origin: "manual",
+  collect_mode: "funnel",
+  stub_jobs: 0,
 };
+
+describe("sourceLabel", () => {
+  it("nomes de exibição das fontes verificadas", () => {
+    expect(sourceLabel("greenhouse")).toBe("Greenhouse");
+    expect(sourceLabel("smartrecruiters")).toBe("SmartRecruiters");
+    expect(sourceLabel("site")).toBe("Página de carreira");
+    expect(sourceLabel("outra")).toBe("outra");
+  });
+});
 
 describe("listCompanies", () => {
   it("GET /companies devolve a lista", async () => {

@@ -12,6 +12,8 @@ function ov(patch: Patch = {}): Overview {
     companies: { ...base.companies, ...patch.companies },
     jobs: { ...base.jobs, ...patch.jobs },
     matches: { ...base.matches, ...patch.matches },
+
+    feeds: { ...base.feeds, ...patch.feeds },
   };
 }
 
