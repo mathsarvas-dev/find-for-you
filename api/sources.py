@@ -31,6 +31,7 @@ from rumo_core.sources import (
     get_source,
     shared_client,
 )
+from rumo_core.sources.feeds import feed_attribution
 from rumo_core.sources.http import SafeClient, UnsafeURL
 from rumo_core.sources.link_import import (
     NeedsPastedText,
@@ -357,14 +358,24 @@ _ITEM_COLS = (
 )
 
 
+def _attribution_for(origin: str, source: str) -> Attribution | None:
+    """Credit line of a feed job (the aggregator must be credited where it is shown)."""
+    if origin != "feed":
+        return None
+    found = feed_attribution(source)
+    return Attribution(label=found.label, url=found.url) if found is not None else None
+
+
 def _item_fields(r) -> dict:
-    return {
+    fields = {
         k: getattr(r, k) for k in (
             "id", "company_id", "company_name", "title", "url", "location_text",
             "country", "city", "work_model", "seniority", "language", "department",
             "salary_known", "status", "first_seen_at", "posted_at", "origin", "source",
         )
     }
+    fields["attribution"] = _attribution_for(r.origin, r.source)
+    return fields
 
 
 def _escape_like(text: str) -> str:
