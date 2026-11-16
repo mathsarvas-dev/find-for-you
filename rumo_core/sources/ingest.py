@@ -56,6 +56,7 @@ from sqlalchemy.orm import Session, defer
 from rumo_core.discovery.names import employer_key
 from rumo_core.models import Company, Job
 from rumo_core.sources.base import RawJob
+from rumo_core.sources.funnel import decide_intake, view_of
 from rumo_core.sources.normalize import NormalizedJob, normalize_job
 
 logger = logging.getLogger("rumo_core.sources.ingest")
@@ -80,8 +81,8 @@ class IngestResult:
     duplicates: int = 0
     skipped: int = 0  # jobs the DB rejected (left as they were / not created)
     outranked: int = 0  # jobs made duplicate by a better-ranked source of the same employer
-    stubs: int = 0
-    promoted: int = 0
+    stubs: int = 0  # jobs stored as stubs by the funnel (present in this fetch)
+    promoted: int = 0  # stubs that passed the filters now and became full
 
 
 @dataclass(frozen=True)
@@ -165,7 +166,8 @@ def ingest_jobs(
     if not by_id and policy.close_missing:
         open_count = session.scalar(
             select(func.count()).select_from(Job).where(
-                Job.user_id == user_id, Job.company_id == company.id, Job.status == "open"
+                Job.user_id == user_id, Job.company_id == company.id, Job.status == "open",
+                Job.intake != "stub",
             )
         )
         if open_count >= SUSPICIOUS_EMPTY_MIN_OPEN:
@@ -226,10 +228,17 @@ def _ingest(
         present += saved
         incumbent |= inc
 
-    # one survivor per fingerprint among the present jobs
+    # stubs follow presence only: open while listed, never grouped or deduped
+    for job in present:
+        if job.intake == "stub":
+            job.status = "open"
+            job.closed_at = None
+    res.stubs = sum(1 for j in present if j.intake == "stub")
+    # one survivor per fingerprint among the present full/gated jobs
     groups: dict[str, list[Job]] = {}
     for job in present:
-        groups.setdefault(job.fingerprint, []).append(job)
+        if job.intake != "stub":
+            groups.setdefault(job.fingerprint, []).append(job)
     for members in groups.values():
         survivor = min(
             members,
@@ -256,7 +265,9 @@ def _ingest(
             res.closed += 1
 
     _cross_source(session, user_id, company, present, policy, res)
-    company.open_jobs = sum(1 for j in existing.values() if j.status == "open")
+    company.open_jobs = sum(
+        1 for j in existing.values() if j.status == "open" and j.intake != "stub"
+    )
     session.flush()
     return res
 
@@ -287,7 +298,7 @@ def _cross_source(
     outranked = {fp for fp, name in better if employer_key(name) == key}
     if outranked:
         for job in present:
-            if job.fingerprint in outranked and job.status == "open":
+            if job.intake != "stub" and job.fingerprint in outranked and job.status == "open":
                 job.status = "duplicate"
                 res.outranked += 1
     # (2) worse-ranked open jobs of the same employer lose their slot to ours
@@ -310,9 +321,34 @@ def _cross_source(
     for other in touched.values():
         other.open_jobs = session.scalar(
             select(func.count()).select_from(Job).where(
-                Job.company_id == other.id, Job.status == "open"
+                Job.company_id == other.id, Job.status == "open", Job.intake != "stub"
             )
         )
+
+
+def _set_content(
+    job: Job, r: RawJob, n: NormalizedJob, policy: IngestPolicy, intake: str,
+    reason: str | None, now: datetime,
+) -> None:
+    """Write the normalized fields, then the funnel state (full or stub)."""
+    _apply(job, r, n)
+    job.origin = policy.origin
+    job.source_rank = policy.source_rank
+    job.last_seen_at = now
+    job.embedding = None
+    job.model_version = None
+    job.fill_attempts = 0
+    if intake == "stub":
+        # a stub never reaches the LLM or the vector step: nothing to fill, nothing kept
+        job.intake = "stub"
+        job.stub_reason = reason
+        job.description = ""
+        job.raw = {}
+        job.llm_filled_at = now
+    else:
+        job.intake = "full"
+        job.stub_reason = None
+        job.llm_filled_at = None
 
 
 def _upsert(
@@ -320,15 +356,16 @@ def _upsert(
     r: RawJob, n: NormalizedJob, now: datetime, res: IngestResult, present: list[Job],
     incumbent: set[str], policy: IngestPolicy,
 ) -> None:
+    intake, reason = decide_intake(
+        view_of(r, n), policy.filters, keywords=policy.keywords, text=n.description
+    )
     job = existing.get(eid)
     if job is None:
         job = Job(
             user_id=user_id, company_id=company.id, external_id=eid,
             status="open", first_seen_at=now, last_seen_at=now, fill_attempts=0,
         )
-        _apply(job, r, n)
-        job.origin = policy.origin
-        job.source_rank = policy.source_rank
+        _set_content(job, r, n, policy, intake, reason, now)
         session.add(job)
         existing[eid] = job
         res.created += 1
@@ -336,20 +373,25 @@ def _upsert(
         job.last_seen_at = now
         job.origin = policy.origin
         job.source_rank = policy.source_rank
-        res.unchanged += 1
+        if job.intake == "stub" and intake == "full":
+            # the filters now let it in: fill it like any other job (promotion)
+            _set_content(job, r, n, policy, intake, reason, now)
+            res.promoted += 1
+        elif job.intake == "stub":
+            job.stub_reason = reason
+            res.unchanged += 1
+        else:
+            # full/gated jobs with the same content are never demoted here
+            res.unchanged += 1
         if job.status == "open":
             incumbent.add(eid)
     else:
         same_fp = job.fingerprint == n.fingerprint
-        _apply(job, r, n)
-        job.origin = policy.origin
-        job.source_rank = policy.source_rank
-        job.embedding = None
-        job.model_version = None
-        job.llm_filled_at = None
-        job.fill_attempts = 0
-        job.last_seen_at = now
+        was_stub = job.intake == "stub"
+        _set_content(job, r, n, policy, intake, reason, now)
         res.updated += 1
+        if was_stub and intake == "full":
+            res.promoted += 1
         if job.status == "open" and same_fp:
             incumbent.add(eid)
     present.append(job)

@@ -13,13 +13,15 @@ from rumo_core.llm.base import LLMError, LLMProvider, LLMRateLimited
 from rumo_core.models import Company, Job
 from rumo_core.sources import get_source
 from rumo_core.sources.base import (
+    source_rank_for,
     SourceBadResponse,
     SourceNotFound,
     SourceUnavailable,
 )
 from rumo_core.sources.embed_text import job_embedding_text
 from rumo_core.sources.fill import JobView, fill_fields, validate_fill
-from rumo_core.sources.ingest import SuspiciousEmptyResult, ingest_jobs
+from rumo_core.sources.funnel import funnel_filters
+from rumo_core.sources.ingest import IngestPolicy, SuspiciousEmptyResult, ingest_jobs
 from rumo_core.sources.normalize import has_pay_context
 from worker import jobs as _chunk_jobs
 from worker.llm_priority import interactive_llm_busy
@@ -101,13 +103,24 @@ def _lock_company(s, company_id: int) -> Company | None:
     ).scalar_one_or_none()
 
 
+def company_policy(s, company: Company, c: ClaimedCompany) -> IngestPolicy:
+    """Origin, rank and funnel filters for one company's fetch.
+
+    collect_mode 'funnel' applies the user's hard filters at intake; 'all'
+    keeps every job full.
+    """
+    origin = "site" if c.source == "site" else "ats"
+    filters = funnel_filters(s, c.user_id) if company.collect_mode == "funnel" else None
+    return IngestPolicy(origin=origin, source_rank=source_rank_for(c.source), filters=filters)
+
+
 def _record_success(session_factory, c: ClaimedCompany, raws, now, interval_hours) -> None:
     """Ingest + health update in ONE transaction."""
     with session_factory() as s:
         company = _lock_company(s, c.company_id)
         if company is None:  # deleted meanwhile
             return
-        ingest_jobs(s, c.user_id, company, raws, now=now)
+        ingest_jobs(s, c.user_id, company, raws, now=now, policy=company_policy(s, company, c))
         company.last_run_at = now
         company.last_success_at = now
         company.last_error = None
