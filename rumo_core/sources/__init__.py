@@ -23,6 +23,7 @@ from rumo_core.sources.base import (
 from rumo_core.sources.ashby import AshbySource
 from rumo_core.sources.bamboohr import BambooHRSource
 from rumo_core.sources.breezy import BreezySource
+from rumo_core.sources.careers import SiteSource
 from rumo_core.sources.personio import PersonioSource
 from rumo_core.sources.pinpoint import PinpointSource
 from rumo_core.sources.recruitee import RecruiteeSource
@@ -143,6 +144,18 @@ register_source("teamtailor", _settings_factory(TeamtailorSource))
 register_source("bamboohr", _settings_factory(BambooHRSource))
 register_source("pinpoint", _settings_factory(PinpointSource))
 
+
+def _site_factory() -> Source:
+    from rumo_core.config import get_settings
+
+    s = get_settings()
+    return SiteSource(
+        shared_client(), max_links=s.site_max_links, max_new_pages=s.site_max_new_pages,
+    )
+
+
+register_source("site", _site_factory)
+
 # Hosts that belong to each ATS: a URL is only read by a connector when its host
 # is one of these (or a subdomain of one), so `evil.test/?x=greenhouse.io` never matches.
 ATS_HOSTS: dict[str, tuple[str, ...]] = {
@@ -214,6 +227,7 @@ __all__ = [
     "AshbySource",
     "SmartRecruitersSource",
     "BreezySource",
+    "SiteSource",
     "get_source",
     "shared_client",
     "register_source",

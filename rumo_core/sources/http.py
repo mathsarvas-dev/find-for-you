@@ -261,6 +261,11 @@ class SafeClient:
         rules = self._robots.get(origin)
         return rules.sitemaps if rules is not None else ()
 
+    async def sitemaps_for(self, origin: str) -> tuple[str, ...]:
+        """Sitemap URLs in the origin's robots.txt (loads and caches robots first)."""
+        rules = await self._robots_rules(origin, _Policy(None, None))
+        return rules.sitemaps
+
     async def get(
         self,
         url: str,
