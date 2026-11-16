@@ -688,3 +688,37 @@ def test_extract_salary_amount_too_large_for_the_column_is_unknown(text):
     # Job.salary_min/max are Numeric(14,2): anything >= 1e12 cannot be stored
     assert extract_salary(text) is None
     assert find_salary_spans(text) == []
+
+
+def test_hints_override_rules():
+    from decimal import Decimal
+
+    from rumo_core.sources.base import RawJob, SalaryHint
+    from rumo_core.sources.normalize import normalize_job
+
+    raw = RawJob(
+        external_id="1", title="Engenheiro", url="https://x.test/1", location_text="Berlin",
+        description_html="<p>Python</p>", department=None, posted_at=None, raw={},
+        work_model_hint="remote", country_hint="DE",
+        salary_hint=SalaryHint(min=Decimal("1000"), max=Decimal("2000"), currency="EUR", period="month"),
+    )
+    n = normalize_job(raw)
+    assert n.work_model == "remote"
+    assert n.country == "DE"
+    assert n.salary_known is True
+    assert (n.salary_min, n.salary_max, n.salary_currency, n.salary_period) == (
+        Decimal("1000"), Decimal("2000"), "EUR", "month")
+
+
+def test_invalid_hints_ignored():
+    from rumo_core.sources.base import RawJob
+    from rumo_core.sources.normalize import normalize_job
+
+    raw = RawJob(
+        external_id="1", title="Engenheiro", url="https://x.test/1", location_text="Remote, Brazil",
+        description_html="<p>Python</p>", department=None, posted_at=None, raw={},
+        work_model_hint="anywhere", country_hint="Germany",
+    )
+    n = normalize_job(raw)
+    assert n.work_model == "remote"  # text rule still applies
+    assert n.country == "BR"

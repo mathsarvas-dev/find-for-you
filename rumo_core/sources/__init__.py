@@ -20,9 +20,12 @@ from rumo_core.sources.base import (
     SourceUnavailable,
 )
 from rumo_core.sources.greenhouse import GreenhouseSource
+from rumo_core.sources.http import SafeClient
+from rumo_core.sources.lever import LeverSource
 
 _REGISTRY: dict[str, Callable[[], Source]] = {}
 _CACHE: dict[str, Source] = {}
+_SHARED: list[SafeClient] = []  # one SafeClient for every new connector (pools, robots, limits)
 
 
 def register_source(name: str, factory: Callable[[], Source]) -> None:
@@ -43,11 +46,25 @@ def get_source(name: str) -> Source:
     return source
 
 
+def shared_client() -> SafeClient:
+    """Process-wide SafeClient for the connectors (built on first use)."""
+    if not _SHARED:
+        from rumo_core.config import get_settings
+
+        s = get_settings()
+        _SHARED.append(SafeClient(
+            page_max_bytes=s.fetch_page_max_bytes, timeout=s.fetch_timeout_seconds,
+        ))
+    return _SHARED[0]
+
+
 async def aclose_sources() -> None:
     sources = list(_CACHE.values())
     _CACHE.clear()
     for source in sources:
         await source.aclose()
+    while _SHARED:
+        await _SHARED.pop().aclose()
 
 
 def _greenhouse_factory() -> Source:
@@ -65,6 +82,15 @@ def _greenhouse_factory() -> Source:
 
 register_source("greenhouse", _greenhouse_factory)
 
+
+def _lever_factory() -> Source:
+    from rumo_core.config import get_settings
+
+    return LeverSource(shared_client(), max_bytes=get_settings().fetch_max_bytes)
+
+
+register_source("lever", _lever_factory)
+
 __all__ = [
     "RawJob",
     "Source",
@@ -73,7 +99,9 @@ __all__ = [
     "SourceUnavailable",
     "SourceBadResponse",
     "GreenhouseSource",
+    "LeverSource",
     "get_source",
+    "shared_client",
     "register_source",
     "aclose_sources",
 ]

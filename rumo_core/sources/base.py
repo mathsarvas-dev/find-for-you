@@ -53,7 +53,7 @@ class RawJob:
 
 
 # Connectors whose jobs come from an applicant tracking system (rank 0).
-ATS_SOURCES: frozenset[str] = frozenset({"greenhouse"})
+ATS_SOURCES: frozenset[str] = frozenset({"greenhouse", "lever"})
 
 
 def source_rank_for(source: str) -> int:

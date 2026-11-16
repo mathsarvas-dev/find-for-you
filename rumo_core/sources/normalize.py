@@ -818,20 +818,36 @@ def normalize_job(raw: RawJob) -> NormalizedJob:
     department = _cap(raw.department, _MAX_DEPARTMENT) if raw.department else None
     description = html_to_text(raw.description_html)
     country, city = parse_location(location)
-    salary = extract_salary(description)
+    if raw.country_hint and re.fullmatch(r"[A-Z]{2}", raw.country_hint):
+        country = raw.country_hint  # the source's own country code beats the text rule
+    if raw.salary_hint is not None:
+        hint = raw.salary_hint
+        salary_fields = dict(
+            salary_min=hint.min, salary_max=hint.max,
+            salary_currency=hint.currency, salary_period=hint.period, salary_known=True,
+        )
+    else:
+        salary = extract_salary(description)
+        salary_fields = dict(
+            salary_min=salary.min if salary else None,
+            salary_max=salary.max if salary else None,
+            salary_currency=salary.currency if salary else None,
+            salary_period=salary.period if salary else None,
+            salary_known=salary is not None,
+        )
+    if raw.work_model_hint in ("remote", "hybrid", "onsite"):
+        work_model = raw.work_model_hint
+    else:
+        work_model = detect_work_model(location, title, description)
     return NormalizedJob(
         description=description,
         country=country,
         city=city,
-        work_model=detect_work_model(location, title, description),
+        work_model=work_model,
         seniority=detect_seniority(title),
         language=detect_language(f"{title}\n{description}"),
         department=department,
-        salary_min=salary.min if salary else None,
-        salary_max=salary.max if salary else None,
-        salary_currency=salary.currency if salary else None,
-        salary_period=salary.period if salary else None,
-        salary_known=salary is not None,
+        **salary_fields,
         # sha256 of (title, location_text, description text, department), capped fields
         content_hash=_sha(title, location, description, department or ""),
         # sha256 of (normalised title, normalised location_text); id-independent
