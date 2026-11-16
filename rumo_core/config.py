@@ -46,6 +46,19 @@ class Settings(BaseSettings):
     discovery_max_seconds: float = Field(20, gt=0)
     discovery_max_auto_companies: int = Field(100, gt=0)
     discovery_max_attempts: int = Field(3, gt=0)
+    # Job sources (marco 3b).
+    fetch_page_max_bytes: int = Field(5_000_000, gt=0)
+    fetch_host_min_interval_seconds: float = Field(2.0, ge=0)
+    fetch_host_daily_cap: int = Field(500, gt=0)
+    site_max_links: int = Field(200, gt=0)
+    site_max_new_pages: int = Field(25, gt=0)
+    feed_job_ttl_days: int = Field(7, gt=0)
+    collect_feeds_max_per_run: int = Field(2, gt=0)
+    # Aggregator keys: .env only; never stored in the database, logged or returned.
+    adzuna_app_id: str = Field("", repr=False)
+    adzuna_app_key: str = Field("", repr=False)
+    jooble_key: str = Field("", repr=False)
+    careerjet_key: str = Field("", repr=False)
     # Comma-separated list of browser origins allowed to call the API.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

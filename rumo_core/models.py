@@ -5,7 +5,7 @@ from decimal import Decimal
 
 from sqlalchemy import (
     Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric,
-    String, Text, UniqueConstraint, func, text,
+    SmallInteger, String, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -182,7 +182,10 @@ class Company(UserScopedMixin, TimestampMixin, Base):
             name="uq_companies_user_source_identifier",
         ),
         CheckConstraint(
-            "origin in ('manual','auto')", name="ck_companies_origin"
+            "origin in ('manual','auto','feed','link')", name="ck_companies_origin"
+        ),
+        CheckConstraint(
+            "collect_mode in ('funnel','all')", name="ck_companies_collect_mode"
         ),
     )
 
@@ -204,9 +207,13 @@ class Company(UserScopedMixin, TimestampMixin, Base):
         nullable=False, server_default="0"
     )
     open_jobs: Mapped[int] = mapped_column(nullable=False, server_default="0")
-    # manual | auto
+    # manual | auto | feed | link
     origin: Mapped[str] = mapped_column(
         String(16), nullable=False, server_default="manual"
+    )
+    # funnel | all (all = skip the hard-filter funnel for this company)
+    collect_mode: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="funnel"
     )
 
 
@@ -223,6 +230,12 @@ class Job(UserScopedMixin, TimestampMixin, Base):
             "user_id", "company_id", "fingerprint",
         ),
         Index("ix_jobs_user_model_version", "user_id", "model_version"),
+        Index("ix_jobs_user_intake_status", "user_id", "intake", "status"),
+        Index("ix_jobs_user_fingerprint", "user_id", "fingerprint"),
+        CheckConstraint("intake in ('full','stub','gated')", name="ck_jobs_intake"),
+        CheckConstraint(
+            "origin in ('ats','site','feed','link')", name="ck_jobs_origin"
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -281,6 +294,18 @@ class Job(UserScopedMixin, TimestampMixin, Base):
     fill_attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
     embedding: Mapped[list[float] | None] = mapped_column(Vector(1024))
     model_version: Mapped[str | None] = mapped_column(String(128))
+    # full | stub | gated (funnel, marco 3b)
+    intake: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="full"
+    )
+    stub_reason: Mapped[str | None] = mapped_column(String(32))
+    source_rank: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default="0"
+    )
+    # ats | site | feed | link
+    origin: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="ats"
+    )
 
 
 class SearchProfile(UserScopedMixin, TimestampMixin, Base):
@@ -372,7 +397,7 @@ class DiscoveryCandidate(UserScopedMixin, TimestampMixin, Base):
             "user_id", "state", "retry_after",
         ),
         CheckConstraint(
-            "origin_kind in ('catalog','profile','target')",
+            "origin_kind in ('catalog','profile','target','feed')",
             name="ck_discovery_candidates_origin_kind",
         ),
         CheckConstraint(
@@ -411,9 +436,56 @@ class UserPreference(Base):
         JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
     quality_seed: Mapped[int | None] = mapped_column(Integer)
+    # vector cut for the funnel (marco 3b); NULL = no cut
+    adherence_vec_floor: Mapped[float | None] = mapped_column(Float)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         onupdate=func.now(),
         nullable=False,
     )
+
+
+class JobFeed(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "job_feeds"
+    __table_args__ = (
+        Index(
+            "uq_job_feeds_user_source_params",
+            "user_id", "source", text("md5((params)::text)"),
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    params: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true"
+    )
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    consecutive_failures: Mapped[int] = mapped_column(
+        nullable=False, server_default="0"
+    )
+    jobs_seen: Mapped[int] = mapped_column(nullable=False, server_default="0")
+
+
+class PortalState(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "portal_state"
+    __table_args__ = (
+        UniqueConstraint("user_id", "portal", name="uq_portal_state_user_portal"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    portal: Mapped[str] = mapped_column(String(64), nullable=False)
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    blocked_by_site: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

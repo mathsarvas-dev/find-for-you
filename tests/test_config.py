@@ -77,3 +77,21 @@ def test_build_llm_model_override_keeps_main_model_untouched():
     assert fill._settings.groq_model == "openai/gpt-oss-20b"
     assert s.groq_model == "openai/gpt-oss-120b"
     assert build_llm(Settings(_env_file=None, database_url="postgresql+psycopg://u:p@h/db")) is None
+
+
+def test_job_sources_settings_defaults():
+    s = Settings(database_url="x", _env_file=None)
+    assert s.fetch_page_max_bytes == 5_000_000
+    assert s.fetch_host_min_interval_seconds == 2.0
+    assert s.fetch_host_daily_cap == 500
+    assert s.site_max_links == 200
+    assert s.site_max_new_pages == 25
+    assert s.feed_job_ttl_days == 7
+    assert s.collect_feeds_max_per_run == 2
+    assert s.adzuna_app_id == "" and s.adzuna_app_key == ""
+    assert s.jooble_key == "" and s.careerjet_key == ""
+
+
+def test_api_keys_hidden_from_repr(monkeypatch):
+    s = Settings(database_url="x", _env_file=None, jooble_key="segredo-123")
+    assert "segredo-123" not in repr(s)
