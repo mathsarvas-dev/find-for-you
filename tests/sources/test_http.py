@@ -29,9 +29,20 @@ class FakeResolver:
 
 
 def _client(handler, resolver=None, **kw):
+    def wrapped(request):
+        # robots.txt is answered by the fixture (404 = allow all) and never seen by the test
+        if request.url.path == "/robots.txt":
+            return httpx.Response(404)
+        return handler(request)
+
+    kw.setdefault("sleep", _no_sleep)
     return SafeClient(
-        httpx.MockTransport(handler), resolve=resolver or FakeResolver(), **kw
+        httpx.MockTransport(wrapped), resolve=resolver or FakeResolver(), **kw
     )
+
+
+async def _no_sleep(seconds):
+    return None
 
 
 JSON = {"content-type": "application/json"}
@@ -81,7 +92,7 @@ async def test_connects_to_checked_ip_dns_rebinding():
 
     resolver = FakeResolver([[PUBLIC], ["127.0.0.1"]])
     client = _client(handler, resolver=resolver)
-    await client.get("https://jobs.example.com/api/offers")
+    await client.get("https://jobs.example.com/api/offers", kind="api")
     assert len(resolver.calls) == 1
     req = seen[0]
     assert req.url.host == PUBLIC

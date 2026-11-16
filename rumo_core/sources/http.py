@@ -18,13 +18,21 @@ import socket
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime, timezone
+from email.utils import parsedate_to_datetime
 from typing import Literal
 from urllib.parse import urljoin, urlsplit
 
 import httpx
 
-from rumo_core.sources.base import SourceBadResponse, SourceUnavailable
+from rumo_core.sources.base import SourceBadResponse, SourceBlocked, SourceUnavailable
+from rumo_core.sources.robots import (
+    ROBOTS_MAX_BYTES,
+    RobotsCache,
+    RobotsDisallowed,
+    RobotsRules,
+    parse_robots,
+)
 
 ALLOWED_PORTS = frozenset({80, 443})
 MAX_REDIRECTS = 3
@@ -66,6 +74,54 @@ USER_AGENT = _user_agent()
 
 class UnsafeURL(SourceBadResponse):
     """The address is not one we may fetch (scheme, port, private IP, redirect...)."""
+
+
+class HostCapReached(SourceUnavailable):
+    """The daily request budget for this host is used up."""
+
+
+# consecutive 403/429 answers from one host before we stop asking (no retries, no workarounds)
+BLOCK_AFTER = 2
+# longest wait a single request may spend sleeping for a host's interval
+MAX_WAIT_SECONDS = 10.0
+
+
+class HostLimits:
+    """Per-host spacing, daily count and 403/429 strikes (process memory)."""
+
+    def __init__(self, clock=time.monotonic, today=date.today) -> None:
+        self._clock = clock
+        self._today = today
+        self._next: dict[str, float] = {}
+        self._day: dict[str, date] = {}
+        self._count: dict[str, int] = {}
+        self._strikes: dict[str, int] = {}
+
+    def day_count(self, host: str) -> int:
+        day = self._today()
+        if self._day.get(host) != day:
+            self._day[host] = day
+            self._count[host] = 0
+        return self._count.get(host, 0)
+
+    def wait_seconds(self, host: str) -> float:
+        return max(0.0, self._next.get(host, 0.0) - self._clock())
+
+    def note_sent(self, host: str, interval: float) -> None:
+        self._count[host] = self.day_count(host) + 1
+        self._next[host] = self._clock() + interval
+
+    def set_retry_after(self, host: str, seconds: float | None) -> None:
+        if seconds is None:
+            return
+        self._next[host] = max(self._next.get(host, 0.0), self._clock() + seconds)
+
+    def strike(self, host: str) -> int:
+        self._strikes[host] = self._strikes.get(host, 0) + 1
+        return self._strikes[host]
+
+    def clear_strikes(self, host: str) -> None:
+        self._strikes.pop(host, None)
 
 
 def canonical_url(text: str) -> str:
@@ -183,8 +239,8 @@ class SafeClient:
         today=date.today,
         page_max_bytes: int = 5_000_000,
         timeout: float = 20.0,
-        robots=None,
-        limits=None,
+        robots: RobotsCache | None = None,
+        limits: HostLimits | None = None,
     ) -> None:
         self._client = httpx.AsyncClient(
             transport=transport, follow_redirects=False, timeout=timeout
@@ -195,11 +251,15 @@ class SafeClient:
         self._today = today
         self._page_max_bytes = page_max_bytes
         self._timeout = timeout
-        self._robots = robots
-        self._limits = limits
+        self._robots = robots if robots is not None else RobotsCache(clock)
+        self._limits = limits if limits is not None else HostLimits(clock, today)
 
     async def aclose(self) -> None:
         await self._client.aclose()
+
+    def sitemaps(self, origin: str) -> tuple[str, ...]:
+        rules = self._robots.get(origin)
+        return rules.sitemaps if rules is not None else ()
 
     async def get(
         self,
@@ -209,14 +269,52 @@ class SafeClient:
         max_bytes: int | None = None,
         headers: Mapping[str, str] | None = None,
         accept: str | None = None,
+        min_interval: float | None = None,
+        daily_cap: int | None = None,
     ) -> SafeResponse:
         limit = max_bytes or (self._page_max_bytes if kind == "page" else API_MAX_BYTES)
+        policy = _Policy(min_interval, daily_cap)
         try:
             return await asyncio.wait_for(
-                self._get_checked(url, limit, headers, accept), self._timeout
+                self._get_policy(url, kind, limit, headers, accept, policy),
+                self._timeout,
             )
         except TimeoutError as exc:
             raise SourceUnavailable("tempo esgotado ao buscar a página") from exc
+
+    async def _get_policy(
+        self, url: str, kind: str, limit: int,
+        headers: Mapping[str, str] | None, accept: str | None, policy: "_Policy",
+    ) -> SafeResponse:
+        current = canonical_url(url)
+        parts = urlsplit(current)
+        if kind == "page":
+            origin = _origin(parts)
+            # refuse unsafe addresses before any request, robots.txt included
+            await self._pin(parts.hostname or "", parts.port or _DEFAULT_PORT[parts.scheme])
+            rules = await self._robots_rules(origin, policy)
+            if not rules.allowed(current):
+                raise RobotsDisallowed("robots.txt não permite esta página")
+        return await self._get_checked(current, limit, headers, accept, policy)
+
+    async def _robots_rules(self, origin: str, policy: "_Policy") -> RobotsRules:
+        cached = self._robots.get(origin)
+        if cached is not None:
+            return cached
+        try:
+            res = await self._get_checked(
+                f"{origin}/robots.txt", ROBOTS_MAX_BYTES, None, "text/plain",
+                _Policy(None, None),
+            )
+            rules = parse_robots(res.status, res.body)
+            error = False
+        except (SourceUnavailable, SourceBadResponse) as exc:
+            if isinstance(exc, UnsafeURL):
+                raise
+            rules = parse_robots(None, None)
+            error = True
+        self._robots.put(origin, rules, error=error or rules.deny_all)
+        return rules
 
     async def _pin(self, host: str, port: int) -> str:
         """Resolve once and return the checked IP to connect to."""
@@ -231,10 +329,30 @@ class SafeClient:
             raise UnsafeURL("endereço não público não é permitido")
         return ips[0]
 
+    async def _gate(self, host: str, origin: str, policy: "_Policy") -> None:
+        """Daily cap, per-host interval and crawl-delay before one request."""
+        default_interval, default_cap = policy.resolved()
+        cap = policy.daily_cap if policy.daily_cap is not None else default_cap
+        if self._limits.day_count(host) >= cap:
+            raise HostCapReached("limite diário de acessos ao site atingido")
+        rules = self._robots.get(origin)
+        crawl = (rules.crawl_delay or 0.0) if rules is not None else 0.0
+        interval = max(
+            policy.min_interval if policy.min_interval is not None else default_interval,
+            crawl,
+        )
+        wait = self._limits.wait_seconds(host)
+        if wait > MAX_WAIT_SECONDS:
+            raise SourceUnavailable("o site pediu uma pausa longa; tentaremos depois")
+        if wait > 0:
+            await self._sleep(wait)
+        self._limits.note_sent(host, interval)
+
     async def _get_checked(
-        self, url: str, limit: int, headers: Mapping[str, str] | None, accept: str | None
+        self, url: str, limit: int, headers: Mapping[str, str] | None,
+        accept: str | None, policy: "_Policy",
     ) -> SafeResponse:
-        current = canonical_url(url)
+        current = url
         origin_domain = registrable_domain(urlsplit(current).hostname or "")
         hops = 0
         while True:
@@ -242,11 +360,13 @@ class SafeClient:
             scheme = parts.scheme
             host = parts.hostname or ""
             port = parts.port or _DEFAULT_PORT[scheme]
+            origin = _origin(parts)
             ip = await self._pin(host, port)
+            await self._gate(host, origin, policy)
             ip_part = f"[{ip}]" if ":" in ip else ip
             query = f"?{parts.query}" if parts.query else ""
             target = f"{scheme}://{ip_part}:{port}{parts.path or '/'}{query}"
-            req_headers = {"User-Agent": USER_AGENT, "Host": host}
+            req_headers = {"User-Agent": USER_AGENT}
             if accept:
                 req_headers["Accept"] = accept
             if headers:
@@ -258,6 +378,14 @@ class SafeClient:
                     extensions={"sni_hostname": host},
                 ) as resp:
                     status = resp.status_code
+                    if status in (403, 429):
+                        self._limits.set_retry_after(host, _retry_after(resp.headers, self._clock))
+                        strikes = self._limits.strike(host)
+                        if strikes >= BLOCK_AFTER:
+                            raise SourceBlocked(host)
+                        raise SourceUnavailable(f"o site respondeu HTTP {status}")
+                    if 200 <= status < 300:
+                        self._limits.clear_strikes(host)
                     if status in (301, 302, 303, 307, 308):
                         location = resp.headers.get("location")
                         if not location:
@@ -299,3 +427,45 @@ class SafeClient:
                 raise SourceBadResponse("resposta maior que o limite")
             chunks.append(chunk)
         return b"".join(chunks)
+
+
+@dataclass(frozen=True)
+class _Policy:
+    min_interval: float | None
+    daily_cap: int | None
+
+    def resolved(self) -> tuple[float, int]:
+        # settings are read on first use (not at import time)
+        from rumo_core.config import get_settings
+
+        s = get_settings()
+        return s.fetch_host_min_interval_seconds, s.fetch_host_daily_cap
+
+
+def _origin(parts) -> str:
+    port = parts.port
+    host = parts.hostname or ""
+    if ":" in host:  # IPv6 literal needs brackets in a URL
+        host = f"[{host}]"
+    base = f"{parts.scheme}://{host}"
+    if port is not None and port != _DEFAULT_PORT[parts.scheme]:
+        base += f":{port}"
+    return base
+
+
+def _retry_after(headers, clock) -> float | None:
+    raw = headers.get("retry-after")
+    if not raw:
+        return None
+    raw = raw.strip()
+    if raw.isdigit():
+        return float(raw)
+    try:
+        when = parsedate_to_datetime(raw)
+    except (TypeError, ValueError):
+        return None
+    if when is None:
+        return None
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=timezone.utc)
+    return max(0.0, (when - datetime.now(timezone.utc)).total_seconds())
