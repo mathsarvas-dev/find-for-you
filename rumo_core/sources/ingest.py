@@ -163,7 +163,8 @@ def ingest_jobs(
         by_id[r.external_id] = r
 
     # guard on the EFFECTIVE list: "every item filtered out" counts as empty
-    if not by_id and policy.close_missing:
+    # a listing that only confirms known jobs (listed_ids) is not an empty list
+    if not by_id and policy.close_missing and not policy.listed_ids:
         open_count = session.scalar(
             select(func.count()).select_from(Job).where(
                 Job.user_id == user_id, Job.company_id == company.id, Job.status == "open",

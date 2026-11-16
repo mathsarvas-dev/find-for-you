@@ -3,7 +3,7 @@
 import asyncio
 import logging
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import or_, select, update
@@ -14,16 +14,21 @@ from rumo_core.matching.gate import apply_vec_gate
 from rumo_core.models import Company, Job, UserPreference
 from rumo_core.sources import get_source
 from rumo_core.sources.base import (
-    source_rank_for,
     SourceBadResponse,
+    SourceBlocked,
     SourceNotFound,
     SourceUnavailable,
+    source_rank_for,
 )
+from rumo_core.sources.careers import MSG_NO_STRUCTURED, EmbeddedAtsFound, NoStructuredData
 from rumo_core.sources.embed_text import job_embedding_text
 from rumo_core.sources.fill import JobView, fill_fields, validate_fill
 from rumo_core.sources.funnel import funnel_filters
 from rumo_core.sources.ingest import IngestPolicy, SuspiciousEmptyResult, ingest_jobs
 from rumo_core.sources.normalize import has_pay_context
+from rumo_core.sources.portals.gate import check, portal_for_url
+from rumo_core.sources.portals.state import load_states, mark_blocked_by_site
+from rumo_core.sources.robots import RobotsDisallowed
 from worker import jobs as _chunk_jobs
 from worker.llm_priority import interactive_llm_busy
 
@@ -35,6 +40,15 @@ MSG_BAD_RESPONSE = "Resposta inesperada da fonte."
 MSG_SUSPICIOUS_EMPTY = "A fonte devolveu uma lista vazia de vagas; mantive as vagas abertas."
 MSG_UNKNOWN_SOURCE = "Fonte desconhecida."
 MSG_UNEXPECTED = "Falha inesperada na coleta."
+MSG_BLOCKED = "O site recusou nosso acesso repetidamente; a coleta desta fonte foi suspensa."
+MSG_ROBOTS = "O robots.txt do site não permite a coleta desta página."
+MSG_CONVERTED = "Página de carreira usa {ats}; a empresa passou a ser coletada direto pela API."
+_ATS_LABELS = {
+    "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby",
+    "smartrecruiters": "SmartRecruiters", "breezy": "Breezy", "recruitee": "Recruitee",
+    "personio": "Personio", "teamtailor": "Teamtailor", "bamboohr": "BambooHR",
+    "pinpoint": "Pinpoint",
+}
 
 # Claiming pushes next_run_at this far ahead (committed before the fetch) so
 # another worker or tick cannot take the same company during a slow fetch. A
@@ -115,13 +129,15 @@ def company_policy(s, company: Company, c: ClaimedCompany) -> IngestPolicy:
     return IngestPolicy(origin=origin, source_rank=source_rank_for(c.source), filters=filters)
 
 
-def _record_success(session_factory, c: ClaimedCompany, raws, now, interval_hours) -> None:
+def _record_success(session_factory, c: ClaimedCompany, raws, now, interval_hours,
+                    listed_ids: frozenset[str] = frozenset()) -> None:
     """Ingest + health update in ONE transaction."""
     with session_factory() as s:
         company = _lock_company(s, c.company_id)
         if company is None:  # deleted meanwhile
             return
-        ingest_jobs(s, c.user_id, company, raws, now=now, policy=company_policy(s, company, c))
+        policy = replace(company_policy(s, company, c), listed_ids=listed_ids)
+        ingest_jobs(s, c.user_id, company, raws, now=now, policy=policy)
         company.last_run_at = now
         company.last_success_at = now
         company.last_error = None
@@ -142,6 +158,93 @@ def _record_failure(session_factory, company_id: int, msg: str, now, interval_ho
         s.commit()
 
 
+def _pause(session_factory, company_id: int, msg: str, now) -> None:
+    """Stop collecting a company; the user can re-enable it."""
+    with session_factory() as s:
+        company = _lock_company(s, company_id)
+        if company is None:
+            return
+        company.active = False
+        company.last_run_at = now
+        company.last_error = msg
+        s.commit()
+
+
+def _pause_blocked(session_factory, c: ClaimedCompany, now) -> None:
+    """Pause after repeated 403/429; a portal host is also marked as refusing us."""
+    with session_factory() as s:
+        company = _lock_company(s, c.company_id)
+        if company is None:
+            return
+        company.active = False
+        company.last_run_at = now
+        company.last_error = MSG_BLOCKED
+        portal = portal_for_url(c.identifier)
+        if portal is not None:
+            mark_blocked_by_site(s, c.user_id, portal.id, now)
+        s.commit()
+
+
+def _convert_company(session_factory, c: ClaimedCompany, found: EmbeddedAtsFound, now) -> None:
+    """A careers page embeds an ATS board: collect that board directly from now on."""
+    msg = MSG_CONVERTED.format(ats=_ATS_LABELS.get(found.source, found.source))
+    with session_factory() as s:
+        company = _lock_company(s, c.company_id)
+        if company is None:
+            return
+        taken = s.scalar(
+            select(Company.id).where(
+                Company.user_id == c.user_id, Company.source == found.source,
+                Company.identifier == found.identifier,
+            )
+        )
+        company.last_run_at = now
+        company.last_error = msg
+        if taken is None:
+            company.source = found.source
+            company.identifier = found.identifier
+            company.next_run_at = now
+        else:
+            company.active = False
+        s.commit()
+
+
+def _gate_message(session_factory, c: ClaimedCompany) -> str | None:
+    """Why a portal page may not be collected now (None = allowed)."""
+    portal = portal_for_url(c.identifier)
+    if portal is None:
+        return None
+    with session_factory() as s:
+        state = load_states(s, c.user_id).get(portal.id)
+    verdict = check(portal.id, c.identifier, state=state)
+    return None if verdict.allowed else verdict.message
+
+
+def _known_external_ids(session_factory, company_id: int) -> frozenset[str]:
+    """Jobs still on the board (stubs excluded: they must be judged again)."""
+    with session_factory() as s:
+        return frozenset(s.scalars(
+            select(Job.external_id).where(
+                Job.company_id == company_id, Job.status.in_(("open", "duplicate")),
+                Job.intake != "stub",
+            )
+        ))
+
+
+async def _collect_site(session_factory, c: ClaimedCompany, source, clock,
+                        interval_hours: int) -> None:
+    msg = _gate_message(session_factory, c)
+    if msg is not None:
+        _record_failure(session_factory, c.company_id, msg, clock(), interval_hours)
+        return
+    known = _known_external_ids(session_factory, c.company_id)
+    fetch = await source.fetch_listing(c.identifier, known_ids=known)  # no transaction held
+    await asyncio.to_thread(
+        _record_success, session_factory, c, fetch.raws, clock(), interval_hours,
+        fetch.listed_ids,
+    )
+
+
 async def _collect_one(session_factory, c: ClaimedCompany, *, source_getter, clock,
                        interval_hours: int) -> None:
     try:
@@ -149,16 +252,31 @@ async def _collect_one(session_factory, c: ClaimedCompany, *, source_getter, clo
             source = source_getter(c.source)
         except KeyError:
             raise _UnknownSource() from None
-        raws = await source.fetch_jobs(c.identifier)  # no DB transaction held
-        # normalize + ingest are CPU/DB-bound: run them off the event loop. The
-        # thread opens its OWN session (nothing is shared across threads).
-        await asyncio.to_thread(
-            _record_success, session_factory, c, raws, clock(), interval_hours
-        )
+        if c.source == "site":
+            await _collect_site(session_factory, c, source, clock, interval_hours)
+        else:
+            raws = await source.fetch_jobs(c.identifier)  # no DB transaction held
+            # normalize + ingest are CPU/DB-bound: run them off the event loop. The
+            # thread opens its OWN session (nothing is shared across threads).
+            await asyncio.to_thread(
+                _record_success, session_factory, c, raws, clock(), interval_hours
+            )
     except _UnknownSource:
         logger.warning("company %s: unknown source", c.company_id)
         _record_failure(session_factory, c.company_id, MSG_UNKNOWN_SOURCE, clock(),
                         interval_hours)
+    except EmbeddedAtsFound as exc:
+        logger.info("company %s: careers page embeds %s", c.company_id, exc.source)
+        _convert_company(session_factory, c, exc, clock())
+    except SourceBlocked:
+        logger.warning("company %s: source refused access repeatedly", c.company_id)
+        _pause_blocked(session_factory, c, clock())
+    except NoStructuredData:
+        logger.warning("company %s: no structured job data", c.company_id)
+        _pause(session_factory, c.company_id, MSG_NO_STRUCTURED, clock())
+    except RobotsDisallowed:
+        logger.warning("company %s: robots.txt disallows the page", c.company_id)
+        _record_failure(session_factory, c.company_id, MSG_ROBOTS, clock(), interval_hours)
     except Exception as exc:
         for cls, msg in _EXPECTED:
             if isinstance(exc, cls):
