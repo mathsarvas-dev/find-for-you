@@ -1,0 +1,257 @@
+[
+  {
+    "id": "indeed",
+    "name": "Indeed",
+    "kind": "portal",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Pesquisa de 14/11/2026: termos e robots proíbem coleta automática. Só importar por link."
+    },
+    "hosts": ["indeed.com", "indeed.com.br"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "linkedin",
+    "name": "LinkedIn",
+    "kind": "portal",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Pesquisa de 14/11/2026: termos proíbem coleta automática. Só importar por link."
+    },
+    "hosts": ["linkedin.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "jobbol",
+    "name": "Jobbol",
+    "kind": "portal",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Pesquisa de 14/11/2026: o site respondeu 403 ao acesso do sistema. Só importar por link."
+    },
+    "hosts": ["jobbol.com.br"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "weworkremotely",
+    "name": "We Work Remotely",
+    "kind": "feed",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Pesquisa de 14/11/2026: o site respondeu 403 ao acesso do sistema."
+    },
+    "hosts": ["weworkremotely.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "gupy_portal",
+    "name": "Portal Gupy",
+    "kind": "portal",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Pesquisa de 14/11/2026: a API usada pelo portal é interna e não documentada; a API oficial exige token. Só importar por link."
+    },
+    "hosts": ["portal.gupy.io", "gupy.io"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "infojobs_br",
+    "name": "InfoJobs",
+    "kind": "portal",
+    "status": "blocked",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://www.infojobs.com.br/robots.txt"],
+      "summary": "Verificação de 14/11/2026: o robots.txt proíbe /detailvacancy.aspx e não há sitemap de vagas. Só importar por link."
+    },
+    "hosts": ["infojobs.com.br"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 0
+  },
+  {
+    "id": "vagas",
+    "name": "Vagas.com.br",
+    "kind": "portal",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://www.vagas.com.br/robots.txt", "https://www.vagas.com.br/sitemap.xml"],
+      "summary": "Verificação de 14/11/2026: o sitemap está obsoleto (lastmod de 2023) e a página de vaga não traz JobPosting. Ligue só se aceitar o risco; a coleta fica só por link."
+    },
+    "hosts": ["vagas.com.br"],
+    "paths_allowed": [],
+    "min_interval_seconds": 10,
+    "daily_cap": 200
+  },
+  {
+    "id": "catho",
+    "name": "Catho",
+    "kind": "portal",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://www.catho.com.br/robots.txt"],
+      "summary": "Verificação de 14/11/2026: a página de vaga respondeu 403 ao acesso do sistema. Ligue só se aceitar o risco; a coleta fica só por link."
+    },
+    "hosts": ["catho.com.br"],
+    "paths_allowed": [],
+    "min_interval_seconds": 10,
+    "daily_cap": 200
+  },
+  {
+    "id": "inhire",
+    "name": "InHire",
+    "kind": "portal",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://priner.inhire.app/vagas"],
+      "summary": "Verificação de 14/11/2026: a página de vagas é um SPA sem JSON-LD nem API pública documentada. Só importar por link."
+    },
+    "hosts": ["inhire.com.br", "inhire.app"],
+    "paths_allowed": [],
+    "min_interval_seconds": 10,
+    "daily_cap": 200
+  },
+  {
+    "id": "bundesagentur",
+    "name": "Bundesagentur für Arbeit",
+    "kind": "feed",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": [],
+      "summary": "Documentação comunitária; os termos de uso não foram verificados e a API recusou o acesso de teste em 14/11/2026."
+    },
+    "hosts": ["rest.arbeitsagentur.de"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 24
+  },
+  {
+    "id": "remotive",
+    "name": "Remotive",
+    "kind": "feed",
+    "status": "allowed",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://remotive.com/api/remote-jobs"],
+      "summary": "Aviso legal do próprio feed: no máximo 4 chamadas por dia, citar a fonte e linkar a vaga; não republicar em terceiros."
+    },
+    "hosts": ["remotive.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 21600,
+    "daily_cap": 4
+  },
+  {
+    "id": "remoteok",
+    "name": "Remote OK",
+    "kind": "feed",
+    "status": "allowed",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://remoteok.com/api"],
+      "summary": "Termos do feed: linkar de volta à vaga no Remote OK e citar a fonte."
+    },
+    "hosts": ["remoteok.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 24
+  },
+  {
+    "id": "himalayas",
+    "name": "Himalayas",
+    "kind": "feed",
+    "status": "allowed",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://himalayas.app/api"],
+      "summary": "Termos da API: usar applicationLink sem alterar, mostrar a fonte, não repassar a agregadores."
+    },
+    "hosts": ["himalayas.app"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 24
+  },
+  {
+    "id": "arbeitnow",
+    "name": "Arbeitnow",
+    "kind": "feed",
+    "status": "allowed",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://www.arbeitnow.com/api/job-board-api"],
+      "summary": "Termos em meta.terms da própria API: link de volta ao site."
+    },
+    "hosts": ["arbeitnow.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 24
+  },
+  {
+    "id": "adzuna",
+    "name": "Adzuna",
+    "kind": "feed",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://developer.adzuna.com/"],
+      "summary": "Não verificado em 14/11/2026: sem chave no .env. Liga só depois da verificação com chave."
+    },
+    "hosts": ["api.adzuna.com"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 50
+  },
+  {
+    "id": "jooble",
+    "name": "Jooble",
+    "kind": "feed",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://jooble.org/info/terms"],
+      "summary": "Não verificado em 14/11/2026: sem chave no .env. Liga só depois da verificação com chave."
+    },
+    "hosts": ["jooble.org"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 50
+  },
+  {
+    "id": "careerjet",
+    "name": "Careerjet",
+    "kind": "feed",
+    "status": "conditional",
+    "checked_at": "2026-11-14",
+    "evidence": {
+      "urls": ["https://www.careerjet.com/partners/api/"],
+      "summary": "Não verificado em 14/11/2026: sem chave no .env. Liga só depois da verificação com chave."
+    },
+    "hosts": ["careerjet.com", "search.api.careerjet.net"],
+    "paths_allowed": [],
+    "min_interval_seconds": 3600,
+    "daily_cap": 50
+  }
+]
