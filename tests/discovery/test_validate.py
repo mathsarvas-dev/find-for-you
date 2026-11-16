@@ -79,3 +79,12 @@ async def test_validate_candidate_name_is_bounded():
     out = await validate_candidate(src, "acme")
     assert out.kind == "valid" and out.name == "x" * 255
     await src.aclose()
+
+
+async def test_validate_requires_accepted_job():
+    src = _source(_json({"jobs": [_job(1), _job(2)]}))
+    refused = await validate_candidate(src, "acme", accept=lambda r: False)
+    assert refused == Outcome("invalid", 0, None)
+    one = await validate_candidate(src, "acme", accept=lambda r: r.external_id == "1")
+    assert one.kind == "valid" and one.open_jobs == 1
+    await src.aclose()

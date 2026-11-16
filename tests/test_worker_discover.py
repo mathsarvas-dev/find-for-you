@@ -68,6 +68,8 @@ class Sleeps:
 def _clean_state(monkeypatch):
     dmod._reset_state()
     monkeypatch.setattr(cmod, "load_catalog", lambda *a, **k: [])
+    # these tests model one ATS; the multi-source behaviour has its own tests below
+    monkeypatch.setattr(dmod, "DISCOVERY_SOURCES", ("greenhouse",))
     yield
     dmod._reset_state()
 
@@ -309,9 +311,9 @@ async def test_refresh_at_most_hourly(uid, monkeypatch):
     calls = []
     real = dmod.refresh_candidates
 
-    def counting(session, user_id):
+    def counting(session, user_id, *, source="greenhouse"):
         calls.append(user_id)
-        return real(session, user_id)
+        return real(session, user_id, source=source)
 
     monkeypatch.setattr(dmod, "refresh_candidates", counting)
     src = FakeSource()
@@ -591,3 +593,50 @@ async def test_removed_target_is_never_validated(uid):
     with SessionLocal() as s:
         assert s.get(DiscoveryCandidate, gone) is None
     assert companies(uid) == []
+
+
+@pytest.mark.db
+async def test_feed_origin_priority_between_profile_and_catalog(uid):
+    cat = add_cand(uid, "cat0")
+    feed = add_cand(uid, "feedco", origin_kind="feed")
+    src = FakeSource({"cat0": [raw(1)], "feedco": [raw(2)]})
+    assert await run(uid, src, max_auto=1) == 1
+    assert src.calls == ["feedco"]
+    assert cand(feed).state == "valid"
+    assert cand(cat).state == "pending"
+
+
+@pytest.mark.db
+async def test_valid_lever_candidate_creates_lever_company(uid):
+    with SessionLocal() as s:
+        s.add(DiscoveryCandidate(user_id=uid, source="lever", token="acme", origin_kind="feed", state="pending"))
+        s.commit()
+    src = FakeSource({"acme": [raw(1)]})
+    assert await run(uid, src, getter=lambda name: src) == 1
+    rows = companies(uid)
+    assert [(c.source, c.identifier, c.origin) for c in rows] == [("lever", "acme", "auto")]
+
+
+@pytest.mark.db
+async def test_site_candidate_creates_site_company(uid):
+    from rumo_core.sources.careers import ProbeResult
+
+    with SessionLocal() as s:
+        s.add(DiscoveryCandidate(user_id=uid, source="site", token="acme.test", origin_kind="feed", state="pending"))
+        s.commit()
+
+    class SiteFake:
+        name = "site"
+
+        async def probe(self, url, *, extra_paths=()):
+            return ProbeResult("jsonld", None, "https://acme.test/careers", [raw(1)])
+
+        async def fetch_jobs(self, identifier):
+            return []
+
+        async def aclose(self):
+            pass
+
+    site = SiteFake()
+    assert await run(uid, site, getter=lambda name: site) == 1
+    assert [(c.source, c.identifier) for c in companies(uid)] == [("site", "https://acme.test/careers")]

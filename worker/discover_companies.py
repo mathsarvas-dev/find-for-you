@@ -17,10 +17,14 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert
 
+from rumo_core.discovery import DISCOVERY_SOURCES
 from rumo_core.discovery.candidates import refresh_candidates
-from rumo_core.discovery.validate import validate_candidate
+from rumo_core.discovery.validate import validate_candidate, validate_site_candidate
 from rumo_core.models import Company, DiscoveryCandidate, User, UserPreference
 from rumo_core.sources import get_source
+from rumo_core.sources.base import RawJob
+from rumo_core.sources.funnel import decide_intake, funnel_filters, view_of
+from rumo_core.sources.normalize import normalize_job
 
 logger = logging.getLogger("worker.discover_companies")
 
@@ -35,11 +39,13 @@ TRANSIENT_BACKOFF_BASE = timedelta(hours=1)
 MAX_NAME_LEN = 255
 
 # The person's own choices first: explicit targets, then past employers, then
-# the generic catalog (so the catalog can never use up the cap before them).
+# employers of the feeds, then the generic catalog (so the catalog can never use
+# up the cap before them).
 _ORIGIN_PRIORITY = case(
     (DiscoveryCandidate.origin_kind == "target", 0),
     (DiscoveryCandidate.origin_kind == "profile", 1),
-    else_=2,
+    (DiscoveryCandidate.origin_kind == "feed", 2),
+    else_=3,
 )
 
 # user_id -> clock() of the last refresh_candidates call
@@ -104,11 +110,29 @@ def _maybe_refresh(session_factory, user_id: int, clock) -> None:
         return
     _last_refresh[user_id] = t  # also on failure: no hot retry loop
     try:
-        with session_factory() as s:
-            refresh_candidates(s, user_id)
+        for source in DISCOVERY_SOURCES:
+            with session_factory() as s:
+                refresh_candidates(s, user_id, source=source)
     except Exception as exc:  # noqa: BLE001 - one user's refresh must not stop the job
         logger.warning("user %s candidate refresh failed (%s)", user_id,
                        type(exc).__name__)
+
+
+def _acceptor(session_factory, user_id: int):
+    """The user's hard filters as a predicate on one posting (None = accept all).
+
+    A board whose open jobs all fail the filters does not count as a company
+    the user wants (it is invalid, rechecked later), as on the funnel.
+    """
+    with session_factory() as s:
+        filters = funnel_filters(s, user_id)
+    if filters is None:
+        return None
+
+    def accept(raw: RawJob) -> bool:
+        return decide_intake(view_of(raw, normalize_job(raw)), filters)[0] == "full"
+
+    return accept
 
 
 def _active_auto_count(s, user_id: int) -> int:
@@ -201,8 +225,12 @@ def _set_known(row: DiscoveryCandidate, cid: int | None, now: datetime) -> None:
 
 
 def _record_valid(session_factory, c: _Claimed, name: str | None, now: datetime,
-                  max_auto: int) -> str:
+                  max_auto: int, resolved: tuple[str, str] | None = None) -> str:
     """Create the auto company; returns 'created', 'known', 'capped' or 'gone'.
+
+    `resolved` (source, identifier) names the company to create when the
+    candidate was a career page resolving to another board; otherwise the
+    candidate's own source and token.
 
     The user row is locked first (FOR NO KEY UPDATE: serialises discover
     workers for that user without blocking FK inserts) so the cap holds.
@@ -210,6 +238,7 @@ def _record_valid(session_factory, c: _Claimed, name: str | None, now: datetime,
     company that appeared meanwhile turns the candidate known and is never
     modified (a paused one stays paused).
     """
+    src, token = resolved if resolved is not None else (c.source, c.token)
     with session_factory() as s:
         s.execute(
             select(User.id).where(User.id == c.user_id).with_for_update(key_share=True)
@@ -218,17 +247,17 @@ def _record_valid(session_factory, c: _Claimed, name: str | None, now: datetime,
         if row is None:
             s.rollback()
             return "gone"
-        cid = _existing_company_id(s, c.user_id, c.source, c.token)
+        cid = _existing_company_id(s, c.user_id, src, token)
         if cid is None and _active_auto_count(s, c.user_id) >= max_auto:
             # retried once a slot frees up (a recheck keeps its own schedule)
             row.retry_after = now + EMPTY_RECHECK if c.recheck else None
             s.commit()
             return "capped"
         if cid is None:
-            company_name = (name or c.name_hint or c.token)[:MAX_NAME_LEN]
+            company_name = (name or c.name_hint or token)[:MAX_NAME_LEN]
             cid = s.execute(
                 insert(Company)
-                .values(user_id=c.user_id, source=c.source, identifier=c.token,
+                .values(user_id=c.user_id, source=src, identifier=token,
                         name=company_name, origin="auto", active=True,
                         next_run_at=now)
                 .on_conflict_do_nothing(
@@ -245,7 +274,7 @@ def _record_valid(session_factory, c: _Claimed, name: str | None, now: datetime,
                 row.checked_at = now
                 s.commit()
                 return "created"
-            cid = _existing_company_id(s, c.user_id, c.source, c.token)
+            cid = _existing_company_id(s, c.user_id, src, token)
         _set_known(row, cid, now)
         s.commit()
         return "known"
@@ -301,7 +330,13 @@ async def _validate_one(session_factory, c: _Claimed, *, source_getter, utcnow,
         _record_invalid(session_factory, c, "UnknownSource", None, utcnow())
         return "invalid"
     try:
-        outcome = await validate_candidate(source, c.token)  # no DB transaction held
+        accept = _acceptor(session_factory, c.user_id)
+        if c.source == "site":  # no DB transaction held during the network calls
+            outcome = await validate_site_candidate(
+                source, c.token, accept=accept, source_getter=source_getter,
+            )
+        else:
+            outcome = await validate_candidate(source, c.token, accept=accept)
     except Exception as exc:  # noqa: BLE001 - unexpected: retry later
         logger.warning("candidate %s unexpected validation failure (%s)", c.id,
                        type(exc).__name__)
@@ -309,7 +344,8 @@ async def _validate_one(session_factory, c: _Claimed, *, source_getter, utcnow,
         return "transient"
     now = utcnow()
     if outcome.kind == "valid":
-        result = _record_valid(session_factory, c, outcome.name, now, max_auto)
+        result = _record_valid(session_factory, c, outcome.name, now, max_auto,
+                               resolved=outcome.resolved)
     elif outcome.kind == "invalid":
         retry = None if outcome.error else now + EMPTY_RECHECK
         _record_invalid(session_factory, c, outcome.error, retry, now)

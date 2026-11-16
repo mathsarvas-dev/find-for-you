@@ -29,9 +29,10 @@ class RefreshStats:
     known: int
 
 
-def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]:
+def _gather(session: Session, user_id: int, source: str) -> dict[str, tuple[str, str | None]]:
     """token -> (origin_kind, name_hint); priority target > profile > catalog
-    (gathered in that order, first wins), deterministic."""
+    (gathered in that order, first wins), deterministic. The catalog is the
+    one of `source` (each ATS has its own)."""
     found: dict[str, tuple[str, str | None]] = {}
 
     def add(token: str, kind: str, hint: str | None) -> None:
@@ -64,7 +65,7 @@ def _gather(session: Session, user_id: int) -> dict[str, tuple[str, str | None]]
             for tok in token_variants(name):
                 add(tok, "profile", name[:255])
 
-    for entry in load_catalog():
+    for entry in load_catalog(source):
         add(entry.token, "catalog", entry.name)
     return found
 
@@ -79,7 +80,7 @@ def refresh_candidates(
     valid/invalid/rejected/known are never retired. Commits the
     session (including any pending work the caller had in it).
     """
-    found = _gather(session, user_id)
+    found = _gather(session, user_id, source)
 
     created = known = 0
     if found:

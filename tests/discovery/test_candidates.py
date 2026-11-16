@@ -415,3 +415,24 @@ def test_retire_is_state_guarded_against_concurrent_change(session):
     assert fired
     session.expire_all()
     assert _cands(session, uid)["acme"].state == "rejected"
+
+
+@pytest.mark.db
+def test_refresh_per_source_tokens(session):
+    uid = session.info["uid"]
+    _profile(session, uid, ["Acme"])
+    refresh_candidates(session, uid, source="lever")
+    rows = session.scalars(select(DiscoveryCandidate).where(DiscoveryCandidate.user_id == uid)).all()
+    assert {(r.source, r.token) for r in rows} == {("lever", "acme"), ("lever", "alpha"), ("lever", "beta")}
+    refresh_candidates(session, uid, source="greenhouse")
+    greenhouse = {r.token for r in session.scalars(select(DiscoveryCandidate).where(DiscoveryCandidate.user_id == uid, DiscoveryCandidate.source == "greenhouse")).all()}
+    assert greenhouse == {"acme", "alpha", "beta"}
+
+
+@pytest.mark.db
+def test_feed_candidates_survive_refresh(session):
+    uid = session.info["uid"]
+    session.add(DiscoveryCandidate(user_id=uid, source="lever", token="zeta", origin_kind="feed", state="pending"))
+    session.commit()
+    refresh_candidates(session, uid, source="lever")
+    assert session.scalar(select(DiscoveryCandidate.id).where(DiscoveryCandidate.user_id == uid, DiscoveryCandidate.token == "zeta")) is not None

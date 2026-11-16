@@ -25,8 +25,28 @@ def test_catalog_rejects_invalid_tokens_and_duplicates(tmp_path):
         {"name": "NoToken"},
         "junk",
     ]))
-    entries = load_catalog(p)
+    entries = load_catalog(path=p)
     assert [e.token for e in entries] == ["good", "ok-2"]
+
+
+def test_load_catalog_per_source(tmp_path):
+    (tmp_path / "lever.json").write_text("[]", encoding="utf-8")
+    assert load_catalog("lever", path=tmp_path / "lever.json") == []
+    assert load_catalog("nao-existe", path=tmp_path / "missing.json") == []
+    p = tmp_path / "c.json"
+    p.write_text(json.dumps([{"token": "acme", "name": "Acme", "country": "de"},
+                             {"token": "beta", "name": "Beta", "country": "Brasil"}]))
+    entries = load_catalog(path=p)
+    assert entries[0].country == "DE"
+    assert entries[1].country is None
+
+
+def test_each_ats_catalog_file_exists_and_is_a_list():
+    import rumo_core.discovery.catalog as catalog
+
+    for source in ("lever", "ashby", "smartrecruiters", "breezy"):
+        raw = json.loads((catalog.CATALOG_DIR / f"{source}.json").read_text(encoding="utf-8"))
+        assert isinstance(raw, list)
 
 
 def test_catalog_all_valid_and_unique():
