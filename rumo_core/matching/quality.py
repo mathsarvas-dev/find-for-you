@@ -4,6 +4,7 @@ Labels belong to (user, job); the sample is a deterministic function of the
 user's seed and the current ranking, so it is stable until `new_seed`.
 """
 
+import math
 import random
 import secrets
 from collections.abc import Mapping, Sequence
@@ -189,3 +190,37 @@ def evaluate(session: Session, user_id: int, *, model_version: str) -> QualityRe
         precision_at_10=p, precision_vec_at_10=pv, target=TARGET,
         misranked=misranked,
     )
+
+
+FLOOR_KEEP = 0.95
+
+
+def floor_from_scores(scores: Sequence[float], keep: float = FLOOR_KEEP) -> float | None:
+    """Highest cut that keeps `keep` of the scores (the lowest of them is dropped).
+
+    None when there are fewer than MIN_EACH scores: not enough to suggest one.
+    Rounded DOWN to 3 decimals so the cut never removes more than planned.
+    """
+    if len(scores) < MIN_EACH:
+        return None
+    ordered = sorted(float(x) for x in scores)
+    k = math.floor((1 - keep) * len(ordered) + 1e-9)
+    return math.floor(ordered[k] * 1000) / 1000
+
+
+def suggest_floor(session: Session, user_id: int, *, model_version: str) -> float | None:
+    """Cut suggested from the jobs the user marked 'good' (never applied by itself)."""
+    good = [
+        job_id for (job_id,) in session.execute(
+            select(JobLabel.job_id).where(JobLabel.user_id == user_id, JobLabel.label == "good")
+        ).all()
+    ]
+    if not good:
+        return None
+    ranked = top_candidate_ids(
+        session, user_id, SearchFilters(), model_version=model_version, n=len(good),
+        status="all", intakes=("full", "gated"), only_ids=good,
+        query_embedding=usable_query_embedding(session, user_id, model_version),
+    )
+    return floor_from_scores([score for _, score in ranked])
+

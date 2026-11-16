@@ -10,7 +10,8 @@ from sqlalchemy import or_, select, update
 
 from rumo_core.embeddings.base import Embedder
 from rumo_core.llm.base import LLMError, LLMProvider, LLMRateLimited
-from rumo_core.models import Company, Job
+from rumo_core.matching.gate import apply_vec_gate
+from rumo_core.models import Company, Job, UserPreference
 from rumo_core.sources import get_source
 from rumo_core.sources.base import (
     source_rank_for,
@@ -301,10 +302,26 @@ async def embed_pending_jobs(
             for (job, _name), v in zip(rows, vectors, strict=True):
                 job.embedding = v
                 job.model_version = embedder.model_version
+            by_owner: dict[int, list[int]] = {}
+            for job, _name in rows:
+                by_owner.setdefault(job.user_id, []).append(job.id)
             s.commit()
             _jobs_embed_failures = 0
             total += len(rows)
+        _apply_floors(session_factory, by_owner, embedder.model_version)
     return total
+
+
+def _apply_floors(session_factory, by_owner: dict[int, list[int]], model_version: str) -> None:
+    """Cut the just-vectorised jobs of users who set a vector floor (own transaction)."""
+    with session_factory() as s:
+        for owner, ids in by_owner.items():
+            floor = s.scalar(
+                select(UserPreference.adherence_vec_floor).where(UserPreference.user_id == owner)
+            )
+            if floor is not None:
+                apply_vec_gate(s, owner, model_version=model_version, floor=floor, job_ids=ids)
+        s.commit()
 
 
 # --- LLM fill of missing fields -----------------------------------------------
@@ -354,12 +371,21 @@ def _select_fill_candidates(
     seen: set[int] = set()  # picked rows stay unmarked: never re-pick them this tick
     for _ in range(_FILL_MAX_WINDOWS):
         with session_factory() as s:
-            stmt = select(Job).where(
-                Job.status == "open",
-                Job.intake == "full",
-                Job.llm_filled_at.is_(None),
-                Job.fill_attempts < MAX_FILL_ATTEMPTS,
-                or_(Job.work_model == "unknown", Job.salary_known.is_(False)),
+            # with a vector floor the LLM only sees jobs that already have a vector
+            stmt = (
+                select(Job)
+                .outerjoin(UserPreference, UserPreference.user_id == Job.user_id)
+                .where(
+                    Job.status == "open",
+                    Job.intake == "full",
+                    Job.llm_filled_at.is_(None),
+                    Job.fill_attempts < MAX_FILL_ATTEMPTS,
+                    or_(Job.work_model == "unknown", Job.salary_known.is_(False)),
+                    or_(
+                        UserPreference.adherence_vec_floor.is_(None),
+                        Job.embedding.is_not(None),
+                    ),
+                )
             )
             if user_id is not None:
                 stmt = stmt.where(Job.user_id == user_id)
