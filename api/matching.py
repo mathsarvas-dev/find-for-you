@@ -28,6 +28,7 @@ from rumo_core.matching.ranking import (
     current_match, job_vec_score, rank_jobs, usable_profile, usable_query_embedding,
 )
 from rumo_core.matching.refresh import mark_pending
+from rumo_core.sources.funnel import mark_for_reevaluation
 from rumo_core.models import Company, Job, Match, SearchProfile
 
 router = APIRouter(tags=["matching"])
@@ -243,7 +244,15 @@ def save_filters(session: Session, user_id: int, filters: SearchFilters, *,
         set_=set_,
     )
     try:
+        previous = session.scalar(
+            select(SearchProfile.filters).where(
+                SearchProfile.user_id == user_id, SearchProfile.is_default.is_(True)
+            )
+        )
         session.execute(stmt)
+        if previous != data:
+            # new filters: stubs may now pass, so their sources are collected again
+            mark_for_reevaluation(session, user_id)
         session.commit()
     except IntegrityError as exc:  # e.g. a non-default row already named "default"
         session.rollback()

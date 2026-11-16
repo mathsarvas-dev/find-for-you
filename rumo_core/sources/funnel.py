@@ -14,11 +14,11 @@ from decimal import Decimal
 from typing import Literal
 
 from pydantic import ValidationError
-from sqlalchemy import select
+from sqlalchemy import exists, func, select, update
 from sqlalchemy.orm import Session
 
 from rumo_core.matching.filters import SearchFilters
-from rumo_core.models import Job, SearchProfile
+from rumo_core.models import Company, Job, JobFeed, SearchProfile
 from rumo_core.sources.base import RawJob
 from rumo_core.sources.normalize import NormalizedJob
 
@@ -182,3 +182,32 @@ def funnel_filters(session: Session, user_id: int) -> SearchFilters | None:
     except ValidationError:
         logger.warning("user %s: saved filters are invalid; funnel disabled", user_id)
         return None
+
+
+def mark_for_reevaluation(session: Session, user_id: int) -> tuple[int, int]:
+    """Schedule the sources that hold stubs now, so the next tick re-judges them.
+
+    Returns (companies, feeds) marked. Does not commit.
+    """
+    stub_in_company = exists().where(
+        Job.company_id == Company.id, Job.intake == "stub", Job.status == "open",
+    )
+    companies = session.execute(
+        update(Company)
+        .where(
+            Company.user_id == user_id, Company.active.is_(True),
+            Company.collect_mode == "funnel", stub_in_company,
+        )
+        .values(next_run_at=func.now())
+    ).rowcount
+    stub_in_feed = exists().where(
+        Job.company_id == Company.id, Job.intake == "stub", Job.status == "open",
+        Company.user_id == user_id, Company.origin == "feed", Company.source == JobFeed.source,
+    )
+    feeds = session.execute(
+        update(JobFeed)
+        .where(JobFeed.user_id == user_id, JobFeed.active.is_(True), stub_in_feed)
+        .values(next_run_at=func.now())
+    ).rowcount
+    return companies or 0, feeds or 0
+
