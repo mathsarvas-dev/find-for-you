@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import subprocess
 import sys
@@ -6,6 +7,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
@@ -22,6 +24,9 @@ from rumo_core.sources import (
     SourceNotFound,
     SourceUnavailable,
 )
+from rumo_core.sources.careers import MSG_NO_STRUCTURED, SiteSource
+from rumo_core.sources.http import SafeClient
+from rumo_core.sources.portals.gate import MSG_CONDITIONAL_OFF
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -70,10 +75,49 @@ def fake():
     return FakeSource()
 
 
+PUBLIC_IP = "93.184.216.34"
+
+
+def _site_source(routes: dict, private=()):
+    """Real SiteSource over a mocked network: `routes` maps host+path to (status, type, body)."""
+
+    def handler(request):
+        key = request.headers.get("host", "") + request.url.path
+        status, ctype, body = routes.get(key, (404, "text/html", ""))
+        return httpx.Response(status, headers={"content-type": ctype}, content=body.encode())
+
+    async def resolve(host, port):
+        return ["10.0.0.1"] if host in private else [PUBLIC_IP]
+
+    async def no_sleep(seconds):
+        return None
+
+    client = SafeClient(httpx.MockTransport(handler), resolve=resolve, sleep=no_sleep,
+                        clock=lambda: 0.0)
+    return SiteSource(client, max_links=200, max_new_pages=25)
+
+
+def _posting_html(n: int) -> str:
+    data = {"@type": "JobPosting", "title": f"Vaga {n}", "url": f"https://jobs.example.com/{n}",
+            "identifier": f"id-{n}", "description": "<p>Descrição</p>", "datePosted": "2026-11-10"}
+    return f'<script type="application/ld+json">{json.dumps(data)}</script>'
+
+
 @pytest.fixture
-def client(uids, fake):
+def site():
+    return _site_source({
+        "jobs.example.com/careers": (200, "text/html",
+                                     f"<html><body>{_posting_html(1)}</body></html>"),
+        "jobs.example.com/vazia": (200, "text/html", "<html><body>Olá</body></html>"),
+    })
+
+
+@pytest.fixture
+def client(uids, fake, site):
     app.dependency_overrides[current_user_id] = lambda: uids[0]
-    app.dependency_overrides[api_sources.source_getter] = lambda: (lambda name: fake)
+    app.dependency_overrides[api_sources.source_getter] = lambda: (
+        lambda name: site if name == "site" else fake
+    )
     yield TestClient(app)
     app.dependency_overrides.clear()
 
@@ -181,8 +225,96 @@ def test_add_company_integrity_race_409(client, uids):
 
 @pytest.mark.db
 def test_unknown_source_422(client):
-    r = client.post("/companies", json={"source": "lever", "identifier": "acme"})
+    r = client.post("/companies", json={"source": "nope", "identifier": "acme"})
     assert r.status_code == 422
+
+
+@pytest.mark.db
+def test_add_lever_company(client, uids):
+    r = client.post("/companies", json={"source": "lever", "identifier": "acme"})
+    assert r.status_code == 201, r.text
+    assert r.json()["source"] == "lever"
+    assert r.json()["collect_mode"] == "funnel"
+    assert _count(uids[0]) == 1
+
+
+@pytest.mark.db
+def test_add_by_careers_url_detects_ats(client):
+    r = client.post("/companies", json={"identifier": "https://boards.greenhouse.io/Acme"})
+    assert r.status_code == 201, r.text
+    assert r.json()["source"] == "greenhouse"
+    assert r.json()["identifier"] == "acme"
+
+
+@pytest.mark.db
+def test_add_site_company_with_jsonld(client):
+    r = client.post("/companies", json={"identifier": "https://jobs.example.com/careers"})
+    assert r.status_code == 201, r.text
+    body = r.json()
+    assert body["source"] == "site"
+    assert body["identifier"] == "https://jobs.example.com/careers"
+    assert body["name"] == "jobs.example.com"
+
+
+@pytest.mark.db
+def test_add_site_without_jsonld_422(client, uids):
+    r = client.post("/companies", json={"identifier": "https://jobs.example.com/vazia",
+                                        "source": "site"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == MSG_NO_STRUCTURED
+    assert _count(uids[0]) == 0
+
+
+@pytest.mark.db
+def test_add_portal_url_gate_409(client, uids):
+    r = client.post("/companies", json={"identifier": "https://www.vagas.com.br/empresa-x"})
+    assert r.status_code == 409
+    assert r.json()["detail"] == MSG_CONDITIONAL_OFF
+    assert _count(uids[0]) == 0
+
+
+@pytest.mark.db
+def test_add_unsafe_url_422(client, uids):
+    r = client.post("/companies", json={"identifier": "https://user:pw@jobs.example.com/careers"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Endereço não permitido."
+    assert _count(uids[0]) == 0
+
+
+@pytest.mark.db
+def test_add_without_source_or_url_422(client):
+    r = client.post("/companies", json={"identifier": "acme"})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "Informe a fonte ou cole a URL da página de carreiras."
+
+
+@pytest.mark.db
+def test_patch_collect_mode_schedules(client, uids):
+    cid = _company(uids[0], next_run_at=None)
+    r = client.patch(f"/companies/{cid}", json={"collect_mode": "all"})
+    assert r.status_code == 200
+    assert r.json()["collect_mode"] == "all"
+    assert r.json()["next_run_at"] is not None
+    assert client.patch(f"/companies/{cid}", json={"collect_mode": "x"}).status_code == 422
+
+
+@pytest.mark.db
+def test_company_out_counts_stubs(client, uids):
+    cid = _company(uids[0])
+    for n in range(3):
+        _job(uids[0], cid, f"s{n}", intake="stub")
+    body = client.get("/companies").json()[0]
+    assert body["open_jobs"] == 0
+    assert body["stub_jobs"] == 3
+
+
+@pytest.mark.db
+def test_list_companies_hides_synthetic(client, uids):
+    _company(uids[0], "acme", "Acme")
+    _company(uids[0], "feedco", "Feed Co", origin="feed")
+    assert [c["identifier"] for c in client.get("/companies").json()] == ["acme"]
+    feed = client.get("/companies", params={"origin": "feed"}).json()
+    assert [c["identifier"] for c in feed] == ["feedco"]
 
 
 @pytest.mark.db
@@ -198,7 +330,8 @@ def test_list_companies_health_fields(client, uids):
     assert [c["name"] for c in items] == ["Acme", "Zeta"]
     assert set(items[0]) == {
         "id", "source", "identifier", "name", "country", "active", "last_run_at",
-        "last_success_at", "next_run_at", "last_error", "consecutive_failures", "open_jobs", "origin"}
+        "last_success_at", "next_run_at", "last_error", "consecutive_failures", "open_jobs",
+        "origin", "collect_mode", "stub_jobs"}
     assert items[0]["consecutive_failures"] == 2 and items[0]["open_jobs"] == 3
     assert items[0]["last_error"] == "boom"
 

@@ -9,6 +9,7 @@ import time
 from collections import deque
 from collections.abc import Callable
 from datetime import datetime, timezone
+from urllib.parse import urlsplit
 from decimal import Decimal
 from typing import Literal
 
@@ -28,9 +29,12 @@ from rumo_core.sources import (
     SourceBadResponse,
     SourceNotFound,
     SourceUnavailable,
+    ats_from_url,
     get_source,
     shared_client,
 )
+from rumo_core.sources.base import ATS_SOURCES
+from rumo_core.sources.careers import MSG_NO_STRUCTURED
 from rumo_core.sources.feeds import feed_attribution
 from rumo_core.sources.http import SafeClient, UnsafeURL
 from rumo_core.sources.link_import import (
@@ -39,6 +43,8 @@ from rumo_core.sources.link_import import (
     read_link,
     save_imported_job,
 )
+from rumo_core.sources.portals.gate import Verdict, check, portal_for_url
+from rumo_core.sources.portals.state import load_states
 
 router = APIRouter(tags=["sources"])
 
@@ -48,6 +54,18 @@ IMPORT_LIMIT = 20  # imports per user per window (per process)
 IMPORT_WINDOW_SECONDS = 3600.0
 _IMPORTS: dict[int, deque[float]] = {}
 MSG_NEEDS_TEXT = "Não consegui ler esta vaga automaticamente. Cole o título e a descrição."
+MSG_NEED_SOURCE = "Informe a fonte ou cole a URL da página de carreiras."
+MSG_UNKNOWN_SOURCE = "Fonte desconhecida."
+MSG_UNSAFE_URL = "Endereço não permitido."
+SITE = "site"
+# company origins shown in the companies list (feed/link companies are synthetic)
+MANUAL_ORIGINS = ("manual", "auto")
+SOURCE_LABELS = {
+    "greenhouse": "Greenhouse", "lever": "Lever", "ashby": "Ashby",
+    "smartrecruiters": "SmartRecruiters", "breezy": "Breezy", "recruitee": "Recruitee",
+    "personio": "Personio", "teamtailor": "Teamtailor", "bamboohr": "BambooHR",
+    "pinpoint": "Pinpoint", SITE: "Página de carreira",
+}
 
 
 def source_getter() -> Callable[[str], Source]:
@@ -55,11 +73,29 @@ def source_getter() -> Callable[[str], Source]:
     return get_source
 
 
+def source_label(source: str) -> str:
+    return SOURCE_LABELS.get(source, source)
+
+
+def _is_http_url(text: str) -> bool:
+    return text.lower().startswith(("http://", "https://"))
+
+
 class CompanyIn(BaseModel):
-    source: Literal["greenhouse"]
+    model_config = ConfigDict(extra="forbid")
+
+    source: str | None = Field(default=None, max_length=32)
     identifier: str = Field(max_length=500)
     name: str | None = Field(default=None, max_length=200)
     country: str | None = None
+    collect_mode: Literal["funnel", "all"] = "funnel"
+
+    @field_validator("source")
+    @classmethod
+    def _source(cls, v):
+        if v is not None and v not in ATS_SOURCES and v != SITE:
+            raise ValueError(MSG_UNKNOWN_SOURCE)
+        return v
 
     @field_validator("country")
     @classmethod
@@ -78,6 +114,7 @@ class CompanyPatch(BaseModel):
     active: bool | None = None
     name: str | None = Field(default=None, max_length=200)
     country: str | None = None
+    collect_mode: Literal["funnel", "all"] | None = None
 
     @field_validator("country")
     @classmethod
@@ -106,6 +143,9 @@ class CompanyOut(BaseModel):
     consecutive_failures: int
     open_jobs: int
     origin: str
+    collect_mode: str
+    # open jobs stored as stubs: they fail the user's filters (not counted above)
+    stub_jobs: int = 0
 
 
 class Attribution(BaseModel):
@@ -150,14 +190,26 @@ class JobDetail(JobItem):
     closed_at: datetime | None
 
 
-def _company_out(c: Company) -> CompanyOut:
+def _company_out(c: Company, stub_jobs: int = 0) -> CompanyOut:
     return CompanyOut(
         id=c.id, source=c.source, identifier=c.identifier, name=c.name,
         country=c.country, active=c.active, last_run_at=c.last_run_at,
         last_success_at=c.last_success_at, next_run_at=c.next_run_at,
         last_error=c.last_error, consecutive_failures=c.consecutive_failures,
-        open_jobs=c.open_jobs, origin=c.origin,
+        open_jobs=c.open_jobs, origin=c.origin, collect_mode=c.collect_mode,
+        stub_jobs=stub_jobs,
     )
+
+
+def _stub_counts(session: Session, user_id: int, company_id: int | None = None) -> dict[int, int]:
+    """Open stub jobs per company (the jobs that fail the user's filters)."""
+    conds = [Job.user_id == user_id, Job.status == "open", Job.intake == "stub"]
+    if company_id is not None:
+        conds.append(Job.company_id == company_id)
+    rows = session.execute(
+        select(Job.company_id, func.count(Job.id)).where(*conds).group_by(Job.company_id)
+    ).all()
+    return dict(rows)
 
 
 def _now() -> datetime:
@@ -175,7 +227,7 @@ def _get_company(session: Session, user_id: int, company_id: int) -> Company:
 
 def _create_company(
     session: Session, user_id: int, source: str, identifier: str,
-    name: str | None, country: str | None,
+    name: str | None, country: str | None, collect_mode: str = "funnel",
 ) -> CompanyOut:
     dup = session.scalars(
         select(Company.id).where(
@@ -188,6 +240,7 @@ def _create_company(
     row = Company(
         user_id=user_id, source=source, identifier=identifier,
         name=name or identifier, country=country, active=True, next_run_at=_now(),
+        collect_mode=collect_mode,
     )
     session.add(row)
     try:
@@ -199,6 +252,56 @@ def _create_company(
     return _company_out(row)
 
 
+def _site_verdict(session: Session, user_id: int, portal_id: str, url: str) -> Verdict:
+    """Automatic-collection verdict for a career page hosted on a known portal."""
+    state = load_states(session, user_id).get(portal_id)
+    return check(portal_id, url, state=state)
+
+
+async def _add_site(
+    session: Session, user_id: int, body: CompanyIn, url: str, get_src: Callable[[str], Source],
+) -> CompanyOut:
+    """A careers URL: connect the ATS it embeds, or follow its JobPosting data."""
+    site = get_src(SITE)
+    try:
+        identifier = site.normalize_identifier(url)
+    except (ValueError, UnsafeURL):
+        raise HTTPException(422, MSG_UNSAFE_URL) from None
+    portal = portal_for_url(identifier)
+    if portal is not None:
+        verdict = await run_in_threadpool(_site_verdict, session, user_id, portal.id, identifier)
+        if not verdict.allowed:
+            raise HTTPException(409, verdict.message)
+    try:
+        found = await asyncio.wait_for(
+            site.probe(identifier), timeout=IMPORT_FETCH_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(503, "A fonte demorou demais para responder.") from None
+    except UnsafeURL:
+        raise HTTPException(422, MSG_UNSAFE_URL) from None
+    except SourceUnavailable:
+        raise HTTPException(503, "Fonte indisponível no momento.") from None
+    except SourceBadResponse:
+        raise HTTPException(502, "Resposta inesperada da fonte.") from None
+    if found.kind == "none":
+        raise HTTPException(422, MSG_NO_STRUCTURED)
+    if found.kind == "ats":
+        try:
+            token = get_src(found.source).normalize_identifier(found.identifier)
+        except ValueError:
+            raise HTTPException(422, "Token do quadro inválido.") from None
+        return await run_in_threadpool(
+            _create_company, session, user_id, found.source, token,
+            body.name, body.country, body.collect_mode,
+        )
+    name = body.name or urlsplit(identifier).hostname or identifier
+    return await run_in_threadpool(
+        _create_company, session, user_id, SITE, identifier,
+        name, body.country, body.collect_mode,
+    )
+
+
 @router.post("/companies", status_code=201, response_model=CompanyOut)
 async def add_company(
     body: CompanyIn,
@@ -206,40 +309,63 @@ async def add_company(
     user_id: int = Depends(current_user_id),
     get_src: Callable[[str], Source] = Depends(source_getter),
 ):
-    source = get_src(body.source)
+    """Add a company by board token/URL of an ATS, or by a careers page URL.
+
+    Without `source`, an ATS board URL is recognised by its host; any other
+    http(s) URL is read as a careers page (`site`).
+    """
+    raw = body.identifier.strip()
+    source = body.source
+    if source is None:
+        hit = ats_from_url(raw)
+        if hit is not None:
+            source = hit[0]
+        elif _is_http_url(raw):
+            source = SITE
+        else:
+            raise HTTPException(422, MSG_NEED_SOURCE)
+    if source == SITE:
+        return await _add_site(session, user_id, body, raw, get_src)
+    connector = get_src(source)
     try:
-        identifier = source.normalize_identifier(body.identifier)
+        identifier = connector.normalize_identifier(raw)
     except ValueError:
         raise HTTPException(422, "Token do quadro inválido.") from None
     # Network validation first; no DB transaction is open during the await.
     try:
-        await asyncio.wait_for(source.fetch_jobs(identifier), timeout=FETCH_TIMEOUT_SECONDS)
+        await asyncio.wait_for(connector.fetch_jobs(identifier), timeout=FETCH_TIMEOUT_SECONDS)
     except asyncio.TimeoutError:
         raise HTTPException(503, "A fonte demorou demais para responder.") from None
     except SourceNotFound:
-        raise HTTPException(422, "Quadro não encontrado no Greenhouse.") from None
+        raise HTTPException(
+            422, f"Quadro não encontrado no {source_label(source)}."
+        ) from None
     except SourceUnavailable:
         raise HTTPException(503, "Fonte indisponível no momento.") from None
     except SourceBadResponse:
         raise HTTPException(502, "Resposta inesperada da fonte.") from None
     return await run_in_threadpool(
-        _create_company, session, user_id, body.source, identifier, body.name, body.country
+        _create_company, session, user_id, source, identifier, body.name, body.country,
+        body.collect_mode,
     )
 
 
 @router.get("/companies", response_model=list[CompanyOut])
 def list_companies(
-    origin: Literal["manual", "auto"] | None = None,
+    origin: Literal["manual", "auto", "feed", "link"] | None = None,
     session: Session = Depends(get_session),
     user_id: int = Depends(current_user_id),
 ):
     conds = [Company.user_id == user_id]
     if origin is not None:
         conds.append(Company.origin == origin)
+    else:
+        conds.append(Company.origin.in_(MANUAL_ORIGINS))
     rows = session.scalars(
         select(Company).where(*conds).order_by(Company.name, Company.id)
     ).all()
-    return [_company_out(c) for c in rows]
+    stubs = _stub_counts(session, user_id)
+    return [_company_out(c, stubs.get(c.id, 0)) for c in rows]
 
 
 @router.patch("/companies/{company_id}", response_model=CompanyOut)
@@ -259,9 +385,13 @@ def patch_company(
         if body.active and not row.active:
             row.next_run_at = _now()
         row.active = body.active
+    if "collect_mode" in fields and body.collect_mode is not None:
+        if body.collect_mode != row.collect_mode:
+            row.collect_mode = body.collect_mode
+            row.next_run_at = _now()
     session.commit()
     session.refresh(row)
-    return _company_out(row)
+    return _company_out(row, _stub_counts(session, user_id, row.id).get(row.id, 0))
 
 
 @router.post("/companies/{company_id}/collect-now", response_model=CompanyOut)
@@ -276,7 +406,7 @@ def collect_now(
     row.next_run_at = _now()
     session.commit()
     session.refresh(row)
-    return _company_out(row)
+    return _company_out(row, _stub_counts(session, user_id, row.id).get(row.id, 0))
 
 
 def safe_client() -> SafeClient:

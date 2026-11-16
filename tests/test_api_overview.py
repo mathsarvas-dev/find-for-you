@@ -8,11 +8,11 @@ from api.main import app, current_user_id
 from rumo_core.db import SessionLocal
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
 from rumo_core.models import (
-    Company, InterviewSession, Job, Match, Profile, ProfileChunk, User,
+    Company, InterviewSession, Job, JobFeed, Match, Profile, ProfileChunk, User,
 )
 
 DIM = 1024
-CONTRACT_KEYS = {"profile", "interview", "companies", "jobs", "matches"}
+CONTRACT_KEYS = {"profile", "interview", "companies", "jobs", "matches", "feeds"}
 
 
 def vec():
@@ -115,7 +115,26 @@ def test_overview_empty_user_defaults(env, as_user):
         "companies": {"total": 0, "active": 0, "auto": 0},
         "jobs": {"open": 0, "outside_filters": 0},
         "matches": {"scored": 0, "pending": 0},
+        "feeds": {"active": 0},
     }
+
+
+@pytest.mark.db
+def test_overview_feeds_active(env, as_user):
+    new_user = env[0]
+    uid = new_user()
+    with SessionLocal() as s:
+        s.add_all([
+            JobFeed(user_id=uid, source="remotive", params={"keywords": ["a"]}, active=True),
+            JobFeed(user_id=uid, source="remoteok", params={"keywords": ["b"]}, active=False),
+        ])
+        s.commit()
+    try:
+        assert as_user(uid).get("/overview").json()["feeds"] == {"active": 1}
+    finally:
+        with SessionLocal() as s:
+            s.execute(delete(JobFeed).where(JobFeed.user_id == uid))
+            s.commit()
 
 
 @pytest.mark.db

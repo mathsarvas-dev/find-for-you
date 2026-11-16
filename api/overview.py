@@ -16,7 +16,7 @@ from api.deps import current_user_id
 from rumo_core.db import get_session
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
 from rumo_core.matching.ranking import usable_profile
-from rumo_core.models import Company, InterviewSession, Job, Match
+from rumo_core.models import Company, InterviewSession, Job, JobFeed, Match
 from rumo_core.profile.service import get_current_profile
 
 router = APIRouter(tags=["overview"])
@@ -54,12 +54,17 @@ class MatchesOverview(BaseModel):
     pending: int = 0
 
 
+class FeedsOverview(BaseModel):
+    active: int = 0
+
+
 class OverviewOut(BaseModel):
     profile: ProfileOverview
     interview: InterviewOverview
     companies: CompaniesOverview
     jobs: JobsOverview
     matches: MatchesOverview
+    feeds: FeedsOverview = FeedsOverview()
 
 
 def _clean(value: object) -> str | None:
@@ -157,6 +162,14 @@ def _matches(session: Session, user_id: int, current) -> MatchesOverview:
     return MatchesOverview(scored=scored, pending=pending)
 
 
+def _feeds(session: Session, user_id: int) -> FeedsOverview:
+    active = session.scalar(
+        select(func.count(JobFeed.id))
+        .where(JobFeed.user_id == user_id, JobFeed.active.is_(True))
+    )
+    return FeedsOverview(active=active or 0)
+
+
 @router.get("/overview", response_model=OverviewOut)
 def get_overview(
     session: Session = Depends(get_session),
@@ -169,4 +182,5 @@ def get_overview(
         companies=_companies(session, user_id),
         jobs=_jobs(session, user_id),
         matches=_matches(session, user_id, current),
+        feeds=_feeds(session, user_id),
     )
