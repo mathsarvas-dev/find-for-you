@@ -19,6 +19,7 @@ from rumo_core.sources.base import (
     SourceNotFound,
     SourceUnavailable,
 )
+from rumo_core.sources.ashby import AshbySource
 from rumo_core.sources.greenhouse import GreenhouseSource
 from rumo_core.sources.http import SafeClient
 from rumo_core.sources.lever import LeverSource
@@ -91,6 +92,15 @@ def _lever_factory() -> Source:
 
 register_source("lever", _lever_factory)
 
+
+def _ashby_factory() -> Source:
+    from rumo_core.config import get_settings
+
+    return AshbySource(shared_client(), max_bytes=get_settings().fetch_max_bytes)
+
+
+register_source("ashby", _ashby_factory)
+
 __all__ = [
     "RawJob",
     "Source",
@@ -100,6 +110,7 @@ __all__ = [
     "SourceBadResponse",
     "GreenhouseSource",
     "LeverSource",
+    "AshbySource",
     "get_source",
     "shared_client",
     "register_source",
