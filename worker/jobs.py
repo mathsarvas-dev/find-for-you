@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import time
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import func, or_, select, update
 
@@ -22,6 +23,8 @@ MSG_LLM_FAIL = "Falha ao processar o currículo. Tente novamente mais tarde."
 MSG_UNEXPECTED = "Falha inesperada ao ler o currículo."
 
 RATE_LIMIT_PAUSE_SECONDS = 60.0
+# an import hit by a quota error is retried automatically after this long
+IMPORT_RETRY_SECONDS = 15 * 60
 EMBED_BACKOFF_BASE = 5.0
 EMBED_BACKOFF_CAP = 300.0
 
@@ -39,6 +42,10 @@ def _reset_state() -> None:
     _extract_pause_until = 0.0
     _embed_next_try = 0.0
     _embed_failures = 0
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def reset_stuck_imports(session_factory, *, user_id: int | None = None) -> int:
@@ -60,7 +67,10 @@ def _claim_import(
     session_factory, user_id: int | None = None
 ) -> tuple[int, str, str] | None:
     with session_factory() as s:
-        stmt = select(ProfileImport).where(ProfileImport.status == "pending")
+        stmt = select(ProfileImport).where(
+            ProfileImport.status == "pending",
+            or_(ProfileImport.retry_at.is_(None), ProfileImport.retry_at <= _utcnow()),
+        )
         if user_id is not None:
             stmt = stmt.where(ProfileImport.user_id == user_id)
         row = s.execute(
@@ -115,7 +125,10 @@ async def process_pending_imports(
         logger.warning(
             "LLM rate limited; pausing extraction for %ds", RATE_LIMIT_PAUSE_SECONDS
         )
-        _finish_import(session_factory, import_id, status="pending")
+        _finish_import(
+            session_factory, import_id, status="pending",
+            retry_at=_utcnow() + timedelta(seconds=IMPORT_RETRY_SECONDS),
+        )
         return 0
     except LLMInvalidResponse:
         _finish_import(
@@ -145,6 +158,7 @@ async def process_pending_imports(
         extracted=profile.model_dump(mode="json"),
         truncated=truncated,
         error=None,
+        retry_at=None,
     )
     return 1
 

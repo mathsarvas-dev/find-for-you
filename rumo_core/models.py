@@ -54,6 +54,8 @@ class ProfileImport(UserScopedMixin, TimestampMixin, Base):
     truncated: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false"
     )
+    # set while waiting for an LLM quota retry (status stays 'pending')
+    retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Profile(UserScopedMixin, TimestampMixin, Base):
@@ -68,6 +70,10 @@ class Profile(UserScopedMixin, TimestampMixin, Base):
     data: Mapped[dict] = mapped_column(JSONB, nullable=False)
     narrative: Mapped[str | None] = mapped_column(Text)
     content_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    # built from raw resume text (no LLM): ranking works, applications do not
+    provisional: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
 
 
 class ProfileChunk(UserScopedMixin, TimestampMixin, Base):

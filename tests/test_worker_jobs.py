@@ -105,24 +105,35 @@ async def test_unexpected_error_marks_error_and_does_not_block_next(uid, caplog)
     assert _get(second).status == "ready"
 
 
-async def test_rate_limited_goes_back_to_pending_and_pauses(uid, caplog):
+async def test_rate_limited_keeps_pending_with_retry_at(uid, caplog, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
     iid = _add_import(uid)
     llm = FakeLLM(LLMRateLimited("slow"))
     now = [1000.0]
     clock = lambda: now[0]  # noqa: E731
+    t0 = datetime.now(timezone.utc)
     with caplog.at_level("WARNING"):
         assert await _run(uid, llm, clock=clock) == 0
-        assert _get(iid).status == "pending" and llm.calls == 1
+        imp = _get(iid)
+        assert imp.status == "pending" and llm.calls == 1
+        assert imp.retry_at is not None and imp.retry_at > t0 + timedelta(minutes=1)
         # paused: no claim, no LLM call, no extra warning
         now[0] += 30
         assert await _run(uid, llm, clock=clock) == 0
         assert llm.calls == 1
         assert sum("rate limited" in r.message for r in caplog.records) == 1
-    # pause over: works again
+    # in-process pause over but retry_at still in the future: not claimed
     now[0] += 31
     ok = FakeLLM()
+    assert await _run(uid, ok, clock=clock) == 0 and ok.calls == 0
+    # retry_at reached: processed and cleared
+    monkeypatch.setattr(
+        jobs, "_utcnow", lambda: datetime.now(timezone.utc) + timedelta(hours=1)
+    )
     assert await _run(uid, ok, clock=clock) == 1
-    assert _get(iid).status == "ready"
+    done = _get(iid)
+    assert done.status == "ready" and done.retry_at is None
 
 
 async def test_no_llm_leaves_pending_without_crashing(uid, caplog):
