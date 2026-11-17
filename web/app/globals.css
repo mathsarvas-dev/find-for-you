@@ -3578,3 +3578,42 @@ select.input {
     justify-content: center;
   }
 }
+
+/* Candidatura (marco 5): plain layout, colours inherited so light and dark themes both work. */
+.application-step { display: grid; gap: 0.75rem; margin-block: 1rem; }
+.application-step__title { font-size: 1.1rem; margin: 0; }
+.application-coverage { margin: 0; }
+.application-list { margin: 0; padding-inline-start: 1.25rem; }
+.application-keywords { margin: 0; overflow-wrap: anywhere; }
+.application-views { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-block: 0.75rem; }
+.application-warning { border-left: 3px solid currentColor; padding: 0.5rem 0.75rem; }
+.application-error { color: #b42318; overflow-wrap: anywhere; }
+.application-lines { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.application-line { display: grid; gap: 0.25rem; border-bottom: 1px solid rgba(127, 127, 127, 0.3); padding-bottom: 0.75rem; }
+.application-line__origin { font-size: 0.8rem; }
+.application-line__header { font-weight: 600; margin: 0; }
+.application-line__text { margin: 0; overflow-wrap: anywhere; }
+.application-line__violations { color: #b42318; margin: 0; padding-inline-start: 1.25rem; }
+.application-line__hint { font-size: 0.85rem; margin: 0; }
+.application-settings, .application-downloads, .application-apply, .application-applied { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end; }
+.application-referees { display: grid; gap: 0.5rem; width: 100%; }
+.application-referees textarea { width: 100%; }
+.application-gaps { display: grid; gap: 0.5rem; }
+.application-letter { display: grid; gap: 0.5rem; }
+.application-answers { display: grid; gap: 0.5rem; }
+.application-answer { display: grid; gap: 0.25rem; }
+.application-answer textarea { width: 100%; }
+.application-list-page { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.75rem; }
+.application-row a { font-weight: 600; }
+.application-empty { display: grid; gap: 0.75rem; justify-items: start; }
+.line-editor { display: grid; gap: 0.5rem; }
+.line-editor__text { width: 100%; }
+.line-editor__error { color: #b42318; margin: 0; }
+.gap-item { display: grid; gap: 0.5rem; margin-block: 0.5rem; }
+.gap-item__form { display: grid; gap: 0.5rem; }
+.question { display: grid; gap: 0.5rem; border-bottom: 1px solid rgba(127, 127, 127, 0.3); padding-bottom: 0.75rem; }
+.question__label { font-weight: 600; margin: 0; }
+.question__tags, .question__suggestion { margin: 0; }
+.question__answer, .question__bank, .question__paste { display: grid; gap: 0.25rem; }
+.question__answer textarea, .question__paste textarea { width: 100%; }
+.template-picker { display: grid; gap: 0.25rem; }

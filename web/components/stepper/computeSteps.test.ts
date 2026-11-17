@@ -14,12 +14,23 @@ function ov(patch: Patch = {}): Overview {
     matches: { ...base.matches, ...patch.matches },
 
     feeds: { ...base.feeds, ...patch.feeds },
+    applications: { ...base.applications, ...patch.applications },
   };
 }
 
 const ready: Patch = {
   profile: { confirmed: true, version: 2, vectorized: true },
 };
+
+/** Every required step before "Candidatar-se" is done; the apply step is the next one. */
+function priorDone(): Patch {
+  return {
+    ...ready,
+    interview: { state: "done" },
+    companies: { total: 1, active: 1 },
+    jobs: { open: 7 },
+  };
+}
 
 function byId(steps: Step[], id: string): Step {
   const s = steps.find((x) => x.id === id);
@@ -56,7 +67,7 @@ describe("computeSteps", () => {
     expect(byId(steps, "interview").state).toBe("optional");
     expect(byId(steps, "interview").cta).toEqual({ label: "Fazer a entrevista", href: "/onboarding/interview" });
     expect(byId(steps, "sources").state).toBe("upcoming");
-    expect(byId(steps, "apply").state).toBe("blocked");
+    expect(byId(steps, "apply").state).toBe("upcoming");
   });
 
   it("test_profile_confirmed_not_vectorized_current_is_confirm", () => {
@@ -127,7 +138,7 @@ describe("computeSteps", () => {
     expect(byId(steps, "evaluate").cta).toEqual({ label: "Avaliar melhores vagas", href: "/jobs" });
   });
 
-  it("test_all_done_apply_blocked", () => {
+  it("test_all_done_apply_current_with_prepare_cta", () => {
     const steps = computeSteps(ov({
       ...ready,
       interview: { state: "done" },
@@ -135,13 +146,33 @@ describe("computeSteps", () => {
       jobs: { open: 7 },
       matches: { scored: 3 },
     }));
-    expect(currentIds(steps)).toEqual([]);
+    expect(currentIds(steps)).toEqual(["apply"]);
     expect(steps.filter((s) => s.id !== "apply").every((s) => s.state === "done")).toBe(true);
     const apply = byId(steps, "apply");
-    expect(apply.state).toBe("blocked");
-    expect(apply.detail).toMatch(/em breve/i);
-    expect(apply.blockedReason).toBeTruthy();
-    expect(apply.cta).toBeUndefined();
+    expect(apply.state).toBe("current");
+    expect(apply.detail).toBe("Nenhuma candidatura ainda");
+    expect(apply.cta).toEqual({ label: "Preparar candidatura", href: "/jobs" });
+  });
+
+  it("test_ready_application_cta_opens_list", () => {
+    const steps = computeSteps(ov({ ...priorDone(), matches: { scored: 3 }, applications: { total: 2, ready: 1, applied: 0 } }));
+    const apply = byId(steps, "apply");
+    expect(apply.state).toBe("current");
+    expect(apply.detail).toBe("1 kit pronto");
+    expect(apply.cta).toEqual({ label: "Abrir candidaturas", href: "/candidaturas" });
+  });
+
+  it("test_applied_marks_apply_done", () => {
+    const steps = computeSteps(ov({ ...ready, matches: { scored: 3 }, applications: { total: 2, ready: 0, applied: 2 } }));
+    const apply = byId(steps, "apply");
+    expect(apply.state).toBe("done");
+    expect(apply.detail).toBe("2 aplicadas");
+  });
+
+  it("test_apply_upcoming_until_evaluated", () => {
+    const steps = computeSteps(ov({ ...priorDone(), applications: { total: 1, ready: 1, applied: 0 } }));
+    expect(byId(steps, "apply").state).toBe("upcoming");
+    expect(currentIds(steps)).toEqual(["evaluate"]);
   });
 
   it("obrigatórios prontos e entrevista pendente: nenhum atual, entrevista segue opcional", () => {
@@ -153,12 +184,12 @@ describe("computeSteps", () => {
         jobs: { open: 7 },
         matches: { scored: 3 },
       }));
-      expect(currentIds(steps)).toEqual([]);
       expect(byId(steps, "interview").state).toBe("optional");
       expect(byId(steps, "interview").cta?.label).toBe(
         state === "none" ? "Fazer a entrevista" : "Continuar entrevista",
       );
-      expect(byId(steps, "apply").state).toBe("blocked");
+      expect(currentIds(steps)).toEqual(["apply"]);
+      expect(byId(steps, "apply").state).toBe("current");
     }
   });
 

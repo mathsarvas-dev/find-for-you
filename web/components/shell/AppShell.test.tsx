@@ -46,7 +46,7 @@ describe("AppShell", () => {
     const { container } = await renderShell();
     expect(screen.getByText("conteúdo")).toBeInTheDocument();
     const nav = screen.getByRole("navigation", { name: "Principal" });
-    expect(within(nav).getAllByRole("link")).toHaveLength(6);
+    expect(within(nav).getAllByRole("link")).toHaveLength(7);
     expect(container.querySelector(".nav-item__dot")).toBeNull();
     expect(screen.getByRole("link", { name: /Sistema/ })).toHaveTextContent("sem resposta da API");
     expect(screen.queryByRole("alert")).toBeNull();

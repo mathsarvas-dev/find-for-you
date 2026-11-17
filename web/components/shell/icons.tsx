@@ -77,6 +77,15 @@ export function JobsIcon(props: IconProps) {
   );
 }
 
+export function ApplicationsIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <path d="M6 3.5h6.5L16 7v9.5a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1v-12a1 1 0 0 1 1-1Z" />
+      <path d="M12.5 3.5V7H16M7 10.5h6M7 13h4" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>

@@ -22,6 +22,7 @@ function allDone(): Overview {
   const o = midJourney();
   o.interview = { state: "done" };
   o.matches = { scored: 12, pending: 3 };
+  o.applications = { total: 1, ready: 0, applied: 1 };
   return o;
 }
 

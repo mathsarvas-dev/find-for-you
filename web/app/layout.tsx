@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Instrument_Sans } from "next/font/google";
+import { Suspense } from "react";
 import { AppShell } from "@/components/shell/AppShell";
 import "./globals.css";
 
@@ -23,7 +24,10 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html lang="pt-BR" className={`${instrumentSans.variable} ${plexMono.variable}`}>
       <body>
-        <AppShell>{children}</AppShell>
+        {/* the shell reads the URL (usePathname): a boundary lets routes that render per request build */}
+        <Suspense fallback={null}>
+          <AppShell>{children}</AppShell>
+        </Suspense>
       </body>
     </html>
   );

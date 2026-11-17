@@ -21,6 +21,7 @@ const sample: Overview = {
   jobs: { open: 340, outside_filters: 12 },
   matches: { scored: 25, pending: 5 },
   feeds: { active: 2 },
+  applications: { total: 3, ready: 1, applied: 1 },
 };
 
 describe("getOverview", () => {
@@ -98,6 +99,7 @@ describe("emptyOverview", () => {
       jobs: { open: 0, outside_filters: 0 },
       matches: { scored: 0, pending: 0 },
       feeds: { active: 0 },
+      applications: { total: 0, ready: 0, applied: 0 },
     });
   });
 });

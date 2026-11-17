@@ -32,6 +32,8 @@ export type MatchesOverview = { scored: number; pending: number };
 /** Feeds de agregadores ativos. */
 export type FeedsOverview = { active: number };
 
+export type ApplicationsOverview = { total: number; ready: number; applied: number };
+
 export type Overview = {
   profile: ProfileOverview;
   interview: InterviewOverview;
@@ -39,6 +41,7 @@ export type Overview = {
   jobs: JobsOverview;
   matches: MatchesOverview;
   feeds: FeedsOverview;
+  applications: ApplicationsOverview;
 };
 
 /** Mesmos padrões seguros da API (usuário sem nada). */
@@ -50,6 +53,7 @@ export function emptyOverview(): Overview {
     jobs: { open: 0, outside_filters: 0 },
     matches: { scored: 0, pending: 0 },
     feeds: { active: 0 },
+    applications: { total: 0, ready: 0, applied: 0 },
   };
 }
 
@@ -78,6 +82,7 @@ export function normalizeOverview(body: unknown): Overview {
     jobs: section(base.jobs, raw.jobs),
     matches: section(base.matches, raw.matches),
     feeds: section(base.feeds, raw.feeds),
+    applications: section(base.applications, raw.applications),
   };
 }
 

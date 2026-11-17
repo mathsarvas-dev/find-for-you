@@ -4,6 +4,7 @@ import { NavItem } from "./NavItem";
 import {
   HomeIcon,
   InterviewIcon,
+  ApplicationsIcon,
   JobsIcon,
   LogoIcon,
   ProfileIcon,
@@ -28,6 +29,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { href: "/onboarding/interview", label: "Entrevista", Icon: InterviewIcon },
   { href: "/sources", label: "Fontes", Icon: SourcesIcon },
   { href: "/jobs", label: "Vagas", Icon: JobsIcon },
+  { href: "/candidaturas", label: "Candidaturas", Icon: ApplicationsIcon },
   { href: "/settings", label: "Configurações", Icon: SettingsIcon, footer: true },
 ];
 

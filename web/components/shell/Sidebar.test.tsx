@@ -28,9 +28,16 @@ describe("NAV_ITEMS", () => {
       ["Entrevista", "/onboarding/interview"],
       ["Fontes", "/sources"],
       ["Vagas", "/jobs"],
+      ["Candidaturas", "/candidaturas"],
       ["Configurações", "/settings"],
     ]);
     expect(NAV_ITEMS.filter((i) => i.footer).map((i) => i.label)).toEqual(["Configurações"]);
+  });
+
+  it("titleForPath follows /candidaturas and its detail page", async () => {
+    const { titleForPath } = await import("./Topbar");
+    expect(titleForPath("/candidaturas/3")).toBe("Candidaturas");
+    expect(titleForPath("/candidaturas")).toBe("Candidaturas");
   });
 });
 

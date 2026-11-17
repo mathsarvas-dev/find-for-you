@@ -51,6 +51,14 @@ function sourcesDetail(o: Overview): string {
 }
 
 /** Trilha "Seu caminho" a partir dos contadores reais de GET /overview. */
+function applyDetail(apps: Overview["applications"]): string {
+  if (apps.applied > 0) return `${num.format(apps.applied)} aplicada${apps.applied === 1 ? "" : "s"}`;
+  if (apps.ready > 0) {
+    return `${num.format(apps.ready)} kit${apps.ready === 1 ? "" : "s"} pronto${apps.ready === 1 ? "" : "s"}`;
+  }
+  return "Nenhuma candidatura ainda";
+}
+
 export function computeSteps(o: Overview): Step[] {
   const { profile, interview, companies, jobs, matches } = o;
   const version = profile.version;
@@ -141,11 +149,15 @@ export function computeSteps(o: Overview): Step[] {
     {
       id: "apply",
       title: "Candidatar-se",
-      detail: "Em breve",
-      done: false,
-      kind: "blocked",
-      reviewHref: "",
-      blockedReason: "As candidaturas chegam em uma próxima versão.",
+      detail: applyDetail(o.applications),
+      done: o.applications.applied >= 1,
+      kind: "required",
+      // with a kit ready the next step is to review it; before that, prepare one from the jobs
+      cta:
+        o.applications.ready > 0
+          ? { label: "Abrir candidaturas", href: "/candidaturas" }
+          : { label: "Preparar candidatura", href: "/jobs" },
+      reviewHref: "/candidaturas",
     },
   ];
 

@@ -3,9 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApplicationDetail } from "@/lib/applications";
 import { getApplication, generateApplication } from "@/lib/applications";
 import { ApiError } from "@/lib/profile";
-import CandidaturaPage from "./page";
+import CandidaturaPageClient from "./CandidaturaPageClient";
 
-vi.mock("next/navigation", () => ({ useParams: () => ({ id: "7" }) }));
 vi.mock("@/components/shell/OverviewContext", () => ({ useRefreshOverview: () => () => {} }));
 vi.mock("@/lib/applications", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/applications")>()),
@@ -43,7 +42,7 @@ afterEach(() => {
 describe("candidatura page", () => {
   it("renders the reading step with hostile text as plain text", async () => {
     getMock.mockResolvedValue(detail());
-    const { container } = render(<CandidaturaPage />);
+    const { container } = render(<CandidaturaPageClient id={7} />);
     expect(await screen.findByText(HOSTILE)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
     expect(screen.getByText(/0 de 1 obrigatórios/)).toBeInTheDocument();
@@ -55,7 +54,7 @@ describe("candidatura page", () => {
       error: "A IA escreveu algo que não está no seu perfil. Gere de novo ou complete o perfil.",
       can_generate: { allowed: false, reason: "Seu perfil ainda está sendo processado." },
     }));
-    render(<CandidaturaPage />);
+    render(<CandidaturaPageClient id={7} />);
     expect(await screen.findByRole("alert")).toHaveTextContent("A IA escreveu algo");
     const button = screen.getByRole("button", { name: "Gerar de novo" });
     expect(button).toBeDisabled();
@@ -64,7 +63,7 @@ describe("candidatura page", () => {
 
   it("shows the profile-changed warning with a regenerate button", async () => {
     getMock.mockResolvedValue(detail({ warnings: ["profile_changed"] }));
-    render(<CandidaturaPage />);
+    render(<CandidaturaPageClient id={7} />);
     expect(await screen.findByText("O perfil mudou desde esta versão.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Gerar de novo" })).toBeEnabled();
   });
@@ -90,7 +89,7 @@ describe("candidatura page", () => {
     getMock
       .mockResolvedValueOnce(detail({ state: "generating", requirements: null, coverage: null }))
       .mockResolvedValue(detail({ state: "ready" }));
-    render(<CandidaturaPage />);
+    render(<CandidaturaPageClient id={7} />);
     await screen.findByText(/Gerando o currículo/);
     expect(polls).toHaveLength(1);
 
@@ -105,7 +104,7 @@ describe("candidatura page", () => {
   it("shows a retry button when loading fails", async () => {
     getMock.mockRejectedValueOnce(new ApiError(null, "Não consegui falar com a API."));
     getMock.mockResolvedValueOnce(detail());
-    render(<CandidaturaPage />);
+    render(<CandidaturaPageClient id={7} />);
     expect(await screen.findByText("Não consegui falar com a API.")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByText(HOSTILE)).toBeInTheDocument();

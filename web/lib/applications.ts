@@ -239,6 +239,14 @@ export function draftQuestion(id: number, qid: number): Promise<QuestionOut> {
   return send(`/applications/${id}/questions/${qid}/draft`, "POST");
 }
 
+export function applyApplication(id: number): Promise<ApplicationOut> {
+  return send(`/applications/${id}/apply`, "POST");
+}
+
+export function unapplyApplication(id: number): Promise<ApplicationOut> {
+  return send(`/applications/${id}/unapply`, "POST");
+}
+
 export function requestCoverLetter(id: number): Promise<ApplicationOut> {
   return send(`/applications/${id}/cover-letter`, "POST");
 }
