@@ -20,6 +20,8 @@ dependencies = [
   "pypdf",
   "python-docx",
   "python-multipart",
+  "jinja2>=3.1",
+  "weasyprint>=62",
 ]
 
 [project.optional-dependencies]
@@ -27,11 +29,12 @@ dev = ["pytest", "pytest-asyncio"]
 embeddings = ["sentence-transformers"]
 
 [tool.setuptools]
-packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "rumo_core.interview", "rumo_core.sources", "rumo_core.sources.feeds", "rumo_core.sources.portals", "rumo_core.matching", "rumo_core.discovery", "api", "worker"]
+packages = ["rumo_core", "rumo_core.llm", "rumo_core.embeddings", "rumo_core.profile", "rumo_core.interview", "rumo_core.sources", "rumo_core.sources.feeds", "rumo_core.sources.portals", "rumo_core.matching", "rumo_core.discovery", "rumo_core.applications", "api", "worker"]
 
 [tool.setuptools.package-data]
 "rumo_core.discovery" = ["catalog/*.json"]
 "rumo_core.sources.portals" = ["policy.json"]
+"rumo_core.applications" = ["templates/*.html", "static/*.css"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
