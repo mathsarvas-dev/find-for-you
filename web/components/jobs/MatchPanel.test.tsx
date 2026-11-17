@@ -119,3 +119,30 @@ describe("MatchPanel candidatura", () => {
     expect(screen.queryByRole("button", { name: "Preparar candidatura" })).toBeNull();
   });
 });
+
+describe("MatchPanel salvar no pipeline", () => {
+  const props = { chunksUsed: 1, now: NOW, onClose: vi.fn(), onRetry: vi.fn() };
+
+  it("o botão chama onSave e some sem a prop", () => {
+    const onSave = vi.fn();
+    const { unmount } = render(
+      <MatchPanel state={{ name: "ready", detail: matchDetail(3) }} {...props} onSave={onSave} />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Salvar no pipeline" }));
+    expect(onSave).toHaveBeenCalledTimes(1);
+    unmount();
+    renderPanel({ name: "ready", detail: matchDetail(4) });
+    expect(screen.queryByRole("button", { name: "Salvar no pipeline" })).toBeNull();
+  });
+
+  it("avisa com texto e link para o pipeline; erro vira alerta", () => {
+    const state: PanelState = { name: "ready", detail: matchDetail(3) };
+    const { rerender } = render(
+      <MatchPanel state={state} {...props} onSave={vi.fn()} saveNote={{ ok: true, text: "Vaga salva no pipeline." }} />,
+    );
+    expect(screen.getByRole("status")).toHaveTextContent("Vaga salva no pipeline.");
+    expect(screen.getByRole("link", { name: "Ver pipeline" })).toHaveAttribute("href", "/pipeline");
+    rerender(<MatchPanel state={state} {...props} onSave={vi.fn()} saveNote={{ ok: false, text: "Falhou." }} />);
+    expect(screen.getByRole("alert")).toHaveTextContent("Falhou.");
+  });
+});

@@ -27,7 +27,7 @@ import {
   type SearchFilters,
 } from "@/lib/matching";
 import { mergeProposal, removeChip, type Chip, type ParsedQuery } from "@/lib/chatFilters";
-import { prepareApplication } from "@/lib/applications";
+import { createApplication, prepareApplication } from "@/lib/applications";
 import { ApiError } from "@/lib/profile";
 
 const MATCHES_PAGE_SIZE = 50;
@@ -104,8 +104,11 @@ export default function JobsPage() {
   const [detailKey, setDetailKey] = useState(0);
   const [preparing, setPreparing] = useState(false);
   const [prepareError, setPrepareError] = useState<string | null>(null);
+  const [savingJob, setSavingJob] = useState(false);
+  const [saveNote, setSaveNote] = useState<{ ok: boolean; text: string } | null>(null);
   const router = useRouter();
   const prepareRef = useRef<() => void>(() => {});
+  const saveRef = useRef<() => void>(() => {});
   // Só lido em handlers e efeitos: Date.now() no render quebra o prerender.
   const [now, setNow] = useState(0);
   /** Só a resposta da requisição de lista mais recente vale. */
@@ -466,12 +469,36 @@ export default function JobsPage() {
     prepareRef.current = () => void prepareSelected();
   });
 
+  /** Salva a vaga no pipeline (candidatura em rascunho, sem gerar nada). Idempotente. */
+  async function saveSelected() {
+    const jobId = selectedRef.current;
+    if (jobId === null || savingJob) return;
+    setSavingJob(true);
+    setSaveNote(null);
+    try {
+      await createApplication(jobId);
+      if (selectedRef.current === jobId) setSaveNote({ ok: true, text: "Vaga salva no pipeline." });
+    } catch (e) {
+      setSaveNote({ ok: false, text: e instanceof ApiError ? e.message : "Não foi possível salvar a vaga agora." });
+    } finally {
+      setSavingJob(false);
+    }
+  }
+  useEffect(() => {
+    saveRef.current = () => void saveSelected();
+  });
+  // O aviso vale só para a vaga em que a pessoa salvou.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSaveNote(null);
+  }, [selectedId]);
+
   function retryDetail() {
     setPanel({ name: "loading" });
     setDetailKey((k) => k + 1);
   }
 
-  // Atalhos: j/k navegam; p prepara a candidatura da vaga selecionada; s (salvar, marco 6) segue reservado.
+  // Atalhos: j/k navegam; p prepara a candidatura da vaga selecionada; s salva a vaga no pipeline.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
@@ -488,6 +515,12 @@ export default function JobsPage() {
         if (selectedRef.current === null) return;
         e.preventDefault();
         prepareRef.current();
+        return;
+      }
+      if (e.key === "s") {
+        if (selectedRef.current === null) return;
+        e.preventDefault();
+        saveRef.current();
         return;
       }
       if (e.key !== "j" && e.key !== "k") return;
@@ -750,6 +783,9 @@ export default function JobsPage() {
                   onPrepare={() => void prepareSelected()}
                   preparing={preparing}
                   prepareError={prepareError}
+                  onSave={() => void saveSelected()}
+                  saving={savingJob}
+                  saveNote={saveNote}
                 />
               </aside>
             )}

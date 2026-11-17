@@ -1,3 +1,4 @@
+import Link from "next/link";
 import {
   formatSalary,
   languageLabel,
@@ -25,6 +26,10 @@ type MatchPanelProps = {
   onPrepare?: () => void;
   preparing?: boolean;
   prepareError?: string | null;
+  /** Salva a vaga no pipeline (tecla s ou botão). Sem a prop, o botão não aparece. */
+  onSave?: () => void;
+  saving?: boolean;
+  saveNote?: { ok: boolean; text: string } | null;
 };
 
 /** Painel lateral (não modal) com a avaliação da vaga selecionada. Tudo como texto. */
@@ -37,13 +42,16 @@ export function MatchPanel({
   onPrepare,
   preparing = false,
   prepareError = null,
+  onSave,
+  saving = false,
+  saveNote = null,
 }: MatchPanelProps) {
   if (state.name === "empty") {
     return (
       <div className="match-panel__empty">
         <p>Escolha uma vaga na lista para ver a justificativa da nota, os pontos fortes e as lacunas.</p>
         <p className="muted">
-          Atalhos: <kbd>j</kbd> próxima, <kbd>k</kbd> anterior, <kbd>p</kbd> preparar candidatura.
+          Atalhos: <kbd>j</kbd> próxima, <kbd>k</kbd> anterior, <kbd>p</kbd> preparar candidatura, <kbd>s</kbd> salvar no pipeline.
         </p>
       </div>
     );
@@ -191,6 +199,25 @@ export function MatchPanel({
           <dd className="mono">{d.country ?? "—"}</dd>
         </div>
       </dl>
+
+      {onSave ? (
+        <div className="actions">
+          <button type="button" className="button button--secondary" disabled={saving} onClick={onSave}>
+            {saving ? "Salvando…" : "Salvar no pipeline"}
+          </button>
+          {saveNote ? (
+            <p role={saveNote.ok ? "status" : "alert"} className={saveNote.ok ? undefined : "match-panel__error"}>
+              {saveNote.text}
+              {saveNote.ok ? (
+                <>
+                  {" "}
+                  <Link href="/pipeline">Ver pipeline</Link>
+                </>
+              ) : null}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       {onPrepare ? (
         <div className="actions">

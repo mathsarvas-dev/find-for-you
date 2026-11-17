@@ -17,9 +17,9 @@ import { parseFilters } from "@/lib/chatFilters";
 import { matchDetail, matchItem, matchPage, parsedQuery } from "@/components/jobs/fixtures";
 import JobsPage from "./page";
 
-const { push, prepare } = vi.hoisted(() => ({ push: vi.fn(), prepare: vi.fn() }));
+const { push, prepare, create } = vi.hoisted(() => ({ push: vi.fn(), prepare: vi.fn(), create: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
-vi.mock("@/lib/applications", () => ({ prepareApplication: prepare }));
+vi.mock("@/lib/applications", () => ({ prepareApplication: prepare, createApplication: create }));
 
 vi.mock("@/lib/chatFilters", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chatFilters")>()),
@@ -261,7 +261,7 @@ describe("JobsPage", () => {
       expect(push).toHaveBeenCalledWith("/candidaturas/33");
     });
 
-    it("j/k trocam a seleção; dentro de input não agem; s não faz nada", async () => {
+    it("j/k trocam a seleção; dentro de input não agem", async () => {
       m.list.mockResolvedValue(matchPage([matchItem(1), matchItem(2), matchItem(3)]));
       await renderPage();
       const current = () => rows().findIndex((r) => r.getAttribute("aria-current") === "true");
@@ -283,10 +283,45 @@ describe("JobsPage", () => {
       await act(async () => {
         fireEvent.keyDown(screen.getByLabelText("Países"), { key: "j" });
         fireEvent.keyDown(document.body, { key: "j", ctrlKey: true });
-        fireEvent.keyDown(document.body, { key: "s" });
+        fireEvent.keyDown(screen.getByLabelText("Países"), { key: "s" });
       });
       expect(current()).toBe(1);
       expect(m.put).not.toHaveBeenCalled();
+      expect(create).not.toHaveBeenCalled();
+    });
+
+    it("s salva a vaga selecionada no pipeline e avisa com texto", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1), matchItem(2)]));
+      create.mockResolvedValue({ id: 5 });
+      await renderPage();
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "s" });
+      });
+      expect(create).not.toHaveBeenCalled(); // nada selecionado
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "j" });
+      });
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "s" });
+      });
+      expect(create).toHaveBeenCalledWith(1);
+      await tick(0);
+      expect(screen.getByText(/Vaga salva no pipeline\./)).toBeInTheDocument();
+      expect(screen.getByRole("link", { name: "Ver pipeline" })).toHaveAttribute("href", "/pipeline");
+      expect(push).not.toHaveBeenCalled();
+    });
+
+    it("erro ao salvar a vaga aparece como alerta", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1)]));
+      create.mockRejectedValue(new ApiError(404, "Vaga não encontrada."));
+      await renderPage();
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "j" });
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Salvar no pipeline" }));
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent("Vaga não encontrada.");
     });
 
     it("resposta antiga do detalhe é ignorada", async () => {
