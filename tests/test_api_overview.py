@@ -12,7 +12,7 @@ from rumo_core.models import (
 )
 
 DIM = 1024
-CONTRACT_KEYS = {"profile", "interview", "companies", "jobs", "matches", "feeds"}
+CONTRACT_KEYS = {"profile", "interview", "companies", "jobs", "matches", "feeds", "applications"}
 
 
 def vec():
@@ -116,6 +116,7 @@ def test_overview_empty_user_defaults(env, as_user):
         "jobs": {"open": 0, "outside_filters": 0},
         "matches": {"scored": 0, "pending": 0},
         "feeds": {"active": 0},
+        "applications": {"total": 0, "ready": 0, "applied": 0},
     }
 
 
@@ -288,3 +289,27 @@ def test_overview_has_no_job_text(env, as_user):
     assert set(b["jobs"]) == {"open", "outside_filters"}
     assert set(b["matches"]) == {"scored", "pending"}
     assert "SECRET" not in r.text
+
+
+@pytest.mark.db
+def test_applications_counts_scoped_by_user(env, as_user):
+    from rumo_core.models import Application as App
+    from rumo_core.models import Company as Co
+    from rumo_core.models import Job as Jb
+
+    new_user = env[0]
+    uid, other = new_user(), new_user()
+    with SessionLocal() as s:
+        co = Co(user_id=uid, source="greenhouse", identifier=f"ov{uid}", name="Acme")
+        s.add(co)
+        s.flush()
+        for i, state in enumerate(["ready", "applied", "draft"]):
+            j = Jb(user_id=uid, company_id=co.id, external_id=f"ov{i}", url="https://example.test/j",
+                   title="t", description="d", raw={}, content_hash=f"h{i}", fingerprint=f"f{i}",
+                   status="open")
+            s.add(j)
+            s.flush()
+            s.add(App(user_id=uid, job_id=j.id, state=state, locale="en", template="us"))
+        s.commit()
+    assert as_user(uid).get("/overview").json()["applications"] == {"total": 3, "ready": 1, "applied": 1}
+    assert as_user(other).get("/overview").json()["applications"] == {"total": 0, "ready": 0, "applied": 0}

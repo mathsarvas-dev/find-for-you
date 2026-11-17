@@ -8,7 +8,7 @@ or sent.
 
 import asyncio
 import re
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -69,6 +69,11 @@ MSG_REFEREES_AU_ONLY = "Referências só se aplicam ao modelo da Austrália."
 MSG_PDF_BLOCKED = "Corrija as linhas marcadas antes de baixar."
 MSG_PDF_UNAVAILABLE = "Não foi possível gerar o PDF agora. Use a versão em texto."
 MSG_NO_RESUME = "O currículo ainda não foi gerado."
+MSG_PROVISIONAL = (
+    "Seu perfil veio de um texto colado, sem extração. "
+    "Confirme o perfil antes de marcar a candidatura como aplicada."
+)
+MSG_NOT_APPLIED = "Esta candidatura não está marcada como aplicada."
 MSG_NO_LETTER = "A carta ainda não foi gerada."
 
 WARN_PROFILE_CHANGED = "profile_changed"
@@ -437,6 +442,44 @@ def edit_line(
         app.coverage = compute_coverage(reqs, lines, item_texts(profile), decisions)
     session.commit()
     return _doc_out(doc)
+
+
+# ---- apply ----------------------------------------------------------------
+
+@router.post("/applications/{app_id}/apply", response_model=ApplicationOut)
+def apply_application(
+    app_id: int,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    """Marks the person's own submission. Nothing is sent: the app never submits a form."""
+    app = _app_or_404(session, user_id, app_id)
+    current = get_current_profile(session, user_id)
+    if current is not None and current.provisional:
+        raise HTTPException(409, MSG_PROVISIONAL)
+    if app.state == "applied":
+        return _out(app)
+    if app.state != "ready":
+        raise HTTPException(409, MSG_NOT_READY)
+    app.state = "applied"
+    app.applied_at = datetime.now(UTC)
+    session.commit()
+    return _out(app)
+
+
+@router.post("/applications/{app_id}/unapply", response_model=ApplicationOut)
+def unapply_application(
+    app_id: int,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    app = _app_or_404(session, user_id, app_id)
+    if app.state != "applied":
+        raise HTTPException(409, MSG_NOT_APPLIED)
+    app.state = "ready"
+    app.applied_at = None
+    session.commit()
+    return _out(app)
 
 
 # ---- questions ------------------------------------------------------------

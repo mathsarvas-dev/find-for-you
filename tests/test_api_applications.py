@@ -634,3 +634,43 @@ def test_letter_download_txt_and_pdf_from_letter_document(questions_env, monkeyp
     pdf = c.get(f"/applications/{aid}/cover-letter.pdf")
     assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
     assert "Candidato-me com prazer." in seen["html"] and "Application for" in seen["html"]
+
+
+# ---- apply / unapply --------------------------------------------------------
+
+def test_apply_from_ready_and_unapply_reverts(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    c = client_as(uid)
+    r = c.post(f"/applications/{aid}/apply")
+    assert r.status_code == 200 and r.json()["state"] == "applied" and r.json()["applied_at"]
+    assert c.post(f"/applications/{aid}/apply").status_code == 200  # idempotent
+    back = c.post(f"/applications/{aid}/unapply").json()
+    assert back["state"] == "ready" and back["applied_at"] is None
+    again = c.post(f"/applications/{aid}/unapply")
+    assert again.status_code == 409 and again.json()["detail"] == api_apps.MSG_NOT_APPLIED
+
+
+def test_apply_requires_ready_and_other_user_404(env):
+    new_user, add_job, add_application, client_as = env
+    owner, other = new_user(), new_user()
+    draft_id = add_application(owner, add_job(owner), state="draft")
+    ready_id = add_application(owner, add_job(owner), state="ready", lines=[_fact(), _ai()])
+    r = client_as(owner).post(f"/applications/{draft_id}/apply")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_NOT_READY
+    assert client_as(other).post(f"/applications/{ready_id}/apply").status_code == 404
+
+
+def test_apply_refused_when_profile_provisional(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    with SessionLocal() as s:
+        s.execute(Profile.__table__.update().where(Profile.user_id == uid).values(provisional=True))
+        s.commit()
+    c = client_as(uid)
+    r = c.post(f"/applications/{aid}/apply")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_PROVISIONAL
+    with SessionLocal() as s:
+        assert s.get(Application, aid).state == "ready"

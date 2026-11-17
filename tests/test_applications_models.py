@@ -105,11 +105,12 @@ def test_documents_and_questions_cascade_with_job(session):
         label="Why?", kind="text", required=False, sensitive=False,
     ))
     session.commit()
+    job_id = j.id
     session.delete(j)
     session.commit()
-    assert session.execute(select(Application)).all() == []
-    assert session.execute(select(ApplicationDocument)).all() == []
-    assert session.execute(select(ApplicationQuestion)).all() == []
+    assert session.execute(select(Application).where(Application.job_id == job_id)).all() == []
+    assert session.execute(select(ApplicationDocument).where(ApplicationDocument.application_id == a.id)).all() == []
+    assert session.execute(select(ApplicationQuestion).where(ApplicationQuestion.application_id == a.id)).all() == []
 
 
 def test_document_version_unique_per_kind(session):

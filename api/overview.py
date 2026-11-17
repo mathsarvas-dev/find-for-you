@@ -16,7 +16,7 @@ from api.deps import current_user_id
 from rumo_core.db import get_session
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
 from rumo_core.matching.ranking import usable_profile
-from rumo_core.models import Company, InterviewSession, Job, JobFeed, Match
+from rumo_core.models import Application, Company, InterviewSession, Job, JobFeed, Match
 from rumo_core.profile.service import get_current_profile
 
 router = APIRouter(tags=["overview"])
@@ -58,6 +58,12 @@ class FeedsOverview(BaseModel):
     active: int = 0
 
 
+class ApplicationsOverview(BaseModel):
+    total: int = 0
+    ready: int = 0
+    applied: int = 0
+
+
 class OverviewOut(BaseModel):
     profile: ProfileOverview
     interview: InterviewOverview
@@ -65,6 +71,7 @@ class OverviewOut(BaseModel):
     jobs: JobsOverview
     matches: MatchesOverview
     feeds: FeedsOverview = FeedsOverview()
+    applications: ApplicationsOverview = ApplicationsOverview()
 
 
 def _clean(value: object) -> str | None:
@@ -170,6 +177,20 @@ def _feeds(session: Session, user_id: int) -> FeedsOverview:
     return FeedsOverview(active=active or 0)
 
 
+def _applications(session: Session, user_id: int) -> ApplicationsOverview:
+    rows = session.execute(
+        select(Application.state, func.count(Application.id))
+        .where(Application.user_id == user_id)
+        .group_by(Application.state)
+    ).all()
+    counts = {state: n for state, n in rows}
+    return ApplicationsOverview(
+        total=sum(counts.values()),
+        ready=counts.get("ready", 0),
+        applied=counts.get("applied", 0),
+    )
+
+
 @router.get("/overview", response_model=OverviewOut)
 def get_overview(
     session: Session = Depends(get_session),
@@ -183,4 +204,5 @@ def get_overview(
         jobs=_jobs(session, user_id),
         matches=_matches(session, user_id, current),
         feeds=_feeds(session, user_id),
+        applications=_applications(session, user_id),
     )
