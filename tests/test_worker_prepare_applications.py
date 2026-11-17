@@ -112,6 +112,7 @@ def make_user():
         for uid in created:
             s.execute(delete(ApplicationDocument).where(ApplicationDocument.user_id == uid))
             s.execute(delete(Application).where(Application.user_id == uid))
+            s.execute(delete(AnswerBankItem).where(AnswerBankItem.user_id == uid))
             s.execute(delete(Profile).where(Profile.user_id == uid))
             s.execute(delete(Job).where(Job.user_id == uid))
             s.execute(delete(Company).where(Company.user_id == uid))
@@ -378,3 +379,90 @@ def test_registered_after_interview_turns():
     s = Settings(_env_file=None, database_url="postgresql+psycopg://u:p@localhost/x")
     names = list(build_registry(s, object(), object(), object())._jobs)
     assert names.index("prepare_applications") == names.index("interview_turns") + 1
+
+
+# ---- answer drafts (queued by the person) ----------------------------------
+
+from rumo_core.models import AnswerBankItem, ApplicationQuestion  # noqa: E402
+from worker.prepare_applications import MSG_ANSWER_INVALID  # noqa: E402
+
+
+def _ready_with_question(uid, *, label="Por que nós?", answer_state="empty", sensitive=False, i=50):
+    """A ready application with a resume document and one question with a queued draft."""
+    app_id = _generating(uid, i=i)
+    with SessionLocal() as s:
+        a = s.get(Application, app_id)
+        a.state = "ready"
+        a.profile_version = 1  # a ready application always has the profile version it was written on
+        s.add(ApplicationDocument(user_id=uid, application_id=app_id, kind="resume", lines=[], status="valid", version=1))
+        q = ApplicationQuestion(user_id=uid, application_id=app_id, position=1, source="pasted", label=label,
+                                kind="text", required=False, sensitive=sensitive, answer_state=answer_state)
+        s.add(q)
+        s.flush()
+        a.tasks = [{"kind": "answer", "qid": q.id, "state": "queued", "error": None}]
+        s.commit()
+        return app_id, q.id
+
+
+def _question(qid) -> ApplicationQuestion:
+    with SessionLocal() as s:
+        q = s.get(ApplicationQuestion, qid)
+        s.expunge(q)
+        return q
+
+
+@pytest.mark.db
+async def test_answer_task_drafted_and_removed(uid):
+    app_id, qid = _ready_with_question(uid)
+    llm = FakeLLM({"text": "Reduzi o tempo do pipeline em 40% com Airflow", "source_refs": ["ach1"]})
+    assert await _run(uid, llm) == 1
+    q = _question(qid)
+    assert q.answer_state == "draft" and "40%" in q.answer
+    assert _get(app_id).tasks == []
+
+
+@pytest.mark.db
+async def test_answer_task_failed_message(uid):
+    app_id, qid = _ready_with_question(uid)
+    bad = {"text": "Trabalhei 10 anos na Google", "source_refs": ["ach1"]}
+    await _run(uid, FakeLLM(bad, bad))
+    app = _get(app_id)
+    (task,) = app.tasks
+    assert task["state"] == "failed" and task["error"] == MSG_ANSWER_INVALID
+    assert _question(qid).answer is None
+
+
+@pytest.mark.db
+async def test_user_edit_not_overwritten(uid):
+    app_id, qid = _ready_with_question(uid, answer_state="edited")
+    with SessionLocal() as s:
+        s.execute(update(ApplicationQuestion).where(ApplicationQuestion.id == qid).values(answer="Minha resposta"))
+        s.commit()
+    await _run(uid, FakeLLM({"text": "Reduzi o tempo do pipeline em 40% com Airflow", "source_refs": ["ach1"]}))
+    q = _question(qid)
+    assert q.answer == "Minha resposta" and q.answer_state == "edited"
+    assert _get(app_id).tasks == []
+
+
+@pytest.mark.db
+async def test_generation_has_priority_over_tasks(uid):
+    ready_id, _ = _ready_with_question(uid, i=60)
+    gen_id = _generating(uid, i=61)
+    llm = FakeLLM(_req_answer(), _draft_answer())
+    await _run(uid, llm)
+    assert _get(gen_id).state == "ready"
+    assert len(llm.calls) == 2  # requirements + resume draft: the answer waits for the next tick
+    assert len(_get(ready_id).tasks) == 1
+
+
+@pytest.mark.db
+async def test_bank_of_other_user_never_sent_to_llm(uid, make_user):
+    other = make_user()
+    with SessionLocal() as s:
+        s.add(AnswerBankItem(user_id=other, key="why_us", value="Segredo do outro usuário", lang="pt"))
+        s.commit()
+    _, qid = _ready_with_question(uid, i=70)
+    llm = FakeLLM({"text": "Reduzi o tempo do pipeline em 40% com Airflow", "source_refs": ["ach1"]})
+    await _run(uid, llm)
+    blob = " ".join(m["content"] for c in llm.calls for m in c)
+    assert "Segredo do outro usuário" not in blob

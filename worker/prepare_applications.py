@@ -19,6 +19,7 @@ from sqlalchemy import func, select
 
 from rumo_core.applications.coverage import compute_coverage
 from rumo_core.applications.draft import DraftInvalid, draft_resume
+from rumo_core.applications.questions import MAX_BANK_ITEMS, AnswerInvalid, draft_answer
 from rumo_core.applications.lines import DocLine, document_status
 from rumo_core.applications.profile_index import item_texts
 from rumo_core.applications.quota import generated_last_24h
@@ -26,7 +27,9 @@ from rumo_core.applications.requirements import Requirements, extract_requiremen
 from rumo_core.applications.select import select_evidence
 from rumo_core.llm.base import LLMProvider, LLMRateLimited
 from rumo_core.matching.ai_score import JobView
-from rumo_core.models import Application, ApplicationDocument, Company, Job
+from rumo_core.models import (
+    AnswerBankItem, Application, ApplicationDocument, ApplicationQuestion, Company, Job, Profile,
+)
 from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import get_current_profile
 from worker.jobs import EMBED_LOCK
@@ -273,26 +276,194 @@ async def prepare_applications(
         return 0
     if interactive_llm_busy(session_factory):
         return 0
+    # the daily cap limits generations only: answer drafts (queued by the person) still run
+    capped = False
     if daily_limit is not None:
         with session_factory() as s:
             used = generated_last_24h(s)
-        if used >= daily_limit:
+        capped = used >= daily_limit
+        if capped:
             now = clock()
             if _cap_logged_at is None or now - _cap_logged_at >= CAP_LOG_EVERY_SECONDS:
                 logger.info("application generation daily limit (%d per 24 h) reached; skipping",
                             daily_limit)
                 _cap_logged_at = now
-            return 0
 
-    app_id = _select_one(session_factory, max_attempts, user_id)
-    if app_id is None:
+    if not capped:
+        app_id = _select_one(session_factory, max_attempts, user_id)
+        if app_id is not None:
+            _in_flight.add(app_id)
+            try:
+                return await _process(session_factory, llm, embedder, app_id,
+                                      max_attempts=max_attempts, call_timeout=call_timeout, clock=clock)
+            finally:
+                _in_flight.discard(app_id)
+
+    picked = _select_task(session_factory, user_id)
+    if picked is None:
         return 0
+    app_id, qid = picked
     _in_flight.add(app_id)
     try:
-        return await _process(session_factory, llm, embedder, app_id,
-                              max_attempts=max_attempts, call_timeout=call_timeout, clock=clock)
+        return await _process_answer(session_factory, llm, app_id, qid,
+                                     call_timeout=call_timeout, clock=clock)
     finally:
         _in_flight.discard(app_id)
+
+
+# ---- answer drafts (queued by the person on a question) ---------------------
+
+MSG_ANSWER_INVALID = "Não consegui rascunhar sem inventar. Escreva você."
+
+
+@dataclass(frozen=True)
+class _AnswerWork:
+    user_id: int
+    locale: str
+    profile: CanonicalProfile
+    job: JobView
+    label: str
+    bank: list[tuple[str, str, str]]
+    refs: list[str]
+
+
+def _select_task(session_factory, user_id: int | None) -> tuple[int, int] | None:
+    """The oldest application with a queued answer draft, locked with SKIP LOCKED."""
+    with session_factory() as s:
+        stmt = select(Application.id, Application.tasks).where(
+            Application.state.in_(("ready", "applied")),
+            func.jsonb_array_length(Application.tasks) > 0,
+        )
+        if user_id is not None:
+            stmt = stmt.where(Application.user_id == user_id)
+        if _in_flight:
+            stmt = stmt.where(Application.id.notin_(_in_flight))
+        rows = s.execute(stmt.order_by(Application.updated_at, Application.id).limit(50)).all()
+        target = None
+        for app_id, tasks in rows:
+            for t in tasks or []:
+                if t.get("kind") == "answer" and t.get("state") == "queued":
+                    target = (app_id, int(t["qid"]))
+                    break
+            if target is not None:
+                break
+        if target is None:
+            s.rollback()
+            return None
+        locked = s.execute(
+            select(Application.id).where(Application.id == target[0])
+            .with_for_update(skip_locked=True)
+        ).scalar_one_or_none()
+        s.commit()
+    return target if locked is not None else None
+
+
+def _load_answer(session_factory, app_id: int, qid: int) -> _AnswerWork | None:
+    with session_factory() as s:
+        app = s.get(Application, app_id)
+        q = s.get(ApplicationQuestion, qid)
+        if app is None or q is None or q.application_id != app.id:
+            return None
+        row = s.execute(
+            select(Job, Company.name)
+            .join(Company, Company.id == Job.company_id)
+            .where(Job.id == app.job_id, Job.user_id == app.user_id)
+        ).first()
+        if row is None:
+            return None
+        job, company_name = row
+        prof = s.execute(select(Profile).where(
+            Profile.user_id == app.user_id, Profile.version == app.profile_version)).scalar_one_or_none()
+        if prof is None:
+            return None
+        profile = CanonicalProfile.model_validate(prof.data)
+        bank_rows = s.execute(
+            select(AnswerBankItem.key, AnswerBankItem.lang, AnswerBankItem.value)
+            .where(AnswerBankItem.user_id == app.user_id)
+            .order_by(AnswerBankItem.updated_at.desc(), AnswerBankItem.id.desc())
+            .limit(MAX_BANK_ITEMS)
+        ).all()
+        return _AnswerWork(
+            user_id=app.user_id,
+            locale=app.locale,
+            profile=profile,
+            job=JobView(
+                title=job.title, company_name=company_name, location_text=job.location_text,
+                work_model=job.work_model, seniority=job.seniority, department=job.department,
+                description=job.description,
+            ),
+            label=q.label,
+            bank=[(k, lang, v) for k, lang, v in bank_rows],
+            refs=[e.id for e in profile.experiences if e.id] + ["summary"],
+        )
+
+
+def _update_task(session_factory, app_id: int, qid: int, *, remove: bool = False,
+                 state: str | None = None, error: str | None = None) -> None:
+    with session_factory() as s:
+        app = s.execute(
+            select(Application).where(Application.id == app_id).with_for_update()
+        ).scalar_one_or_none()
+        if app is None:
+            s.rollback()
+            return
+        tasks = []
+        for t in app.tasks or []:
+            if t.get("kind") == "answer" and t.get("qid") == qid:
+                if remove:
+                    continue
+                t = {**t, "state": state, "error": error}
+            tasks.append(t)
+        app.tasks = tasks
+        s.commit()
+
+
+def _write_answer(session_factory, app_id: int, qid: int, text: str, bank_key: str | None) -> None:
+    """A draft never overwrites what the person wrote or finalised meanwhile."""
+    with session_factory() as s:
+        q = s.execute(
+            select(ApplicationQuestion).where(ApplicationQuestion.id == qid).with_for_update()
+        ).scalar_one_or_none()
+        if q is not None and q.answer_state in ("empty", "draft"):
+            q.answer = text
+            q.answer_state = "draft"
+            q.bank_key = bank_key
+        app = s.execute(
+            select(Application).where(Application.id == app_id).with_for_update()
+        ).scalar_one_or_none()
+        if app is not None:
+            app.tasks = [t for t in (app.tasks or [])
+                         if not (t.get("kind") == "answer" and t.get("qid") == qid)]
+        s.commit()
+
+
+async def _process_answer(session_factory, llm, app_id: int, qid: int, *,
+                          call_timeout: float, clock) -> int:
+    global _pause_until
+    work = _load_answer(session_factory, app_id, qid)
+    if work is None:
+        _update_task(session_factory, app_id, qid, remove=True)
+        return 1
+    timed = _TimedLLM(llm, call_timeout)
+    try:
+        text, key = await draft_answer(
+            timed, work.label, work.job, work.profile, work.refs, work.bank, locale=work.locale,
+        )
+    except (LLMRateLimited, TimeoutError) as exc:
+        _pause_until = clock() + RATE_LIMIT_PAUSE_SECONDS
+        logger.warning("LLM %s; pausing answer drafts for %ds",
+                       "call timed out" if isinstance(exc, TimeoutError) else "rate limited",
+                       int(RATE_LIMIT_PAUSE_SECONDS))
+        return 0
+    except AnswerInvalid:
+        _update_task(session_factory, app_id, qid, state="failed", error=MSG_ANSWER_INVALID)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - class name only
+        logger.warning("answer %s draft failed (%s)", qid, type(exc).__name__)
+        _update_task(session_factory, app_id, qid, state="failed", error=MSG_LLM_FAIL)
+        return 1
+    _write_answer(session_factory, app_id, qid, text, key)
+    return 1
 
 
 async def _process(session_factory, llm, embedder, app_id, *, max_attempts, call_timeout, clock) -> int:

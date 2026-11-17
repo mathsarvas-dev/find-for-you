@@ -551,3 +551,41 @@ def test_bank_suggestion_only_for_sensitive_and_only_own_bank(questions_env):
     salary, why = qs[0], qs[1]
     assert salary["bank_suggestion"] == {"key": "salary_expectation", "value": "R$ 8.000"}
     assert why["bank_suggestion"] is None
+
+
+# ---- answer drafts --------------------------------------------------------
+
+def test_draft_sensitive_question_409_never_queued(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    c = client_as(uid)
+    qs = c.post(f"/applications/{aid}/questions", json={"text": "Qual é a sua pretensão salarial?"}).json()
+    r = c.post(f"/applications/{aid}/questions/{qs[0]['id']}/draft")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_SENSITIVE
+    with SessionLocal() as s:
+        assert s.get(Application, aid).tasks == []
+
+
+def test_draft_requires_ready_resume(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft")
+    c = client_as(uid)
+    qid = c.post(f"/applications/{aid}/questions", json={"text": "Por que nós?"}).json()[0]["id"]
+    r = c.post(f"/applications/{aid}/questions/{qid}/draft")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_NOT_READY
+
+
+def test_draft_not_duplicated(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    c = client_as(uid)
+    qid = c.post(f"/applications/{aid}/questions", json={"text": "Por que nós?"}).json()[0]["id"]
+    first = c.post(f"/applications/{aid}/questions/{qid}/draft")
+    second = c.post(f"/applications/{aid}/questions/{qid}/draft")
+    assert first.status_code == 202 and second.status_code == 202
+    assert second.json()["task"] == {"state": "queued", "error": None}
+    with SessionLocal() as s:
+        assert len(s.get(Application, aid).tasks) == 1

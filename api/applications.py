@@ -472,6 +472,11 @@ def _question_out(session: Session, user_id: int, app: Application, q: Applicati
         id=q.id, position=q.position, source=q.source, label=q.label, kind=q.kind,
         options=q.options, required=q.required, sensitive=q.sensitive, answer=q.answer,
         answer_state=q.answer_state, bank_key=q.bank_key, bank_suggestion=suggestion,
+        task=next(
+            ({"state": t.get("state"), "error": t.get("error")} for t in (app.tasks or [])
+             if t.get("kind") == "answer" and t.get("qid") == q.id),
+            None,
+        ),
     )
 
 
@@ -597,6 +602,39 @@ def update_question(
             )
         )
         q.bank_key = key
+    session.commit()
+    return _question_out(session, user_id, app, q)
+
+
+MSG_SENSITIVE = "Esta pergunta é pessoal, legal ou de remuneração: responda você."
+MSG_FILE_QUESTION = "Envie o arquivo você mesmo no site da vaga."
+MSG_NOT_READY = "Gere o currículo antes."
+
+
+@router.post("/applications/{app_id}/questions/{qid}/draft", response_model=QuestionOut,
+             status_code=202)
+def request_answer_draft(
+    app_id: int,
+    qid: int,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    """Queues a draft for the worker. Sensitive and file questions are never drafted."""
+    app = _app_or_404(session, user_id, app_id)
+    q = _question_or_404(session, user_id, app, qid)
+    if q.sensitive:
+        raise HTTPException(409, MSG_SENSITIVE)
+    if q.kind == "file":
+        raise HTTPException(409, MSG_FILE_QUESTION)
+    if app.state not in ("ready", "applied") or _latest_doc(session, app.id, "resume") is None:
+        raise HTTPException(409, MSG_NOT_READY)
+    tasks = list(app.tasks or [])
+    existing = next((t for t in tasks if t.get("kind") == "answer" and t.get("qid") == q.id), None)
+    if existing is not None and existing.get("state") == "queued":
+        return _question_out(session, user_id, app, q)  # already queued: not duplicated
+    tasks = [t for t in tasks if not (t.get("kind") == "answer" and t.get("qid") == q.id)]
+    tasks.append({"kind": "answer", "qid": q.id, "state": "queued", "error": None})
+    app.tasks = tasks
     session.commit()
     return _question_out(session, user_id, app, q)
 
