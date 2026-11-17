@@ -205,3 +205,19 @@ async def test_new_texts_before_model_reindex(uid):
     assert emb.calls == [["novo"]]
     assert _get(new).query_model_version == "new@2"
     assert _get(old).query_model_version == "old@1"
+
+
+async def test_embeds_every_named_profile_active_first(uid):
+    other = _profile(uid, "outro", name="Remoto Europa")
+    with SessionLocal() as s:
+        active = SearchProfile(user_id=uid, name="default", filters={}, query_text="ativo",
+                               is_default=True)
+        s.add(active)
+        s.commit()
+        active_id = active.id
+    emb = FakeEmbedder()
+    assert await _run(uid, emb, batch=1) == 1
+    assert _get(active_id).query_embedding is not None  # the active one goes first
+    assert _get(other).query_embedding is None
+    assert await _run(uid, emb, batch=1) == 1
+    assert _get(other).query_embedding is not None  # inactive ones are ready before a switch

@@ -23,6 +23,7 @@ from api.pipeline import router as pipeline_router
 from api.portals import router as portals_router
 from api.profile import router as profile_router
 from api.quality import router as quality_router
+from api.search_profiles import router as search_profiles_router
 from api.sources import router as sources_router
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
@@ -49,6 +50,7 @@ app.include_router(profile_router)
 app.include_router(interview_router)
 app.include_router(sources_router)
 app.include_router(matching_router)
+app.include_router(search_profiles_router)
 app.include_router(discovery_router)
 app.include_router(overview_router)
 app.include_router(chat_filters_router)

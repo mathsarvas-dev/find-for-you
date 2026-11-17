@@ -65,7 +65,7 @@ async def embed_pending_queries(
             stmt = stmt.where(SearchProfile.user_id == user_id)
         rows = [
             (r.id, r.query_text)
-            for r in s.execute(stmt.order_by(SearchProfile.query_embedding.is_(None).desc(), SearchProfile.id).limit(batch)).all()
+            for r in s.execute(stmt.order_by(SearchProfile.is_default.desc(), SearchProfile.query_embedding.is_(None).desc(), SearchProfile.id).limit(batch)).all()
         ]
         s.commit()
     if not rows:
