@@ -42,6 +42,7 @@ from rumo_core.applications.render import (
 from rumo_core.applications.profile_index import item_texts
 from rumo_core.applications.quota import generated_last_24h
 from rumo_core.applications.requirements import Requirements
+from rumo_core.applications.stages import APPLIED_STAGES
 from rumo_core.applications.validator import build_context, validate_line
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
@@ -381,8 +382,10 @@ def generate_application(
     if result.rowcount == 0:
         session.rollback()
         raise HTTPException(409, MSG_GENERATING)
-    session.commit()
     session.refresh(app)
+    if app.stage == "saved":  # asking for the kit is the start of preparing it
+        app.stage = "preparing"
+    session.commit()
     return _out(app)
 
 
@@ -463,6 +466,8 @@ def apply_application(
         raise HTTPException(409, MSG_NOT_READY)
     app.state = "applied"
     app.applied_at = datetime.now(UTC)
+    if app.stage not in APPLIED_STAGES:
+        app.stage = "applied"
     session.commit()
     return _out(app)
 
@@ -478,6 +483,7 @@ def unapply_application(
         raise HTTPException(409, MSG_NOT_APPLIED)
     app.state = "ready"
     app.applied_at = None
+    app.stage = "preparing"
     session.commit()
     return _out(app)
 

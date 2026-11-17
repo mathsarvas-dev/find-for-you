@@ -1,10 +1,10 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from pgvector.sqlalchemy import Vector
 from decimal import Decimal
 
 from sqlalchemy import (
-    Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, Numeric,
+    Boolean, CheckConstraint, Date, DateTime, Float, ForeignKey, Index, Integer, Numeric,
     SmallInteger, String, Text, UniqueConstraint, func, text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -500,6 +500,12 @@ class Application(UserScopedMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("user_id", "job_id", name="uq_applications_user_job"),
         Index("ix_applications_user_state", "user_id", "state"),
+        Index("ix_applications_user_stage", "user_id", "stage"),
+        CheckConstraint(
+            "stage in ('saved','preparing','applied','interview','offer',"
+            "'rejected','no_response')",
+            name="ck_applications_stage",
+        ),
         CheckConstraint(
             "state in ('draft','generating','ready','error','applied')",
             name="ck_applications_state",
@@ -531,6 +537,13 @@ class Application(UserScopedMixin, TimestampMixin, Base):
     )
     # typed by the person; only used by the Australian template
     referees: Mapped[str | None] = mapped_column(Text)
+    # pipeline (marco 6): saved | preparing | applied | interview | offer |
+    # rejected | no_response. applied_at is the date of the application.
+    stage: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="saved"
+    )
+    follow_up_at: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
 
 
 class ApplicationDocument(UserScopedMixin, TimestampMixin, Base):

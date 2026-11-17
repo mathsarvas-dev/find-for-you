@@ -18,6 +18,7 @@ from api.funnel import router as funnel_router
 from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
+from api.pipeline import router as pipeline_router
 from api.portals import router as portals_router
 from api.profile import router as profile_router
 from api.quality import router as quality_router
@@ -55,6 +56,7 @@ app.include_router(feeds_router)
 app.include_router(portals_router)
 app.include_router(funnel_router)
 app.include_router(applications_router)
+app.include_router(pipeline_router)
 
 
 def _json_safe(value):
