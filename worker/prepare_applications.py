@@ -18,7 +18,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select
 
 from rumo_core.applications.coverage import compute_coverage
-from rumo_core.applications.draft import DraftInvalid, draft_resume
+from rumo_core.applications.draft import DraftInvalid, draft_letter, draft_resume
 from rumo_core.applications.questions import MAX_BANK_ITEMS, AnswerInvalid, draft_answer
 from rumo_core.applications.lines import DocLine, document_status
 from rumo_core.applications.profile_index import item_texts
@@ -302,18 +302,22 @@ async def prepare_applications(
     picked = _select_task(session_factory, user_id)
     if picked is None:
         return 0
-    app_id, qid = picked
+    app_id, kind, qid = picked
     _in_flight.add(app_id)
     try:
+        if kind == "cover_letter":
+            return await _process_letter(session_factory, llm, app_id,
+                                         call_timeout=call_timeout, clock=clock)
         return await _process_answer(session_factory, llm, app_id, qid,
                                      call_timeout=call_timeout, clock=clock)
     finally:
         _in_flight.discard(app_id)
 
 
-# ---- answer drafts (queued by the person on a question) ---------------------
+# ---- queued drafts (answers and the cover letter, requested by the person) ----
 
 MSG_ANSWER_INVALID = "Não consegui rascunhar sem inventar. Escreva você."
+_TASK_KINDS = ("answer", "cover_letter")
 
 
 @dataclass(frozen=True)
@@ -327,8 +331,22 @@ class _AnswerWork:
     refs: list[str]
 
 
-def _select_task(session_factory, user_id: int | None) -> tuple[int, int] | None:
-    """The oldest application with a queued answer draft, locked with SKIP LOCKED."""
+@dataclass(frozen=True)
+class _LetterWork:
+    user_id: int
+    locale: str
+    profile: CanonicalProfile
+    job: JobView
+    reqs: Requirements
+    refs: list[str]
+
+
+def _task_matches(task: dict, kind: str, qid: int) -> bool:
+    return task.get("kind") == kind and (kind == "cover_letter" or task.get("qid") == qid)
+
+
+def _select_task(session_factory, user_id: int | None) -> tuple[int, str, int] | None:
+    """The oldest application with a queued draft (answer or letter), locked with SKIP LOCKED."""
     with session_factory() as s:
         stmt = select(Application.id, Application.tasks).where(
             Application.state.in_(("ready", "applied")),
@@ -342,8 +360,8 @@ def _select_task(session_factory, user_id: int | None) -> tuple[int, int] | None
         target = None
         for app_id, tasks in rows:
             for t in tasks or []:
-                if t.get("kind") == "answer" and t.get("state") == "queued":
-                    target = (app_id, int(t["qid"]))
+                if t.get("kind") in _TASK_KINDS and t.get("state") == "queued":
+                    target = (app_id, t["kind"], int(t.get("qid") or 0))
                     break
             if target is not None:
                 break
@@ -356,6 +374,14 @@ def _select_task(session_factory, user_id: int | None) -> tuple[int, int] | None
         ).scalar_one_or_none()
         s.commit()
     return target if locked is not None else None
+
+
+def _job_view(job: Job, company_name: str | None) -> JobView:
+    return JobView(
+        title=job.title, company_name=company_name, location_text=job.location_text,
+        work_model=job.work_model, seniority=job.seniority, department=job.department,
+        description=job.description,
+    )
 
 
 def _load_answer(session_factory, app_id: int, qid: int) -> _AnswerWork | None:
@@ -371,7 +397,6 @@ def _load_answer(session_factory, app_id: int, qid: int) -> _AnswerWork | None:
         ).first()
         if row is None:
             return None
-        job, company_name = row
         prof = s.execute(select(Profile).where(
             Profile.user_id == app.user_id, Profile.version == app.profile_version)).scalar_one_or_none()
         if prof is None:
@@ -387,18 +412,41 @@ def _load_answer(session_factory, app_id: int, qid: int) -> _AnswerWork | None:
             user_id=app.user_id,
             locale=app.locale,
             profile=profile,
-            job=JobView(
-                title=job.title, company_name=company_name, location_text=job.location_text,
-                work_model=job.work_model, seniority=job.seniority, department=job.department,
-                description=job.description,
-            ),
+            job=_job_view(row[0], row[1]),
             label=q.label,
             bank=[(k, lang, v) for k, lang, v in bank_rows],
             refs=[e.id for e in profile.experiences if e.id] + ["summary"],
         )
 
 
-def _update_task(session_factory, app_id: int, qid: int, *, remove: bool = False,
+def _load_letter(session_factory, app_id: int) -> _LetterWork | None:
+    with session_factory() as s:
+        app = s.get(Application, app_id)
+        if app is None or app.requirements is None or app.profile_version is None:
+            return None
+        row = s.execute(
+            select(Job, Company.name)
+            .join(Company, Company.id == Job.company_id)
+            .where(Job.id == app.job_id, Job.user_id == app.user_id)
+        ).first()
+        if row is None:
+            return None
+        prof = s.execute(select(Profile).where(
+            Profile.user_id == app.user_id, Profile.version == app.profile_version)).scalar_one_or_none()
+        if prof is None:
+            return None
+        profile = CanonicalProfile.model_validate(prof.data)
+        return _LetterWork(
+            user_id=app.user_id,
+            locale=app.locale,
+            profile=profile,
+            job=_job_view(row[0], row[1]),
+            reqs=Requirements.model_validate(app.requirements),
+            refs=[e.id for e in profile.experiences if e.id] + ["summary"],
+        )
+
+
+def _update_task(session_factory, app_id: int, kind: str, qid: int, *, remove: bool = False,
                  state: str | None = None, error: str | None = None) -> None:
     with session_factory() as s:
         app = s.execute(
@@ -409,7 +457,7 @@ def _update_task(session_factory, app_id: int, qid: int, *, remove: bool = False
             return
         tasks = []
         for t in app.tasks or []:
-            if t.get("kind") == "answer" and t.get("qid") == qid:
+            if _task_matches(t, kind, qid):
                 if remove:
                     continue
                 t = {**t, "state": state, "error": error}
@@ -432,17 +480,44 @@ def _write_answer(session_factory, app_id: int, qid: int, text: str, bank_key: s
             select(Application).where(Application.id == app_id).with_for_update()
         ).scalar_one_or_none()
         if app is not None:
-            app.tasks = [t for t in (app.tasks or [])
-                         if not (t.get("kind") == "answer" and t.get("qid") == qid)]
+            app.tasks = [t for t in (app.tasks or []) if not _task_matches(t, "answer", qid)]
         s.commit()
+
+
+def _write_letter(session_factory, app_id: int, lines: list[DocLine]) -> None:
+    with session_factory() as s:
+        app = s.execute(
+            select(Application).where(Application.id == app_id).with_for_update()
+        ).scalar_one_or_none()
+        if app is None:
+            s.rollback()
+            return
+        last = s.scalar(select(func.max(ApplicationDocument.version)).where(
+            ApplicationDocument.application_id == app.id,
+            ApplicationDocument.kind == "cover_letter",
+        )) or 0
+        s.add(ApplicationDocument(
+            user_id=app.user_id, application_id=app.id, kind="cover_letter",
+            lines=[line.model_dump(mode="json") for line in lines],
+            status=document_status(lines), version=last + 1,
+        ))
+        app.tasks = [t for t in (app.tasks or []) if not _task_matches(t, "cover_letter", 0)]
+        s.commit()
+
+
+def _pause(clock, exc: BaseException) -> None:
+    global _pause_until
+    _pause_until = clock() + RATE_LIMIT_PAUSE_SECONDS
+    logger.warning("LLM %s; pausing drafts for %ds",
+                   "call timed out" if isinstance(exc, TimeoutError) else "rate limited",
+                   int(RATE_LIMIT_PAUSE_SECONDS))
 
 
 async def _process_answer(session_factory, llm, app_id: int, qid: int, *,
                           call_timeout: float, clock) -> int:
-    global _pause_until
     work = _load_answer(session_factory, app_id, qid)
     if work is None:
-        _update_task(session_factory, app_id, qid, remove=True)
+        _update_task(session_factory, app_id, "answer", qid, remove=True)
         return 1
     timed = _TimedLLM(llm, call_timeout)
     try:
@@ -450,19 +525,39 @@ async def _process_answer(session_factory, llm, app_id: int, qid: int, *,
             timed, work.label, work.job, work.profile, work.refs, work.bank, locale=work.locale,
         )
     except (LLMRateLimited, TimeoutError) as exc:
-        _pause_until = clock() + RATE_LIMIT_PAUSE_SECONDS
-        logger.warning("LLM %s; pausing answer drafts for %ds",
-                       "call timed out" if isinstance(exc, TimeoutError) else "rate limited",
-                       int(RATE_LIMIT_PAUSE_SECONDS))
+        _pause(clock, exc)
         return 0
     except AnswerInvalid:
-        _update_task(session_factory, app_id, qid, state="failed", error=MSG_ANSWER_INVALID)
+        _update_task(session_factory, app_id, "answer", qid, state="failed", error=MSG_ANSWER_INVALID)
         return 1
     except Exception as exc:  # noqa: BLE001 - class name only
         logger.warning("answer %s draft failed (%s)", qid, type(exc).__name__)
-        _update_task(session_factory, app_id, qid, state="failed", error=MSG_LLM_FAIL)
+        _update_task(session_factory, app_id, "answer", qid, state="failed", error=MSG_LLM_FAIL)
         return 1
     _write_answer(session_factory, app_id, qid, text, key)
+    return 1
+
+
+async def _process_letter(session_factory, llm, app_id: int, *, call_timeout: float, clock) -> int:
+    work = _load_letter(session_factory, app_id)
+    if work is None:
+        _update_task(session_factory, app_id, "cover_letter", 0, remove=True)
+        return 1
+    timed = _TimedLLM(llm, call_timeout)
+    try:
+        lines = await draft_letter(timed, work.profile, work.job, work.reqs,
+                                   {"all": work.refs}, locale=work.locale)
+    except (LLMRateLimited, TimeoutError) as exc:
+        _pause(clock, exc)
+        return 0
+    except DraftInvalid:
+        _update_task(session_factory, app_id, "cover_letter", 0, state="failed", error=MSG_DRAFT_INVALID)
+        return 1
+    except Exception as exc:  # noqa: BLE001 - class name only
+        logger.warning("cover letter of application %s failed (%s)", app_id, type(exc).__name__)
+        _update_task(session_factory, app_id, "cover_letter", 0, state="failed", error=MSG_LLM_FAIL)
+        return 1
+    _write_letter(session_factory, app_id, lines)
     return 1
 
 

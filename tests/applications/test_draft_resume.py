@@ -156,3 +156,27 @@ async def test_end_empty_rendered_as_locale_word():
     lines = build_fact_lines(_profile(), "de")
     header = next(l for l in lines if l.fields.get("company") == "Beta")
     assert header.fields["end"] == "heute"
+
+
+# ---- cover letter -----------------------------------------------------------
+
+from rumo_core.applications.draft import draft_letter  # noqa: E402
+
+
+async def test_letter_lines_validated_and_retry():
+    bad = {"paragraphs": [{"text": "Reduzi o tempo do pipeline em 60% com Airflow", "source_refs": ["ach1"], "covers": []}]}
+    good = {"paragraphs": [{"text": "Reduzi o tempo do pipeline em 40% com Airflow", "source_refs": ["ach1"], "covers": []}]}
+    llm = FakeLLM(bad, good)
+    lines = await draft_letter(llm, _profile(), JOB, REQS, _ev(), locale="pt")
+    assert len(llm.calls) == 2
+    assert lines[0].section == "letter" and lines[0].origin == "ai"
+    assert "40%" in lines[0].text
+
+
+async def test_letter_company_from_job_allowed_other_company_rejected():
+    ok = {"paragraphs": [{"text": "Quero trabalhar na Globex como Data Engineer", "source_refs": ["summary"], "covers": []}]}
+    lines = await draft_letter(FakeLLM(ok), _profile(), JOB, REQS, _ev(), locale="pt")
+    assert lines[0].text.startswith("Quero trabalhar na Globex")
+    other = {"paragraphs": [{"text": "Quero trabalhar na Google", "source_refs": ["summary"], "covers": []}]}
+    with pytest.raises(DraftInvalid):
+        await draft_letter(FakeLLM(other, other), _profile(), JOB, REQS, _ev(), locale="pt")

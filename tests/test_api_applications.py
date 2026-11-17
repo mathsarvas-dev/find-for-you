@@ -589,3 +589,48 @@ def test_draft_not_duplicated(questions_env):
     assert second.json()["task"] == {"state": "queued", "error": None}
     with SessionLocal() as s:
         assert len(s.get(Application, aid).tasks) == 1
+
+
+# ---- cover letter ---------------------------------------------------------
+
+def test_letter_request_requires_ready_and_is_not_duplicated(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    draft_id = add_application(uid, add_job(uid), state="draft")
+    ready_id = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    c = client_as(uid)
+    r = c.post(f"/applications/{draft_id}/cover-letter")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_NOT_READY
+    first = c.post(f"/applications/{ready_id}/cover-letter")
+    second = c.post(f"/applications/{ready_id}/cover-letter")
+    assert first.status_code == 202 and second.status_code == 202
+    with SessionLocal() as s:
+        tasks = s.get(Application, ready_id).tasks
+    assert [t["kind"] for t in tasks] == ["cover_letter"]
+
+
+def test_letter_download_txt_and_pdf_from_letter_document(questions_env, monkeypatch):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    with SessionLocal() as s:
+        s.add(ApplicationDocument(
+            user_id=uid, application_id=aid, kind="cover_letter", version=1, status="valid",
+            lines=[{"id": "P1", "section": "letter", "text": "Candidato-me com prazer.", "fields": {},
+                    "parent": None, "source_refs": ["summary"], "origin": "ai", "covers": [],
+                    "violations": []}],
+        ))
+        s.commit()
+    seen = {}
+
+    def fake_pdf(html):
+        seen["html"] = html
+        return b"%PDF-1.4 fake"
+
+    monkeypatch.setattr(api_apps, "render_pdf", fake_pdf)
+    c = client_as(uid)
+    txt = c.get(f"/applications/{aid}/cover-letter.txt")
+    assert txt.status_code == 200 and "Candidato-me com prazer." in txt.text
+    pdf = c.get(f"/applications/{aid}/cover-letter.pdf")
+    assert pdf.status_code == 200 and pdf.content.startswith(b"%PDF")
+    assert "Candidato-me com prazer." in seen["html"] and "Application for" in seen["html"]

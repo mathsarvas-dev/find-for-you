@@ -466,3 +466,46 @@ async def test_bank_of_other_user_never_sent_to_llm(uid, make_user):
     await _run(uid, llm)
     blob = " ".join(m["content"] for c in llm.calls for m in c)
     assert "Segredo do outro usuário" not in blob
+
+
+# ---- cover letter task ------------------------------------------------------
+
+from rumo_core.models import ApplicationDocument as _AppDoc  # noqa: E402
+
+
+def _ready_with_letter_task(uid, i=80):
+    app_id = _generating(uid, i=i)
+    with SessionLocal() as s:
+        a = s.get(Application, app_id)
+        a.state = "ready"
+        a.profile_version = 1
+        a.requirements = {"must": [{"id": "m1", "text": "Airflow"}], "nice": [], "keywords": []}
+        s.add(_AppDoc(user_id=uid, application_id=app_id, kind="resume", lines=[], status="valid", version=1))
+        a.tasks = [{"kind": "cover_letter", "state": "queued", "error": None}]
+        s.commit()
+    return app_id
+
+
+@pytest.mark.db
+async def test_letter_task_creates_document(uid):
+    app_id = _ready_with_letter_task(uid)
+    llm = FakeLLM({"paragraphs": [{"text": "Reduzi o tempo do pipeline em 40% com Airflow",
+                                   "source_refs": ["ach1"], "covers": ["m1"]}]})
+    assert await _run(uid, llm) == 1
+    with SessionLocal() as s:
+        letters = s.execute(select(_AppDoc).where(_AppDoc.application_id == app_id,
+                                                  _AppDoc.kind == "cover_letter")).scalars().all()
+    assert len(letters) == 1 and letters[0].version == 1 and letters[0].status == "valid"
+    assert _get(app_id).tasks == []
+
+
+@pytest.mark.db
+async def test_letter_task_failure_keeps_no_document(uid):
+    app_id = _ready_with_letter_task(uid, i=81)
+    bad = {"paragraphs": [{"text": "Reduzi em 60% o pipeline", "source_refs": ["ach1"], "covers": []}]}
+    await _run(uid, FakeLLM(bad, bad))
+    (task,) = _get(app_id).tasks
+    assert task["state"] == "failed" and task["error"] == MSG_DRAFT_INVALID
+    with SessionLocal() as s:
+        assert s.execute(select(_AppDoc).where(_AppDoc.application_id == app_id,
+                                               _AppDoc.kind == "cover_letter")).first() is None

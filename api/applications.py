@@ -639,6 +639,25 @@ def request_answer_draft(
     return _question_out(session, user_id, app, q)
 
 
+@router.post("/applications/{app_id}/cover-letter", response_model=ApplicationOut, status_code=202)
+def request_cover_letter(
+    app_id: int,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    """Queues the optional cover letter for the worker (same validation as the resume)."""
+    app = _app_or_404(session, user_id, app_id)
+    if app.state not in ("ready", "applied") or _latest_doc(session, app.id, "resume") is None:
+        raise HTTPException(409, MSG_NOT_READY)
+    tasks = list(app.tasks or [])
+    if not any(t.get("kind") == "cover_letter" and t.get("state") == "queued" for t in tasks):
+        tasks = [t for t in tasks if t.get("kind") != "cover_letter"]
+        tasks.append({"kind": "cover_letter", "state": "queued", "error": None})
+        app.tasks = tasks
+        session.commit()
+    return _out(app)
+
+
 # ---- gaps -----------------------------------------------------------------
 
 MSG_REQ_NOT_FOUND = "Requisito não encontrado."
