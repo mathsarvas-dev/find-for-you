@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/shell/PageHeader";
 import { computeSteps, type Step } from "@/components/stepper/computeSteps";
 import { Stepper } from "@/components/stepper/Stepper";
 import type { Overview } from "@/lib/overview";
+import { Highlights } from "./Highlights";
 import { SummaryCards, SummaryCardsLoading } from "./SummaryCards";
 
 const num = new Intl.NumberFormat("pt-BR");
@@ -164,6 +165,7 @@ export function JourneyPanel() {
           <Link href={SYSTEM_HREF}>Ver estado do sistema</Link>
         </p>
       )}
+      <Highlights />
       <div className="home">
         <section className="panel home__path" aria-labelledby="seu-caminho">
           <div className="panel__head">

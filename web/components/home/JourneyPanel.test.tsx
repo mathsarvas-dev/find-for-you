@@ -5,6 +5,9 @@ import { PageTitleContext } from "@/components/shell/PageHeader";
 import { emptyOverview, type Overview } from "@/lib/overview";
 import { JourneyPanel, greetingFor } from "./JourneyPanel";
 
+// Os destaques têm testes próprios; aqui a API fica fora do ar (nada aparece).
+vi.mock("@/lib/pipeline", () => ({ getHighlights: vi.fn(() => Promise.reject(new Error("offline"))) }));
+
 function fresh(): Overview {
   return emptyOverview();
 }
