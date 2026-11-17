@@ -52,6 +52,10 @@ describe("sourcesSteps", () => {
     expect(steps[1].detail).toBe("3 vagas abertas");
   });
 
+  it("sem fontes: o detalhe convida a colar quadro, página de carreiras ou criar feed", () => {
+    expect(sourcesSteps([])[0].detail).toBe("Cole um quadro, uma página de carreiras ou crie um feed");
+  });
+
   it("nenhum passo traz botão próprio", () => {
     expect(sourcesSteps([company()]).every((s) => s.cta === undefined)).toBe(true);
   });

@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "@/lib/profile";
-import { addCompany, type Company, type NewCompany } from "@/lib/sources";
+import { addCompany, sourceLabel, type Company, type NewCompany } from "@/lib/sources";
 
 type AddCompanyFormProps = {
   onAdded: (company: Company) => void;
@@ -11,10 +11,17 @@ type AddCompanyFormProps = {
 const message = (err: unknown) =>
   err instanceof ApiError ? err.message : "Não consegui cadastrar. Tente de novo.";
 
-/** Cadastro de um quadro do Greenhouse: aceita o token ou a URL colada (o servidor normaliza). */
+/** Fontes que o cadastro aceita escolher; sem escolha, a API detecta pela URL. */
+const SOURCE_OPTIONS = ["greenhouse", "lever", "ashby", "smartrecruiters", "breezy", "site"] as const;
+
+/**
+ * Cadastro de empresa: token ou URL colada (o servidor normaliza). Sem fonte escolhida,
+ * a API detecta o ATS pela URL ou usa a página de carreiras.
+ */
 export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
   const [identifier, setIdentifier] = useState("");
   const [country, setCountry] = useState("");
+  const [source, setSource] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState<string | null>(null);
@@ -26,6 +33,7 @@ export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
   const errorId = useId();
   const countryId = useId();
   const countryHintId = useId();
+  const sourceId = useId();
 
   useEffect(() => {
     mounted.current = true;
@@ -49,13 +57,15 @@ export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
     setSending(true);
     setError(null);
     setAdded(null);
-    const input: NewCompany = { source: "greenhouse", identifier: value };
+    const input: NewCompany = { identifier: value };
+    if (source) input.source = source;
     if (cc) input.country = cc;
     try {
       const company = await addCompany(input);
       if (!mounted.current) return;
       setIdentifier("");
       setCountry("");
+      setSource("");
       setAdded(company.name);
       onAdded(company);
     } catch (err) {
@@ -79,9 +89,27 @@ export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
       }}
     >
       <div className="add-company__fields">
+        <div className="field add-company__source">
+          <label className="field__label" htmlFor={sourceId}>
+            Fonte
+          </label>
+          <select
+            id={sourceId}
+            className="input"
+            value={source}
+            onChange={(e) => setSource(e.target.value)}
+          >
+            <option value="">Detectar pela URL</option>
+            {SOURCE_OPTIONS.map((s) => (
+              <option key={s} value={s}>
+                {sourceLabel(s)}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="field add-company__token">
           <label className="field__label" htmlFor={fieldId}>
-            Token ou URL do quadro Greenhouse
+            Token ou URL da empresa
           </label>
           <input
             ref={fieldRef}
@@ -99,8 +127,8 @@ export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
             onChange={(e) => setIdentifier(e.target.value)}
           />
           <p className="field__hint" id={hintId}>
-            O token é a parte final de <span className="mono">boards.greenhouse.io/&lt;token&gt;</span>,
-            no endereço da página de vagas da empresa. Pode colar a URL inteira.
+            Para um quadro de vagas, use o token (a parte final da URL) ou cole a URL inteira. Para
+            outra página de vagas, cole a URL da página de carreiras da empresa.
           </p>
         </div>
         <div className="field add-company__country">
@@ -134,13 +162,13 @@ export function AddCompanyForm({ onAdded }: AddCompanyFormProps) {
       <div className="add-company__foot">
         <p className="muted add-company__status" role="status" aria-live="polite">
           {sending
-            ? "Conferindo o quadro no Greenhouse. Pode levar alguns segundos."
+            ? "Conferindo a fonte. Pode levar alguns segundos."
             : added
               ? `${added} cadastrada. A primeira coleta começa em instantes.`
               : ""}
         </p>
         <button type="submit" className="button" disabled={!canSend} aria-busy={sending || undefined}>
-          {sending ? "Validando o quadro…" : "Cadastrar empresa"}
+          {sending ? "Validando a fonte…" : "Cadastrar empresa"}
         </button>
       </div>
     </form>

@@ -151,3 +151,45 @@ describe("CompanyRow", () => {
     expect(onChange).toHaveBeenCalledWith(healthy);
   });
 });
+
+describe("CompanyRow (fontes, funil e modo de coleta)", () => {
+  it("mostra a fonte como selo de texto", () => {
+    renderRow({ ...healthy, source: "lever" });
+    expect(screen.getByText("Lever")).toBeInTheDocument();
+  });
+
+  it("vagas fora dos filtros aparecem junto das abertas", () => {
+    renderRow({ ...healthy, open_jobs: 0, stub_jobs: 3 });
+    expect(screen.getByText("0 vagas abertas · 3 fora dos seus filtros")).toBeInTheDocument();
+  });
+
+  it("sem stubs não mostra o trecho fora dos filtros", () => {
+    renderRow(healthy);
+    expect(screen.queryByText(/fora dos seus filtros/)).toBeNull();
+  });
+
+  it("interruptor de coleta total mostra o modo e chama PATCH com collect_mode all", async () => {
+    const updated = { ...healthy, collect_mode: "all" as const };
+    patch.mockResolvedValue(updated);
+    const onChange = renderRow(healthy);
+    const toggle = screen.getByRole("checkbox", { name: "Coletar todas as vagas desta empresa" });
+    expect(toggle).not.toBeChecked();
+    expect(screen.getByText("Ignora seus filtros só para esta empresa.")).toBeInTheDocument();
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(patch).toHaveBeenCalledWith(1, { collect_mode: "all" });
+    expect(onChange).toHaveBeenCalledWith(updated);
+  });
+
+  it("com coleta total ligada, desligar volta ao modo funnel", async () => {
+    patch.mockResolvedValue(healthy);
+    renderRow({ ...healthy, collect_mode: "all" });
+    const toggle = screen.getByRole("checkbox", { name: "Coletar todas as vagas desta empresa" });
+    expect(toggle).toBeChecked();
+    await act(async () => {
+      fireEvent.click(toggle);
+    });
+    expect(patch).toHaveBeenCalledWith(1, { collect_mode: "funnel" });
+  });
+});

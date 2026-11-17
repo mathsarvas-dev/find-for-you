@@ -19,7 +19,7 @@ export function sourcesSteps(companies: Company[]): Step[] {
     {
       id: "add",
       title: "Adicionar",
-      detail: added ? count(companies.length, "empresa", "empresas") : "Cole o quadro do Greenhouse",
+      detail: added ? count(companies.length, "empresa", "empresas") : "Cole um quadro, uma página de carreiras ou crie um feed",
       state: added ? "done" : "current",
     },
     {

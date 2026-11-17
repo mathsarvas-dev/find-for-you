@@ -4,6 +4,7 @@ import { OverviewContext, type OverviewState } from "@/components/shell/Overview
 import { ApiError } from "@/lib/profile";
 import { addCompany, collectNow, listCompanies, listJobs, patchCompany, type Company } from "@/lib/sources";
 import { getDiscovery, putDiscovery, type DiscoveryState } from "@/lib/discovery";
+import { getFunnel } from "@/lib/funnel";
 import SourcesPage from "./page";
 
 vi.mock("@/lib/sources", async (importOriginal) => ({
@@ -31,6 +32,12 @@ const discovery: DiscoveryState = {
   found: 0,
 };
 
+vi.mock("@/lib/funnel", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/funnel")>()),
+  getFunnel: vi.fn(),
+  putFunnel: vi.fn(),
+}));
+
 const m = {
   discovery: vi.mocked(getDiscovery),
   companies: vi.mocked(listCompanies),
@@ -39,6 +46,7 @@ const m = {
   patch: vi.mocked(patchCompany),
   collect: vi.mocked(collectNow),
   putDiscovery: vi.mocked(putDiscovery),
+  funnel: vi.mocked(getFunnel),
 };
 
 const NOW = Date.parse("2026-11-12T12:00:00Z");
@@ -116,6 +124,8 @@ beforeEach(() => {
   vi.setSystemTime(NOW);
   m.jobs.mockResolvedValue({ total: 0, items: [] });
   m.discovery.mockResolvedValue(discovery);
+  m.funnel.mockResolvedValue({ full: 0, stub: 0, gated: 0, floor: null, suggested_floor: null, good_labels: 0 });
+  window.history.replaceState(null, "", "/sources");
 });
 
 afterEach(() => {
@@ -137,7 +147,7 @@ describe("SourcesPage", () => {
     expect(
       screen.getByText("Nenhuma vaga ainda — cadastre uma empresa e aguarde a primeira coleta"),
     ).toBeInTheDocument();
-    expect(screen.getByLabelText("Token ou URL do quadro Greenhouse")).toBeInTheDocument();
+    expect(screen.getByLabelText("Token ou URL da empresa")).toBeInTheDocument();
   });
 
   it("carrega empresas e a primeira página de vagas", async () => {
@@ -252,7 +262,7 @@ describe("SourcesPage", () => {
     m.companies.mockResolvedValueOnce([collected]).mockResolvedValue([collected, pending]);
     m.add.mockResolvedValue(pending);
     await renderPage();
-    fireEvent.change(screen.getByLabelText("Token ou URL do quadro Greenhouse"), {
+    fireEvent.change(screen.getByLabelText("Token ou URL da empresa"), {
       target: { value: "nubank" },
     });
     await act(async () => {
@@ -361,7 +371,7 @@ describe("SourcesPage", () => {
       expect(buttons).toHaveLength(1);
       expect(buttons[0]).toHaveTextContent("Adicionar empresa");
       fireEvent.click(buttons[0]);
-      expect(screen.getByLabelText("Token ou URL do quadro Greenhouse")).toHaveFocus();
+      expect(screen.getByLabelText("Token ou URL da empresa")).toHaveFocus();
       // Sem empresas não há vagas para ver.
       expect(screen.queryByRole("link", { name: "Ver vagas" })).toBeNull();
     });
@@ -371,7 +381,7 @@ describe("SourcesPage", () => {
       await renderPage();
       const actions = within(header()!);
       fireEvent.click(actions.getByRole("button", { name: "Adicionar empresa" }));
-      expect(screen.getByLabelText("Token ou URL do quadro Greenhouse")).toHaveFocus();
+      expect(screen.getByLabelText("Token ou URL da empresa")).toHaveFocus();
       expect(actions.getByRole("link", { name: "Ver vagas" })).toHaveAttribute("href", "/jobs");
       // Focar não chama a API.
       expect(m.companies).toHaveBeenCalledTimes(1);
@@ -391,7 +401,7 @@ describe("SourcesPage", () => {
       m.add.mockResolvedValue(pending);
       const { refresh } = await renderWithOverview();
       expect(refresh).not.toHaveBeenCalled();
-      fireEvent.change(screen.getByLabelText("Token ou URL do quadro Greenhouse"), {
+      fireEvent.change(screen.getByLabelText("Token ou URL da empresa"), {
         target: { value: "nubank" },
       });
       await act(async () => {
@@ -433,7 +443,7 @@ describe("SourcesPage", () => {
       m.companies.mockResolvedValue([collected]);
       m.add.mockRejectedValue(new ApiError(404, "Quadro não encontrado."));
       const { refresh } = await renderWithOverview();
-      fireEvent.change(screen.getByLabelText("Token ou URL do quadro Greenhouse"), {
+      fireEvent.change(screen.getByLabelText("Token ou URL da empresa"), {
         target: { value: "nada" },
       });
       await act(async () => {
@@ -442,5 +452,30 @@ describe("SourcesPage", () => {
       expect(screen.getByRole("alert")).toHaveTextContent("Quadro não encontrado.");
       expect(refresh).not.toHaveBeenCalled();
     });
+  });
+
+  it("abas: a aba fica na query e setas trocam de aba", async () => {
+    m.companies.mockResolvedValue([collected]);
+    await renderPage();
+    const empresas = screen.getByRole("tab", { name: "Empresas" });
+    expect(empresas).toHaveAttribute("aria-selected", "true");
+    fireEvent.keyDown(empresas, { key: "ArrowRight" });
+    expect(screen.getByRole("tab", { name: "Feeds" })).toHaveAttribute("aria-selected", "true");
+    expect(window.location.search).toBe("?tab=feeds");
+    expect(screen.queryByRole("heading", { name: "Empresas vigiadas" })).toBeNull();
+  });
+
+  it("?tab=link abre direto a aba de importar por link", async () => {
+    window.history.replaceState(null, "", "/sources?tab=link");
+    m.companies.mockResolvedValue([collected]);
+    await renderPage();
+    expect(screen.getByRole("tab", { name: "Importar por link" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Empresas mostra o resumo do funil acima da lista", async () => {
+    m.companies.mockResolvedValue([collected]);
+    m.funnel.mockResolvedValue({ full: 0, stub: 4, gated: 0, floor: null, suggested_floor: null, good_labels: 0 });
+    await renderPage();
+    expect(screen.getByText("4 vagas fora dos seus filtros")).toBeInTheDocument();
   });
 });

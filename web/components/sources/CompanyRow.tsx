@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { ApiError } from "@/lib/profile";
-import { collectNow, isPending, patchCompany, relativeTime, type Company } from "@/lib/sources";
+import {
+  collectNow,
+  isPending,
+  patchCompany,
+  relativeTime,
+  sourceLabel,
+  type Company,
+} from "@/lib/sources";
 
 type CompanyRowProps = {
   company: Company;
@@ -21,10 +28,11 @@ function failureText(c: Company): string | null {
 }
 
 export function CompanyRow({ company: c, now, onChange }: CompanyRowProps) {
-  const [busy, setBusy] = useState<"collect" | "toggle" | null>(null);
+  const [busy, setBusy] = useState<"collect" | "toggle" | "mode" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inFlight = useRef(false);
   const mounted = useRef(true);
+  const modeHintId = useId();
 
   useEffect(() => {
     mounted.current = true;
@@ -33,14 +41,18 @@ export function CompanyRow({ company: c, now, onChange }: CompanyRowProps) {
     };
   }, []);
 
-  async function run(kind: "collect" | "toggle") {
+  async function run(kind: "collect" | "toggle" | "mode") {
     if (inFlight.current) return;
     inFlight.current = true;
     setBusy(kind);
     setError(null);
     try {
       const next =
-        kind === "collect" ? await collectNow(c.id) : await patchCompany(c.id, { active: !c.active });
+        kind === "collect"
+          ? await collectNow(c.id)
+          : kind === "toggle"
+            ? await patchCompany(c.id, { active: !c.active })
+            : await patchCompany(c.id, { collect_mode: c.collect_mode === "all" ? "funnel" : "all" });
       if (mounted.current) onChange(next);
     } catch (err) {
       if (mounted.current) setError(message(err));
@@ -76,13 +88,29 @@ export function CompanyRow({ company: c, now, onChange }: CompanyRowProps) {
             {c.active ? "ativa" : "pausada"}
           </span>
           {c.country && <span className="mono">{c.country}</span>}
+          <span className="chip">{sourceLabel(c.source)}</span>
           <span className="company__jobs">
             {`${c.open_jobs} ${c.open_jobs === 1 ? "vaga aberta" : "vagas abertas"}`}
+            {c.stub_jobs > 0 && ` · ${c.stub_jobs} fora dos seus filtros`}
           </span>
         </p>
         <p className="company__run">
           <span>{lastRun}</span>
           {pending && <span className="company__pending">{"· coleta pendente"}</span>}
+        </p>
+        <label className="company__mode">
+          <input
+            type="checkbox"
+            role="checkbox"
+            checked={c.collect_mode === "all"}
+            disabled={busy !== null}
+            aria-describedby={`${modeHintId}`}
+            onChange={() => void run("mode")}
+          />{" "}
+          Coletar todas as vagas desta empresa
+        </label>
+        <p className="field__hint" id={modeHintId}>
+          Ignora seus filtros só para esta empresa.
         </p>
         {failure && <p className="company__failure">{failure}</p>}
         {error && (

@@ -31,14 +31,41 @@ const created: Company = {
 
 afterEach(() => add.mockReset());
 
-const field = () => screen.getByLabelText("Token ou URL do quadro Greenhouse");
+const field = () => screen.getByLabelText("Token ou URL da empresa");
+const sourceField = () => screen.getByLabelText("Fonte");
 const submit = () => screen.getByRole("button", { name: /Cadastrar empresa/ });
 
 describe("AddCompanyForm", () => {
-  it("rótulo associado e ajuda de onde achar o token", () => {
+  it("rótulo associado e ajuda de onde achar o token ou a página de carreiras", () => {
     render(<AddCompanyForm onAdded={() => {}} />);
-    expect(field()).toHaveAccessibleDescription(/boards\.greenhouse\.io\/<token>/);
+    expect(field()).toHaveAccessibleDescription(/URL da página de carreiras/);
     expect(submit()).toBeDisabled();
+  });
+
+  it("fonte padrão detecta pela URL e lista as fontes verificadas", () => {
+    render(<AddCompanyForm onAdded={() => {}} />);
+    expect(sourceField()).toHaveValue("");
+    const options = Array.from(sourceField().querySelectorAll("option")).map((o) => o.textContent);
+    expect(options).toEqual([
+      "Detectar pela URL",
+      "Greenhouse",
+      "Lever",
+      "Ashby",
+      "SmartRecruiters",
+      "Breezy",
+      "Página de carreira",
+    ]);
+  });
+
+  it("fonte escolhida vai no envio", async () => {
+    add.mockResolvedValue({ ...created, source: "lever" });
+    render(<AddCompanyForm onAdded={() => {}} />);
+    fireEvent.change(sourceField(), { target: { value: "lever" } });
+    fireEvent.change(field(), { target: { value: "leverdemo" } });
+    await act(async () => {
+      fireEvent.click(submit());
+    });
+    expect(add).toHaveBeenCalledWith({ source: "lever", identifier: "leverdemo" });
   });
 
   it("envia a URL colada como está e limpa ao dar certo", async () => {
@@ -51,7 +78,6 @@ describe("AddCompanyForm", () => {
       fireEvent.click(submit());
     });
     expect(add).toHaveBeenCalledWith({
-      source: "greenhouse",
       identifier: "https://boards.greenhouse.io/gitlab",
       country: "BR",
     });
@@ -68,7 +94,7 @@ describe("AddCompanyForm", () => {
     await act(async () => {
       fireEvent.click(submit());
     });
-    expect(add).toHaveBeenCalledWith({ source: "greenhouse", identifier: "gitlab" });
+    expect(add).toHaveBeenCalledWith({ identifier: "gitlab" });
   });
 
   it("desabilita após o primeiro clique (sem envio duplo)", async () => {
@@ -82,7 +108,7 @@ describe("AddCompanyForm", () => {
     fireEvent.submit(field().closest("form")!);
     expect(add).toHaveBeenCalledTimes(1);
     expect(button).toBeDisabled();
-    expect(button).toHaveTextContent("Validando o quadro…");
+    expect(button).toHaveTextContent("Validando a fonte…");
     await act(async () => resolve(created));
   });
 
