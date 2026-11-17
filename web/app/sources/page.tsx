@@ -5,8 +5,10 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 import { AddCompanyForm } from "@/components/sources/AddCompanyForm";
 import { CompanyRow } from "@/components/sources/CompanyRow";
 import { DiscoveryPanel } from "@/components/sources/DiscoveryPanel";
+import { FeedsPanel } from "@/components/sources/FeedsPanel";
 import { FunnelSummary } from "@/components/sources/FunnelSummary";
 import { JobsList } from "@/components/sources/JobsList";
+import { PortalsPanel } from "@/components/sources/PortalsPanel";
 import { DEFAULT_TAB, parseTab, SourcesTabs, type SourcesTab } from "@/components/sources/SourcesTabs";
 import { sourcesSteps } from "@/components/sources/sourcesSteps";
 import { useRefreshOverview } from "@/components/shell/OverviewContext";
@@ -378,8 +380,8 @@ export default function SourcesPage() {
         )}
         </>
       )}
-      {tab === "feeds" && <p className="empty">Feeds chegam na próxima etapa.</p>}
-      {tab === "portais" && <p className="empty">Portais chegam na próxima etapa.</p>}
+      {tab === "feeds" && <FeedsPanel />}
+      {tab === "portais" && <PortalsPanel />}
       {tab === "link" && <p className="empty">Importar por link chega na próxima etapa.</p>}
       </div>
     </main>
