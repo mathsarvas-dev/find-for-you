@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     adzuna_app_key: str = Field("", repr=False)
     jooble_key: str = Field("", repr=False)
     careerjet_key: str = Field("", repr=False)
+    # Candidatura (marco 5).
+    application_daily_limit: int = Field(5, gt=0)
+    application_max_attempts: int = Field(3, gt=0)
+    application_call_timeout: float = Field(25, gt=0)
+    greenhouse_questions_timeout: float = Field(10, gt=0)
     # Comma-separated list of browser origins allowed to call the API.
     cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 

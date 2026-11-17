@@ -172,6 +172,10 @@ class AnswerBankItem(UserScopedMixin, TimestampMixin, Base):
     key: Mapped[str] = mapped_column(String(64), nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
     source_message_id: Mapped[int | None] = mapped_column()
+    # language of `value` (pt|en|de): applications reuse it only with the same meaning
+    lang: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="pt"
+    )
 
 
 class Company(UserScopedMixin, TimestampMixin, Base):
@@ -489,3 +493,104 @@ class PortalState(UserScopedMixin, TimestampMixin, Base):
     )
     blocked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class Application(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "applications"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_applications_user_job"),
+        Index("ix_applications_user_state", "user_id", "state"),
+        CheckConstraint(
+            "state in ('draft','generating','ready','error','applied')",
+            name="ck_applications_state",
+        ),
+        CheckConstraint(
+            "template in ('us','de','au','br')", name="ck_applications_template"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    profile_version: Mapped[int | None] = mapped_column()
+    job_content_hash: Mapped[str | None] = mapped_column(String(64))
+    state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="draft"
+    )
+    locale: Mapped[str] = mapped_column(String(8), nullable=False)
+    template: Mapped[str] = mapped_column(String(8), nullable=False)
+    requirements: Mapped[dict | None] = mapped_column(JSONB)
+    coverage: Mapped[dict | None] = mapped_column(JSONB)
+    error: Mapped[str | None] = mapped_column(Text)
+    attempts: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # queue of letter / answer drafts for the worker: [{kind, state, error, ...}]
+    tasks: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    # typed by the person; only used by the Australian template
+    referees: Mapped[str | None] = mapped_column(Text)
+
+
+class ApplicationDocument(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "application_documents"
+    __table_args__ = (
+        UniqueConstraint(
+            "application_id", "kind", "version",
+            name="uq_application_documents_app_kind_version",
+        ),
+        Index("ix_application_documents_created", "kind", "created_at"),
+        CheckConstraint(
+            "kind in ('resume','cover_letter')", name="ck_application_documents_kind"
+        ),
+        CheckConstraint(
+            "status in ('valid','needs_fix')", name="ck_application_documents_status"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    lines: Mapped[list] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    version: Mapped[int] = mapped_column(nullable=False)
+
+
+class ApplicationQuestion(UserScopedMixin, TimestampMixin, Base):
+    __tablename__ = "application_questions"
+    __table_args__ = (
+        CheckConstraint(
+            "source in ('api','pasted')", name="ck_application_questions_source"
+        ),
+        CheckConstraint(
+            "kind in ('text','choice','bool','file')", name="ck_application_questions_kind"
+        ),
+        CheckConstraint(
+            "answer_state in ('empty','draft','edited','final')",
+            name="ck_application_questions_answer_state",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    application_id: Mapped[int] = mapped_column(
+        ForeignKey("applications.id", ondelete="CASCADE"), nullable=False
+    )
+    position: Mapped[int] = mapped_column(nullable=False)
+    source: Mapped[str] = mapped_column(String(8), nullable=False)
+    label: Mapped[str] = mapped_column(Text, nullable=False)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    options: Mapped[list | None] = mapped_column(JSONB)
+    required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    sensitive: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    answer: Mapped[str | None] = mapped_column(Text)
+    answer_state: Mapped[str] = mapped_column(
+        String(8), nullable=False, server_default="empty"
+    )
+    bank_key: Mapped[str | None] = mapped_column(String(64))
