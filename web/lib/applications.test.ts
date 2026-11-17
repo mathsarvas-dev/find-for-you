@@ -53,3 +53,20 @@ describe("prepareApplication", () => {
     expect((err as ApiError).message).toMatch(/Limite diário/);
   });
 });
+
+describe("downloadArtifact", () => {
+  it("turns a 503 into an ApiError with the server message", async () => {
+    mockFetch(async () => jsonResponse(503, { detail: "Não foi possível gerar o PDF agora. Use a versão em texto." }));
+    const { downloadArtifact } = await import("./applications");
+    const err = await downloadArtifact(7, "resume", "pdf").catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(503);
+    expect((err as ApiError).message).toMatch(/Use a versão em texto/);
+  });
+
+  it("builds the URLs of the resume and the letter", async () => {
+    const { artifactUrl } = await import("./applications");
+    expect(artifactUrl(7, "resume", "pdf")).toBe("http://localhost:8000/applications/7/resume.pdf");
+    expect(artifactUrl(7, "cover_letter", "txt")).toBe("http://localhost:8000/applications/7/cover-letter.txt");
+  });
+});

@@ -1,4 +1,4 @@
-import { request } from "@/lib/profile";
+import { ApiError, publicApiUrl, request } from "@/lib/profile";
 
 /* Tipos espelhando api/applications.py e rumo_core/applications/lines.py */
 
@@ -153,4 +153,33 @@ export async function prepareApplication(jobId: number): Promise<number> {
     await generateApplication(app.id);
   }
   return app.id;
+}
+
+export function artifactUrl(id: number, kind: DocKind, fmt: "pdf" | "txt"): string {
+  const name = kind === "resume" ? "resume" : "cover-letter";
+  return `${publicApiUrl()}/applications/${id}/${name}.${fmt}`;
+}
+
+/** Baixa o PDF ou o texto. Erros do servidor (409, 503) viram ApiError com a mensagem em PT-BR. */
+export async function downloadArtifact(id: number, kind: DocKind, fmt: "pdf" | "txt"): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(artifactUrl(id, kind, fmt), { cache: "no-store" });
+  } catch {
+    throw new ApiError(null, "Não consegui falar com a API. Confira se ela está no ar e tente de novo.");
+  }
+  if (!res.ok) {
+    const body = (await res.json().catch(() => null)) as { detail?: unknown } | null;
+    const detail = body?.detail;
+    throw new ApiError(
+      res.status,
+      typeof detail === "string" && detail ? detail : `A API respondeu com erro (HTTP ${res.status}).`,
+    );
+  }
+  const url = URL.createObjectURL(await res.blob());
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${kind === "resume" ? "curriculo" : "carta"}-${id}.${fmt}`;
+  link.click();
+  URL.revokeObjectURL(url);
 }

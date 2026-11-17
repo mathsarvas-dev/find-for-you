@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import {
+  downloadArtifact,
   editLine,
+  patchApplication,
+  type Template,
   type ApplicationDetail,
   type CoverageItem,
   type Counts,
@@ -11,6 +14,9 @@ import {
 } from "@/lib/applications";
 import { ApiError } from "@/lib/profile";
 import { LineEditor } from "./LineEditor";
+import { TemplatePicker } from "./TemplatePicker";
+
+const BLOCKED_REASON = "Corrija as linhas marcadas antes de baixar.";
 
 type Props = {
   detail: ApplicationDetail;
@@ -58,6 +64,9 @@ export function ResumeStep({ detail, onChanged }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const [referees, setReferees] = useState(detail.referees ?? "");
 
   const doc = saved && saved.base === detail ? saved.doc : detail.resume;
   const cov = detail.coverage;
@@ -68,6 +77,41 @@ export function ResumeStep({ detail, onChanged }: Props) {
   const lines = doc.lines;
   const needsFix = doc.status === "needs_fix";
   const gaps = cov ? uncovered(cov.items) : [];
+
+  async function changeTemplate(template: Template) {
+    setBusy(true);
+    setSettingsError(null);
+    try {
+      await patchApplication(detail.id, { template });
+      onChanged();
+    } catch (e) {
+      setSettingsError(e instanceof ApiError ? e.message : "Não foi possível trocar o modelo agora.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveReferees() {
+    setBusy(true);
+    setSettingsError(null);
+    try {
+      await patchApplication(detail.id, { referees });
+      onChanged();
+    } catch (e) {
+      setSettingsError(e instanceof ApiError ? e.message : "Não foi possível salvar as referências agora.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function download(fmt: "pdf" | "txt") {
+    setDownloadError(null);
+    try {
+      await downloadArtifact(detail.id, "resume", fmt);
+    } catch (e) {
+      setDownloadError(e instanceof ApiError ? e.message : "Não foi possível baixar agora.");
+    }
+  }
 
   async function save(line: DocLine, text: string) {
     setBusy(true);
@@ -101,6 +145,58 @@ export function ResumeStep({ detail, onChanged }: Props) {
           Corrija as linhas marcadas para liberar o PDF.
         </div>
       ) : null}
+
+      <div className="application-settings">
+        <TemplatePicker value={detail.template} disabled={busy} onChange={changeTemplate} />
+        {settingsError ? (
+          <p role="alert" className="application-error">
+            {settingsError}
+          </p>
+        ) : null}
+        {detail.template === "au" ? (
+          <div className="application-referees">
+            <label>
+              Referências (digitadas por você)
+              <textarea
+                value={referees}
+                maxLength={1000}
+                rows={2}
+                onChange={(e) => setReferees(e.target.value)}
+              />
+            </label>
+            <button type="button" className="button button--secondary" disabled={busy} onClick={saveReferees}>
+              Salvar referências
+            </button>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="application-downloads">
+        <button
+          type="button"
+          className="button"
+          disabled={needsFix}
+          title={needsFix ? BLOCKED_REASON : undefined}
+          onClick={() => download("pdf")}
+        >
+          Baixar PDF
+        </button>
+        <button
+          type="button"
+          className="button button--secondary"
+          disabled={needsFix}
+          title={needsFix ? BLOCKED_REASON : undefined}
+          onClick={() => download("txt")}
+        >
+          Baixar texto
+        </button>
+        {needsFix ? <p className="muted">{BLOCKED_REASON}</p> : null}
+        {downloadError ? (
+          <p role="alert" className="application-error">
+            {downloadError}
+          </p>
+        ) : null}
+      </div>
 
       <ol className="application-lines">
         {lines.map((line) => {
