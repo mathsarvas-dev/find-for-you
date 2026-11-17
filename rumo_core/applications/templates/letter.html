@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="{{ locale }}">
+<head>
+<meta charset="utf-8">
+<title>{{ kind }} · {{ sender_name }}</title>
+<style>{{ css }}</style>
+</head>
+<body class="tpl-{{ template }} letter">
+<header class="cv-header">
+  <h1>{{ sender_name }}</h1>
+  {% if contact %}
+  <p class="cv-contact">{% for c in contact %}<span>{{ c }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  {% endif %}
+</header>
+<p class="letter-date">{{ today }}</p>
+<p class="letter-subject"><strong>{{ subject }}</strong></p>
+<p>{{ salutation }}</p>
+{% for p in paragraphs %}<p>{{ p }}</p>{% endfor %}
+<p>{{ closing }}</p>
+<p>{{ sender_name }}</p>
+</body>
+</html>

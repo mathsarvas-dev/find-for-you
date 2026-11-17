@@ -6,7 +6,7 @@ and the worker does the rest. Nothing leaves the computer: no form is filled
 or sent.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
@@ -19,6 +19,14 @@ from api.deps import current_user_id
 from api.matching import INT4_MAX, model_version
 from rumo_core.applications.coverage import compute_coverage
 from rumo_core.applications.lines import DocLine, document_status, locale_for, template_for
+from rumo_core.applications.pdf import PdfUnavailable
+from rumo_core.applications.render import (
+    render_html,
+    render_letter_html,
+    render_letter_text,
+    render_pdf,
+    render_text,
+)
 from rumo_core.applications.profile_index import item_texts
 from rumo_core.applications.quota import generated_last_24h
 from rumo_core.applications.requirements import Requirements
@@ -44,6 +52,10 @@ MSG_FACT_LINE = "Este dado vem do seu perfil. Para mudar, edite o perfil."
 MSG_LINE_NOT_FOUND = "Linha não encontrada."
 MSG_NO_DOCUMENT = "Esta candidatura ainda não tem currículo."
 MSG_REFEREES_AU_ONLY = "Referências só se aplicam ao modelo da Austrália."
+MSG_PDF_BLOCKED = "Corrija as linhas marcadas antes de baixar."
+MSG_PDF_UNAVAILABLE = "Não foi possível gerar o PDF agora. Use a versão em texto."
+MSG_NO_RESUME = "O currículo ainda não foi gerado."
+MSG_NO_LETTER = "A carta ainda não foi gerada."
 
 WARN_PROFILE_CHANGED = "profile_changed"
 WARN_JOB_CHANGED = "job_changed"
@@ -394,3 +406,70 @@ def edit_line(
         app.coverage = compute_coverage(reqs, lines, item_texts(profile), decisions)
     session.commit()
     return _doc_out(doc)
+
+
+# ---- downloads ------------------------------------------------------------
+
+def _send_document(session: Session, user_id: int, app_id: int, *, kind: str, fmt: str) -> Response:
+    """PDF or plain text of the current document. Only a document whose lines
+    all pass the validator is served; the attachment name is built from the
+    application id, never from the posting."""
+    app = _app_or_404(session, user_id, app_id)
+    doc = _latest_doc(session, app.id, kind)
+    if doc is None:
+        raise HTTPException(404, MSG_NO_RESUME if kind == "resume" else MSG_NO_LETTER)
+    if doc.status != "valid":
+        raise HTTPException(409, MSG_PDF_BLOCKED)
+    lines = [DocLine.model_validate(x) for x in doc.lines]
+    today = date.today()
+
+    if kind == "resume":
+        referees = app.referees if app.template == "au" else None
+        html = render_html(lines, template=app.template, locale=app.locale, referees=referees)
+        text = render_text(lines, locale=app.locale, referees=referees, template=app.template)
+        stem = "curriculo"
+    else:
+        row = _job_row(session, user_id, app.job_id)
+        job_title, company_name = (row[0].title, row[1]) if row is not None else ("", "")
+        resume = _latest_doc(session, app.id, "resume")
+        sender = [DocLine.model_validate(x) for x in resume.lines] if resume is not None else []
+        sender = [x for x in sender if x.section == "contact"]
+        html = render_letter_html(lines, template=app.template, locale=app.locale,
+                                  job_title=job_title, company_name=company_name,
+                                  sender_lines=sender, today=today)
+        text = render_letter_text(lines, locale=app.locale, job_title=job_title,
+                                  company_name=company_name, sender_lines=sender, today=today)
+        stem = "carta"
+
+    headers = {"Content-Disposition": f'attachment; filename="{stem}-{app.id}.{fmt}"'}
+    if fmt == "txt":
+        return Response(text, media_type="text/plain; charset=utf-8", headers=headers)
+    try:
+        pdf = render_pdf(html)
+    except PdfUnavailable:
+        raise HTTPException(503, MSG_PDF_UNAVAILABLE) from None
+    return Response(pdf, media_type="application/pdf", headers=headers)
+
+
+@router.get("/applications/{app_id}/resume.pdf")
+def resume_pdf(app_id: int, session: Session = Depends(get_session),
+               user_id: int = Depends(current_user_id)):
+    return _send_document(session, user_id, app_id, kind="resume", fmt="pdf")
+
+
+@router.get("/applications/{app_id}/resume.txt")
+def resume_txt(app_id: int, session: Session = Depends(get_session),
+               user_id: int = Depends(current_user_id)):
+    return _send_document(session, user_id, app_id, kind="resume", fmt="txt")
+
+
+@router.get("/applications/{app_id}/cover-letter.pdf")
+def cover_letter_pdf(app_id: int, session: Session = Depends(get_session),
+                     user_id: int = Depends(current_user_id)):
+    return _send_document(session, user_id, app_id, kind="cover_letter", fmt="pdf")
+
+
+@router.get("/applications/{app_id}/cover-letter.txt")
+def cover_letter_txt(app_id: int, session: Session = Depends(get_session),
+                     user_id: int = Depends(current_user_id)):
+    return _send_document(session, user_id, app_id, kind="cover_letter", fmt="txt")

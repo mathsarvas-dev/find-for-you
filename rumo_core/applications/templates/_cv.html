@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="{{ locale }}">
+<head>
+<meta charset="utf-8">
+<title>{{ d.name or 'Currículo' }}</title>
+<style>{{ css }}</style>
+</head>
+<body class="tpl-{{ template }}">
+<header class="cv-header">
+  <h1>{{ d.name }}</h1>
+  {% if d.contact %}
+  <p class="cv-contact">{% for c in d.contact %}<span>{{ c }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</p>
+  {% endif %}
+</header>
+
+{% for section in order %}
+  {% if section == 'summary' and d.summary %}
+  <section class="cv-section cv-summary">
+    <h2>{{ H.summary }}</h2>
+    <p>{{ d.summary }}</p>
+  </section>
+
+  {% elif section == 'experience' and d.experiences %}
+  <section class="cv-section">
+    <h2>{{ H.experience }}</h2>
+    {% if tabular %}
+    <table class="cv-table">
+      {% for e in d.experiences %}
+      <tr>
+        <td class="cv-dates">{{ e.dates }}</td>
+        <td><strong>{{ e.header }}</strong>
+          {% if e.bullets %}<ul>{% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+      {% for e in d.experiences %}
+      <div class="cv-item">
+        <h3>{{ e.header }}</h3>
+        {% if e.dates %}<p class="cv-dates">{{ e.dates }}</p>{% endif %}
+        {% if e.bullets %}<ul>{% for b in e.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+      </div>
+      {% endfor %}
+    {% endif %}
+  </section>
+
+  {% elif section == 'projects' and d.projects %}
+  <section class="cv-section">
+    <h2>{{ H.projects }}</h2>
+    {% for p in d.projects %}
+    <div class="cv-item">
+      <h3>{{ p.header }}</h3>
+      {% if p.bullets %}<ul>{% for b in p.bullets %}<li>{{ b }}</li>{% endfor %}</ul>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+
+  {% elif section == 'education' and d.education %}
+  <section class="cv-section">
+    <h2>{{ H.education }}</h2>
+    {% if tabular %}
+    <table class="cv-table">
+      {% for e in d.education %}
+      <tr><td class="cv-dates">{{ e.dates }}</td><td>{{ e.header }}</td></tr>
+      {% endfor %}
+    </table>
+    {% else %}
+      {% for e in d.education %}
+      <div class="cv-item"><h3>{{ e.header }}</h3>{% if e.dates %}<p class="cv-dates">{{ e.dates }}</p>{% endif %}</div>
+      {% endfor %}
+    {% endif %}
+  </section>
+
+  {% elif section == 'skills' and d.skills %}
+  <section class="cv-section">
+    <h2>{{ H.skills }}</h2>
+    <p>{{ d.skills }}</p>
+  </section>
+
+  {% elif section == 'languages' and d.languages %}
+  <section class="cv-section">
+    <h2>{{ H.languages }}</h2>
+    <ul>{% for x in d.languages %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+
+  {% elif section == 'certifications' and d.certifications %}
+  <section class="cv-section">
+    <h2>{{ H.certifications }}</h2>
+    <ul>{% for x in d.certifications %}<li>{{ x }}</li>{% endfor %}</ul>
+  </section>
+
+  {% elif section == 'referees' and d.referees %}
+  <section class="cv-section">
+    <h2>{{ H.referees }}</h2>
+    <p>{{ d.referees }}</p>
+  </section>
+  {% endif %}
+{% endfor %}
+</body>
+</html>

@@ -290,3 +290,47 @@ def test_patch_template_and_referees_rules(env):
     assert c.patch(f"/applications/{aid}", json={"template": "au", "referees": "Dr. X"}).json()["referees"] == "Dr. X"
     assert c.patch(f"/applications/{aid}", json={"template": "fr"}).status_code == 422
     assert c.patch(f"/applications/{aid}", json={"template": "de"}).json()["template"] == "de"
+
+
+def test_pdf_and_txt_blocked_while_needs_fix(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), lines=[_fact(), _ai(violations=["Número, data ou valor que não está no item citado: 60%"])])
+    c = client_as(uid)
+    for path in ("resume.pdf", "resume.txt"):
+        r = c.get(f"/applications/{aid}/{path}")
+        assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_PDF_BLOCKED
+
+
+def test_pdf_503_when_unavailable_txt_still_works(env, monkeypatch):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), lines=[_fact(), _ai()])
+
+    def unavailable(html):
+        raise api_apps.PdfUnavailable("libpango missing")
+
+    monkeypatch.setattr(api_apps, "render_pdf", unavailable)
+    c = client_as(uid)
+    r = c.get(f"/applications/{aid}/resume.pdf")
+    assert r.status_code == 503 and r.json()["detail"] == api_apps.MSG_PDF_UNAVAILABLE
+    t = c.get(f"/applications/{aid}/resume.txt")
+    assert t.status_code == 200 and "Reduzi o tempo" in t.text
+
+
+def test_pdf_served_as_attachment_named_by_id(env, monkeypatch):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid, title="Vaga <b>secreta</b>"), lines=[_fact(), _ai()])
+    monkeypatch.setattr(api_apps, "render_pdf", lambda html: b"%PDF-1.4 fake")
+    r = client_as(uid).get(f"/applications/{aid}/resume.pdf")
+    assert r.status_code == 200 and r.content.startswith(b"%PDF")
+    assert r.headers["content-disposition"] == f'attachment; filename="curriculo-{aid}.pdf"'
+    assert "secreta" not in r.headers["content-disposition"]
+
+
+def test_download_other_user_404(env):
+    new_user, add_job, add_application, client_as = env
+    owner, other = new_user(), new_user()
+    aid = add_application(owner, add_job(owner), lines=[_fact(), _ai()])
+    assert client_as(other).get(f"/applications/{aid}/resume.txt").status_code == 404

@@ -1,0 +1,28 @@
+/* Shared styles for every CV and letter. Text only: no images, no photo. */
+body {
+  font-family: "DejaVu Sans", sans-serif;
+  font-size: 10pt;
+  line-height: 1.35;
+  color: #111;
+  margin: 0;
+}
+h1 { font-size: 18pt; margin: 0 0 2pt 0; }
+h2 {
+  font-size: 11pt;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 0.6pt solid #888;
+  margin: 10pt 0 4pt 0;
+  padding-bottom: 1pt;
+}
+h3 { font-size: 10pt; margin: 6pt 0 1pt 0; }
+p { margin: 2pt 0; }
+ul { margin: 2pt 0 2pt 14pt; padding: 0; }
+li { margin: 1pt 0; }
+.cv-contact { color: #333; font-size: 9pt; }
+.cv-dates { color: #555; font-size: 9pt; }
+.cv-item { margin-bottom: 4pt; }
+.cv-table { width: 100%; border-collapse: collapse; }
+.cv-table td { vertical-align: top; padding: 1pt 4pt 3pt 0; }
+.cv-table td.cv-dates { width: 28%; white-space: nowrap; }
+.letter-date, .letter-subject { margin-top: 12pt; }
