@@ -9,6 +9,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
+from api.applications import router as applications_router
 from api.chat_filters import router as chat_filters_router
 from api.deps import current_user_id
 from api.discovery import router as discovery_router
@@ -53,6 +54,7 @@ app.include_router(quality_router)
 app.include_router(feeds_router)
 app.include_router(portals_router)
 app.include_router(funnel_router)
+app.include_router(applications_router)
 
 
 def _json_safe(value):
