@@ -7,6 +7,7 @@ import {
   ApplicationsIcon,
   JobsIcon,
   LogoIcon,
+  PipelineIcon,
   ProfileIcon,
   SettingsIcon,
   SourcesIcon,
@@ -30,6 +31,7 @@ export const NAV_ITEMS: NavEntry[] = [
   { href: "/sources", label: "Fontes", Icon: SourcesIcon },
   { href: "/jobs", label: "Vagas", Icon: JobsIcon },
   { href: "/candidaturas", label: "Candidaturas", Icon: ApplicationsIcon },
+  { href: "/pipeline", label: "Pipeline", Icon: PipelineIcon },
   { href: "/settings", label: "Configurações", Icon: SettingsIcon, footer: true },
 ];
 

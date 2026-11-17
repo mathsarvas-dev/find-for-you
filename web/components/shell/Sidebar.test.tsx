@@ -29,6 +29,7 @@ describe("NAV_ITEMS", () => {
       ["Fontes", "/sources"],
       ["Vagas", "/jobs"],
       ["Candidaturas", "/candidaturas"],
+      ["Pipeline", "/pipeline"],
       ["Configurações", "/settings"],
     ]);
     expect(NAV_ITEMS.filter((i) => i.footer).map((i) => i.label)).toEqual(["Configurações"]);
@@ -38,6 +39,7 @@ describe("NAV_ITEMS", () => {
     const { titleForPath } = await import("./Topbar");
     expect(titleForPath("/candidaturas/3")).toBe("Candidaturas");
     expect(titleForPath("/candidaturas")).toBe("Candidaturas");
+    expect(titleForPath("/pipeline")).toBe("Pipeline");
   });
 });
 

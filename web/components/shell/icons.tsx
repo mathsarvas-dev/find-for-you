@@ -86,6 +86,16 @@ export function ApplicationsIcon(props: IconProps) {
   );
 }
 
+export function PipelineIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="4" width="4" height="12" rx="1" />
+      <rect x="8" y="4" width="4" height="8" rx="1" />
+      <rect x="13" y="4" width="4" height="5" rx="1" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>
