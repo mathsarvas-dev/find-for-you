@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import json
 
 import httpx
@@ -170,3 +171,79 @@ async def test_retry_after_60_sleeps_60():
     )
     await p.complete_json(MSGS, Out)
     assert sleeps == [60.0]
+
+
+class FakeStore:
+    def __init__(self):
+        self.calls = []
+
+    def record(self, model, snap, now=None):
+        self.calls.append(("record", model, snap))
+
+    def mark_missing(self, model, now=None):
+        self.calls.append(("missing", model))
+
+    def set_next_try(self, model, at, now=None):
+        self.calls.append(("next_try", model, at))
+
+
+def make_store(responses):
+    store = FakeStore()
+    p, reqs, sleeps = make(responses)
+    p._store = store
+    return p, store
+
+
+async def test_records_quota_headers_of_each_answer():
+    headers = {"x-ratelimit-remaining-tokens": "123", "x-ratelimit-limit-tokens": "8000"}
+    p, store = make_store([httpx.Response(200, json=body(GOOD), headers=headers)])
+    await p.complete_json(MSG_USER, Out)
+    kind, model, snap = store.calls[0]
+    assert (kind, model) == ("record", p.model)
+    assert snap.remaining_tokens == 123 and snap.limit_tokens == 8000
+
+
+async def test_model_not_found_marks_missing_and_raises_specific_error():
+    from rumo_core.llm.base import LLMModelMissing
+
+    err = {"error": {"code": "model_not_found", "message": "gone"}}
+    p, store = make_store([httpx.Response(404, json=err)])
+    with pytest.raises(LLMModelMissing):
+        await p.complete_json(MSG_USER, Out)
+    assert ("missing", p.model) in store.calls
+
+
+async def test_other_404_is_a_plain_llm_error():
+    from rumo_core.llm.base import LLMModelMissing
+
+    p, store = make_store([httpx.Response(404, json={"error": {"code": "other"}})])
+    with pytest.raises(LLMError) as ei:
+        await p.complete_json(MSG_USER, Out)
+    assert not isinstance(ei.value, LLMModelMissing)
+    assert not any(c[0] == "missing" for c in store.calls)
+
+
+async def test_rate_limit_records_next_try_from_retry_after():
+    r429 = httpx.Response(429, headers={"Retry-After": "7"})
+    p, store = make_store([r429] * 5)
+    with pytest.raises(LLMRateLimited):
+        await p.complete_json(MSG_USER, Out)
+    nexts = [c for c in store.calls if c[0] == "next_try"]
+    assert nexts and nexts[-1][1] == p.model
+
+
+async def test_retry_after_too_long_still_records_next_try():
+    p, store = make_store([httpx.Response(429, headers={"Retry-After": "600"})])
+    with pytest.raises(LLMRateLimited):
+        await p.complete_json(MSG_USER, Out)
+    kind, _, at = [c for c in store.calls if c[0] == "next_try"][-1]
+    assert (at - datetime.now(timezone.utc)).total_seconds() > 500
+
+
+def test_model_property_follows_settings():
+    settings = Settings(database_url="x", groq_api_key="k", groq_model="m/x")
+    p = GroqProvider(settings, httpx.AsyncClient(), NoLimit())
+    assert p.model == "m/x"
+
+
+MSG_USER = [{"role": "user", "content": "hi"}]
