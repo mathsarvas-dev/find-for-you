@@ -110,3 +110,12 @@
 - **Testes lentos:** `pytest` sem filtro carrega o modelo de embeddings real (`tests/embeddings/test_bge_m3.py`, marcado `slow`), que não existe neste host; a suíte de regressão local usa `-m "not slow"`, como na linha de base.
 - **Desvios de plano:** o arquivo de teste de lacunas foi renomeado para `tests/applications/test_application_gaps.py` (colisão de nome com `tests/interview/test_gaps.py`); a migração é `0010` (ruling); o teste de cabeçalho do PDF (`test_pdf_unavailable_wraps_errors`) usa um módulo falso, porque importar o WeasyPrint real falha no host Windows.
 - **Regra de aplicação:** "Apliquei" é recusado com perfil provisório (ruling), tanto na API (409) quanto na interface (botão desabilitado com o motivo). Gerar continua permitido com perfil provisório.
+
+## Marco 6 (pipeline) e destaques (R8, R9)
+- **Verificação visual não feita:** o quadro, o relatório e os destaques não foram conferidos no navegador em 375 px, 768 px e desktop, claro e escuro (só testes, `tsc` e lint).
+- **Quadro sem arrastar:** mover é um seletor por cartão (teclado e leitor de tela); arrastar e soltar fica para depois, se fizer falta. Sem confirmação ao mover para trás (limpa a data de aplicação).
+- **Sem histórico de etapas:** o relatório usa a etapa atual (não há data de cada mudança); "respondida" = entrevista, oferta ou recusa. Taxa por faixa de nota usa só a nota da versão atual do perfil.
+- **Lembretes só no app:** o follow-up aparece no cartão e em Início (hoje ou atrasado); sem e-mail, push ou calendário. A data é a do servidor (`today`), sem fuso por usuário.
+- **Salvar:** `s` e o botão criam a candidatura em rascunho; não há "remover do pipeline" nem desfazer salvar. Vagas que sumiram da fonte seguem no quadro.
+- **Destaques:** limite fixo (nota 80, 7 dias, 5 itens) em `api/highlights.py`; sem ajuste por usuário e sem link direto para abrir a vaga em /jobs. "Nova" é pela primeira vez vista, não por "desde a última visita".
+- **Kanban x candidatura:** mover um cartão para "Aplicada" sem kit gerado marca a etapa e a data, mas deixa o estado do kit como está (o contador "aplicadas" do resumo conta o estado do kit).

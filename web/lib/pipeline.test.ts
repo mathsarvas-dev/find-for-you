@@ -2,9 +2,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { followUpState, formatDay, getHighlights, getPipeline, getReport, patchPipeline } from "./pipeline";
 
 function mockFetch(body: unknown) {
-  const fn = vi.fn(
-    async (_url: string, _init?: RequestInit) =>
-      new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
+  const fn = vi.fn<typeof fetch>(
+    async () => new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
   );
   vi.stubGlobal("fetch", fn);
   return fn;
@@ -20,7 +19,7 @@ describe("pipeline client", () => {
     await getPipeline();
     await getReport();
     await getHighlights();
-    expect(fn.mock.calls.map((c) => c[0])).toEqual([
+    expect(fn.mock.calls.map((c) => String(c[0]))).toEqual([
       "http://localhost:8000/pipeline",
       "http://localhost:8000/pipeline/report",
       "http://localhost:8000/highlights",
