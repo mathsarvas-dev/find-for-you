@@ -7,6 +7,7 @@ import { ChatBar } from "@/components/jobs/ChatBar";
 import { FilterBar } from "@/components/jobs/FilterBar";
 import { FilterChips } from "@/components/jobs/FilterChips";
 import { jobsSteps } from "@/components/jobs/jobsSteps";
+import { ProfileSwitcher } from "@/components/jobs/ProfileSwitcher";
 import { MatchList } from "@/components/jobs/MatchList";
 import { MatchPanel, type PanelState } from "@/components/jobs/MatchPanel";
 import { useRefreshOverview } from "@/components/shell/OverviewContext";
@@ -664,6 +665,7 @@ export default function JobsPage() {
 
       {phase.name === "ready" && meta && filters && (
         <>
+          {hasProfile && <ProfileSwitcher onSwitched={reboot} disabled={saving || editing || applyingProposal} />}
           {hasProfile && (
             <>
               <ChatBar onApply={applyProposal} disabled={applyingProposal} inputRef={chatInputRef} />

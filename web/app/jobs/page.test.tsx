@@ -19,6 +19,10 @@ import JobsPage from "./page";
 
 const { push, prepare, create } = vi.hoisted(() => ({ push: vi.fn(), prepare: vi.fn(), create: vi.fn() }));
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/lib/searchProfiles", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/searchProfiles")>()),
+  listSearchProfiles: vi.fn(async () => []),
+}));
 vi.mock("@/lib/applications", () => ({ prepareApplication: prepare, createApplication: create }));
 
 vi.mock("@/lib/chatFilters", async (importOriginal) => ({

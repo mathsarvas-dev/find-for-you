@@ -3650,3 +3650,79 @@ select.input {
 .highlights { display: grid; gap: var(--space-2); }
 .highlights__list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .highlights__headline { margin: 0; font-weight: 600; }
+
+/* Perfis de busca nomeados (página Vagas) */
+
+.profile-switcher {
+  display: grid;
+  gap: var(--space-2);
+  margin-bottom: var(--space-4);
+}
+
+.profile-switcher__row,
+.profile-switcher__form,
+.profile-switcher__item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2) var(--space-3);
+}
+
+.profile-switcher__label {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.profile-switcher__select {
+  width: auto;
+  min-width: 12rem;
+  max-width: 100%;
+}
+
+.profile-switcher__form .input {
+  flex: 1 1 14rem;
+  width: auto;
+  min-width: 0;
+}
+
+.profile-switcher__hint {
+  flex-basis: 100%;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.profile-switcher__list {
+  display: grid;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.profile-switcher__name {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-weight: 500;
+}
+
+.profile-switcher__badge {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.profile-switcher__live {
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.profile-switcher__live:empty {
+  display: none;
+}
+
+@media (max-width: 600px) {
+  .profile-switcher__select {
+    flex: 1 1 100%;
+  }
+}
