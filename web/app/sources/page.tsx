@@ -6,6 +6,7 @@ import { AddCompanyForm } from "@/components/sources/AddCompanyForm";
 import { CompanyRow } from "@/components/sources/CompanyRow";
 import { DiscoveryPanel } from "@/components/sources/DiscoveryPanel";
 import { FeedsPanel } from "@/components/sources/FeedsPanel";
+import { ImportLinkForm } from "@/components/sources/ImportLinkForm";
 import { FunnelSummary } from "@/components/sources/FunnelSummary";
 import { JobsList } from "@/components/sources/JobsList";
 import { PortalsPanel } from "@/components/sources/PortalsPanel";
@@ -382,7 +383,7 @@ export default function SourcesPage() {
       )}
       {tab === "feeds" && <FeedsPanel />}
       {tab === "portais" && <PortalsPanel />}
-      {tab === "link" && <p className="empty">Importar por link chega na próxima etapa.</p>}
+      {tab === "link" && <ImportLinkForm />}
       </div>
     </main>
   );

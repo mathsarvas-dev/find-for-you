@@ -110,13 +110,13 @@ describe("JourneyPanel", () => {
     expect(cta).toHaveAttribute("href", "/jobs");
   });
 
-  it("fontes como passo atual: CTA Adicionar empresas → /sources", () => {
+  it("fontes como passo atual: CTA Adicionar fontes → /sources", () => {
     const o = midJourney();
     o.companies = { total: 0, active: 0, auto: 0 };
     o.jobs = { open: 0, outside_filters: 0 };
     const { container } = renderPanel({ overview: o, status: "ok" });
     const cta = within(headerActions(container)!).getByRole("link");
-    expect(cta).toHaveTextContent("Adicionar empresas");
+    expect(cta).toHaveTextContent("Adicionar fontes");
     expect(cta).toHaveAttribute("href", "/sources");
   });
 

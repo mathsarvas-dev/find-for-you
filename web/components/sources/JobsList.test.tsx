@@ -259,3 +259,31 @@ describe("JobsList", () => {
     expect(lastQuery()).toMatchObject({ offset: 0 });
   });
 });
+
+describe("JobsList (crédito de feed)", () => {
+  it("vaga de feed mostra 'via <fonte>' linkando a atribuição", async () => {
+    list.mockResolvedValue(
+      page([
+        job(1, {
+          origin: "feed",
+          source: "remotive",
+          company_name: "Acme",
+          attribution: { label: "Remotive", url: "https://remotive.com/" },
+        }),
+      ], 1),
+    );
+    render(<JobsList companies={companies} now={NOW} refreshKey={0} />);
+    await act(async () => {});
+    const credit = screen.getByRole("link", { name: "via Remotive" });
+    expect(credit).toHaveAttribute("target", "_blank");
+    expect(credit.getAttribute("rel")).toContain("noopener");
+    expect(credit).toHaveAttribute("href", expect.stringContaining("remotive.com"));
+  });
+
+  it("vaga de ATS não mostra crédito", async () => {
+    list.mockResolvedValue(page([job(1)], 1));
+    render(<JobsList companies={companies} now={NOW} refreshKey={0} />);
+    await act(async () => {});
+    expect(screen.queryByText(/^via /)).toBeNull();
+  });
+});

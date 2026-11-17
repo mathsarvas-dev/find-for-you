@@ -85,9 +85,25 @@ describe("computeSteps", () => {
   it("test_no_companies_current_is_sources_with_cta", () => {
     const steps = computeSteps(ov(ready));
     expect(currentIds(steps)).toEqual(["sources"]);
-    expect(byId(steps, "sources").cta).toEqual({ label: "Adicionar empresas", href: "/sources" });
+    expect(byId(steps, "sources").cta).toEqual({ label: "Adicionar fontes", href: "/sources" });
     expect(byId(steps, "jobs").state).toBe("upcoming");
     expect(byId(steps, "jobs").cta).toBeUndefined();
+  });
+
+  it("feed ativo conta como fonte ativa e entra no detalhe", () => {
+    const steps = computeSteps(ov({ ...ready, feeds: { active: 2 }, jobs: { open: 5 } }));
+    expect(byId(steps, "sources").state).toBe("done");
+    expect(byId(steps, "sources").detail).toBe("2 feeds · 5 vagas abertas");
+    expect(currentIds(steps)).not.toContain("sources");
+  });
+
+  it("empresas, feeds e vagas no detalhe; zeros omitidos", () => {
+    const steps = computeSteps(ov({ ...ready, companies: { total: 3, active: 2 }, feeds: { active: 1 }, jobs: { open: 0 } }));
+    expect(byId(steps, "sources").detail).toBe("2 empresas · 1 feed");
+  });
+
+  it("sem fontes ativas: Nenhuma fonte ativa", () => {
+    expect(byId(computeSteps(ov(ready)), "sources").detail).toBe("Nenhuma fonte ativa");
   });
 
   it("empresas só pausadas não concluem as fontes", () => {

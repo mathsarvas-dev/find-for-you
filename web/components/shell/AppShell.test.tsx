@@ -59,7 +59,7 @@ describe("AppShell", () => {
     o.profile = { ...o.profile, confirmed: true, name: "Ana Souza", email: "ana@example.com" };
     m.overview.mockResolvedValue(o);
     await renderShell();
-    expect(screen.getByRole("link", { name: "Fontes (nenhuma empresa ativa)" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Fontes (nenhuma fonte ativa)" })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /Sistema/ })).toHaveTextContent("ok");
     expect(screen.getByRole("button", { name: "Menu do perfil" })).toHaveTextContent("AS");
   });

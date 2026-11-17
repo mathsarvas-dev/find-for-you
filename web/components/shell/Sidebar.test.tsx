@@ -77,7 +77,7 @@ describe("Sidebar", () => {
     const perfil = within(nav()).getByRole("link", { name: /Perfil/ });
     expect(perfil).toHaveAccessibleName("Perfil (perfil não confirmado)");
     expect(within(nav()).getByRole("link", { name: /Fontes/ })).toHaveAccessibleName(
-      "Fontes (nenhuma empresa ativa)",
+      "Fontes (nenhuma fonte ativa)",
     );
     expect(within(nav()).getByRole("link", { name: /Vagas/ })).toHaveAccessibleName(
       "Vagas (nenhuma vaga avaliada)",
@@ -101,7 +101,14 @@ describe("Sidebar", () => {
     const o = withOverview((x) => {
       x.companies.total = 2;
     });
-    expect(pendingFor("/sources", o)).toBe("nenhuma empresa ativa");
+    expect(pendingFor("/sources", o)).toBe("nenhuma fonte ativa");
+  });
+
+  it("Fontes com feed ativo não fica pendente", () => {
+    const o = withOverview((x) => {
+      x.feeds.active = 1;
+    });
+    expect(pendingFor("/sources", o)).toBeNull();
   });
 
   it("Vagas sem vagas abertas não fica pendente", () => {

@@ -30,6 +30,26 @@ type Draft = {
   blockedReason?: string;
 };
 
+/** Empresas ou feeds ativos concluem o passo "Fontes de vagas". */
+export function sourcesActive(o: Overview): boolean {
+  return o.companies.active > 0 || o.feeds.active > 0;
+}
+
+/** "N empresas · M feeds · K vagas abertas", zeros omitidos. */
+function sourcesDetail(o: Overview): string {
+  if (!sourcesActive(o)) {
+    return o.companies.total > 0
+      ? `Nenhuma fonte ativa · ${count(o.companies.total, "pausada", "pausadas")}`
+      : "Nenhuma fonte ativa";
+  }
+  const parts = [
+    o.companies.active > 0 ? count(o.companies.active, "empresa", "empresas") : null,
+    o.feeds.active > 0 ? count(o.feeds.active, "feed", "feeds") : null,
+    o.jobs.open > 0 ? count(o.jobs.open, "vaga aberta", "vagas abertas") : null,
+  ];
+  return parts.filter((p): p is string => p !== null).join(" · ");
+}
+
 /** Trilha "Seu caminho" a partir dos contadores reais de GET /overview. */
 export function computeSteps(o: Overview): Step[] {
   const { profile, interview, companies, jobs, matches } = o;
@@ -82,15 +102,10 @@ export function computeSteps(o: Overview): Step[] {
     {
       id: "sources",
       title: "Fontes de vagas",
-      detail:
-        companies.active > 0
-          ? `${count(companies.active, "empresa", "empresas")} · ${count(jobs.open, "vaga aberta", "vagas abertas")}`
-          : companies.total > 0
-            ? `Nenhuma empresa ativa · ${count(companies.total, "pausada", "pausadas")}`
-            : "Nenhuma empresa ativa",
-      done: companies.active > 0,
+      detail: sourcesDetail(o),
+      done: sourcesActive(o),
       kind: "required",
-      cta: { label: "Adicionar empresas", href: "/sources" },
+      cta: { label: "Adicionar fontes", href: "/sources" },
       reviewHref: "/sources",
     },
     {

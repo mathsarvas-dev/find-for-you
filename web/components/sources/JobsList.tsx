@@ -242,6 +242,23 @@ export function JobsList({ companies, now, refreshKey }: JobsListProps) {
   );
 }
 
+/** Crédito obrigatório de vaga vinda de agregador: "via <fonte>" linkando a fonte. */
+function FeedCredit({ attribution }: { attribution: { label: string; url: string } }) {
+  const href = safeJobUrl(attribution.url);
+  const text = `via ${attribution.label}`;
+  return (
+    <span className="jobs__credit">
+      {href ? (
+        <a href={href} target="_blank" rel="noopener noreferrer">
+          {text}
+        </a>
+      ) : (
+        text
+      )}
+    </span>
+  );
+}
+
 function JobRow({ job, now }: { job: JobItem; now: number }) {
   const href = safeJobUrl(job.url);
   return (
@@ -249,7 +266,10 @@ function JobRow({ job, now }: { job: JobItem; now: number }) {
       <td className="jobs__title" data-label="Título">
         {job.title}
       </td>
-      <td data-label="Empresa">{job.company_name}</td>
+      <td data-label="Empresa">
+        {job.company_name}
+        {job.origin === "feed" && job.attribution && <FeedCredit attribution={job.attribution} />}
+      </td>
       <td className="jobs__muted" data-label="Local">
         {job.location_text || "—"}
       </td>
