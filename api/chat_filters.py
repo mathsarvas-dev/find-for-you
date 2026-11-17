@@ -110,11 +110,14 @@ def _build_llm() -> LLMProvider | None:
         return None
     import httpx
 
+    from rumo_core.db import SessionLocal
     from rumo_core.llm.groq import GroqProvider
+    from rumo_core.llm.quota import QuotaStore
     from rumo_core.llm.ratelimit import RateLimiter
 
     return GroqProvider(
-        settings, httpx.AsyncClient(timeout=30), RateLimiter(settings.groq_max_per_minute)
+        settings, httpx.AsyncClient(timeout=30), RateLimiter(settings.groq_max_per_minute),
+        store=QuotaStore(SessionLocal),
     )
 
 

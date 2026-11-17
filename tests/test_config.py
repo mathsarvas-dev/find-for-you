@@ -95,3 +95,33 @@ def test_job_sources_settings_defaults():
 def test_api_keys_hidden_from_repr(monkeypatch):
     s = Settings(database_url="x", _env_file=None, jooble_key="segredo-123")
     assert "segredo-123" not in repr(s)
+
+
+def test_groq_fallback_model_default_differs_from_fill_and_main():
+    s = Settings(_env_file=None, database_url="x")
+    assert s.groq_fallback_model
+    assert s.groq_fallback_model not in {s.groq_model, s.groq_fill_model}
+
+
+def test_build_fill_llm_wraps_fill_model_with_fallback_only():
+    from rumo_core.llm.fallback import FallbackLLM
+    from worker.main import build_fill_llm, build_llm
+
+    s = Settings(_env_file=None, database_url="x", groq_api_key="k")
+    fill = build_fill_llm(s)
+    assert isinstance(fill, FallbackLLM)
+    assert fill.model == s.groq_fill_model
+    assert fill._fallback.model == s.groq_fallback_model
+    # critical work keeps a plain provider: no silent switch to another model
+    assert not isinstance(build_llm(s), FallbackLLM)
+    assert build_fill_llm(Settings(_env_file=None, database_url="x")) is None
+    off = Settings(_env_file=None, database_url="x", groq_api_key="k", groq_fallback_model="")
+    assert not isinstance(build_fill_llm(off), FallbackLLM)
+
+
+def test_build_llm_passes_quota_store_to_the_provider():
+    from worker.main import build_llm
+
+    marker = object()
+    s = Settings(_env_file=None, database_url="x", groq_api_key="k")
+    assert build_llm(s, store=marker)._store is marker

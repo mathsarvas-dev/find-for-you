@@ -38,9 +38,10 @@ async def heartbeat(session_factory) -> None:
     record_heartbeat(session_factory)
 
 
-def build_llm(settings, *, model: str | None = None):
+def build_llm(settings, *, model: str | None = None, store=None):
     """Real Groq provider, or None when no API key is configured. `model`
-    overrides settings.groq_model (a separate model has its own token quota)."""
+    overrides settings.groq_model (a separate model has its own token quota);
+    `store` (a QuotaStore) receives the quota headers and model status."""
     if not settings.groq_api_key:
         return None
     import httpx
@@ -51,8 +52,23 @@ def build_llm(settings, *, model: str | None = None):
     if model:
         settings = settings.model_copy(update={"groq_model": model})
     return GroqProvider(
-        settings, httpx.AsyncClient(timeout=60), RateLimiter(settings.groq_max_per_minute)
+        settings, httpx.AsyncClient(timeout=60), RateLimiter(settings.groq_max_per_minute),
+        store=store,
     )
+
+
+def build_fill_llm(settings, store=None):
+    """Provider of the job-field fill (non-critical background work): its own model,
+    with the fallback model taking over when the quota runs out or the model is gone."""
+    from rumo_core.llm.fallback import FallbackLLM
+
+    primary = build_llm(settings, model=settings.groq_fill_model or None, store=store)
+    if primary is None:
+        return None
+    name = settings.groq_fallback_model
+    if not name or name == primary.model:
+        return primary
+    return FallbackLLM(primary, build_llm(settings, model=name, store=store), store=store)
 
 
 def build_collect_job(settings, session_factory):
@@ -261,9 +277,12 @@ async def main() -> None:
     reset_iv = await retry_startup(lambda: reset_working_sessions(SessionLocal))
     if reset_iv:
         logger.info("reset %d working interview sessions to generating", reset_iv)
-    llm = build_llm(settings)
+    from rumo_core.llm.quota import QuotaStore
+
+    store = QuotaStore(SessionLocal)
+    llm = build_llm(settings, store=store)
     embedder = BgeM3Embedder()  # model loads lazily, only when chunks are pending
-    fill_llm = build_llm(settings, model=settings.groq_fill_model or None)
+    fill_llm = build_fill_llm(settings, store)
     registry = build_registry(settings, SessionLocal, llm, embedder, fill_llm)
     logger.info("worker started")
     try:
