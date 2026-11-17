@@ -135,6 +135,20 @@ def build_score_matches_job(settings, session_factory, llm):
     )
 
 
+def build_prepare_applications_job(settings, session_factory, llm, embedder):
+    """prepare_applications bound to the application_* settings (one application per tick)."""
+    from functools import partial
+
+    from worker.prepare_applications import prepare_applications
+
+    return partial(
+        prepare_applications, session_factory, llm, embedder,
+        max_attempts=settings.application_max_attempts,
+        daily_limit=settings.application_daily_limit,
+        call_timeout=settings.application_call_timeout,
+    )
+
+
 def build_registry(settings, session_factory, llm, embedder, fill_llm=None) -> JobRegistry:
     """All worker jobs, in priority order (run_due runs them in this order)."""
     from functools import partial
@@ -153,6 +167,12 @@ def build_registry(settings, session_factory, llm, embedder, fill_llm=None) -> J
     )
     registry.register(
         "interview_turns", partial(process_interview_turns, session_factory, llm), 3
+    )
+    # right after the interview turns (the interview keeps priority on the LLM);
+    # one application per tick, progress is polled by the page
+    registry.register(
+        "prepare_applications",
+        build_prepare_applications_job(settings, session_factory, llm, embedder), 5,
     )
     # every 60 s with a small batch: the Groq rate limiter is shared with the
     # interview, whose turns keep priority (registered after interview_turns)

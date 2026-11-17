@@ -28,11 +28,13 @@ def test_pdf_smoke_accents_and_eszett(weasy):
 
 
 def test_pdf_unavailable_wraps_errors(monkeypatch):
-    import weasyprint
+    # a stub module: importing the real weasyprint raises OSError on hosts without its libraries
+    import types
 
     def boom(*args, **kwargs):
         raise OSError("libpango-1.0-0 missing")
 
-    monkeypatch.setattr(weasyprint, "HTML", boom)
+    stub = types.SimpleNamespace(HTML=boom)
+    monkeypatch.setitem(sys.modules, "weasyprint", stub)
     with pytest.raises(PdfUnavailable):
         html_to_pdf("<p>x</p>")
