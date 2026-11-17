@@ -31,8 +31,11 @@ class JobRegistry:
         return ran
 
 
-async def heartbeat() -> None:
-    logger.info("heartbeat")
+async def heartbeat(session_factory) -> None:
+    """Writes the liveness row the API reads (rumo_core.heartbeat)."""
+    from rumo_core.heartbeat import record_heartbeat
+
+    record_heartbeat(session_factory)
 
 
 def build_llm(settings, *, model: str | None = None):
@@ -159,7 +162,7 @@ def build_registry(settings, session_factory, llm, embedder, fill_llm=None) -> J
     from worker.jobs import embed_pending_chunks, process_pending_imports
 
     registry = JobRegistry()
-    registry.register("heartbeat", heartbeat, 10)
+    registry.register("heartbeat", partial(heartbeat, session_factory), 10)
     registry.register(
         "extract_imports",
         partial(process_pending_imports, session_factory, llm, settings.extract_max_chars),

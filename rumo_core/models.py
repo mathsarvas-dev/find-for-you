@@ -621,3 +621,12 @@ class LinkedinOptimization(UserScopedMixin, TimestampMixin, Base):
     profile_version: Mapped[int] = mapped_column(nullable=False)
     language: Mapped[str] = mapped_column(String(8), nullable=False)
     data: Mapped[dict] = mapped_column(JSONB, nullable=False)
+
+
+class WorkerHeartbeat(Base):
+    """Last sign of life of a background process (the worker writes it every tick)."""
+
+    __tablename__ = "worker_heartbeats"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

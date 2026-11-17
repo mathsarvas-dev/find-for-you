@@ -27,6 +27,7 @@ from api.quality import router as quality_router
 from api.search_profiles import router as search_profiles_router
 from api.sources import router as sources_router
 from rumo_core.config import get_settings
+from rumo_core.heartbeat import worker_status
 from rumo_core.db import get_session
 from rumo_core.matching.chat_filters import (
     INVALID_CHARS_MESSAGE,
@@ -125,3 +126,9 @@ async def db_unavailable(request: Request, exc: OperationalError) -> JSONRespons
 def health(session: Session = Depends(get_session)):
     session.execute(text("SELECT 1"))
     return {"status": "ok", "db": "up"}
+
+
+@app.get("/worker/status")
+def worker_status_route(session: Session = Depends(get_session)):
+    """Worker liveness: down when its heartbeat is older than 2 minutes (or never seen)."""
+    return worker_status(session)
