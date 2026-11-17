@@ -2,7 +2,7 @@ import "server-only";
 import { connection } from "next/server";
 import { RecheckButton } from "@/components/RecheckButton";
 import { StatusRow } from "@/components/StatusRow";
-import { checkHealth, type HealthReport } from "@/lib/health";
+import { checkHealth, checkWorker, type HealthReport, type WorkerReport } from "@/lib/health";
 
 /*
  * Painel "Serviços" (API e banco), vindo da antiga página inicial. Componente de
@@ -29,6 +29,7 @@ export function HealthPanelLoading({ title }: { title?: string } = {}) {
       <ul className="status-list">
         <StatusRow label="API" state="loading" />
         <StatusRow label="Banco de dados" state="loading" />
+        <StatusRow label="Worker" state="loading" />
       </ul>
       <div className="panel__foot">
         <span className="skeleton skeleton--short" aria-hidden="true" />
@@ -44,7 +45,7 @@ type HealthPanelProps = {
 
 export async function HealthPanel({ title }: HealthPanelProps = {}) {
   await connection();
-  const report = await checkHealth();
+  const [report, worker] = await Promise.all([checkHealth(), checkWorker()]);
   const time = new Intl.DateTimeFormat("pt-BR", {
     hour: "2-digit",
     minute: "2-digit",
@@ -57,8 +58,10 @@ export async function HealthPanel({ title }: HealthPanelProps = {}) {
       <ul className="status-list">
         <StatusRow label="API" state={report.api} detail={report.apiDetail} />
         <StatusRow label="Banco de dados" state={report.db} detail={report.dbDetail} />
+        <StatusRow label="Worker" state={worker.state} detail={worker.detail} />
       </ul>
       <ProblemNotice report={report} />
+      <WorkerNotice worker={worker} />
       <div className="panel__foot">
         <span>
           Verificado às <span className="mono">{time}</span>
@@ -108,4 +111,18 @@ export function ProblemNotice({ report }: { report: HealthReport }) {
         </div>
       );
   }
+}
+
+export function WorkerNotice({ worker }: { worker: WorkerReport }) {
+  if (worker.state !== "down") return null;
+  return (
+    <div className="notice" role="alert">
+      <strong>O worker está parado.</strong>
+      <p>
+        Sem sinal há mais de 2 minutos: as vagas não são coletadas e as filas de currículo,
+        entrevista e pontuação não andam. Suba com <code>.\scripts\dev-up.ps1</code> ou{" "}
+        <code>docker compose up -d worker</code>.
+      </p>
+    </div>
+  );
 }

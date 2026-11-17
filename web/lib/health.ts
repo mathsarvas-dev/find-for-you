@@ -86,3 +86,48 @@ export async function checkHealth(): Promise<HealthReport> {
   }
   return interpretHealth(apiUrl, outcome, new Date());
 }
+
+export type WorkerReport = {
+  /** "ok" = heartbeat recent, "down" = stale or never seen, "unknown" = no answer. */
+  state: StatusState;
+  detail: string;
+};
+
+/** Traduz GET /worker/status. Sem I/O, para testar. */
+export function interpretWorker(outcome: Outcome, now: Date): WorkerReport {
+  if (outcome.kind === "no-response") {
+    return { state: "unknown", detail: "depende da API" };
+  }
+  const { status, body, ms } = outcome;
+  const b = body as { status?: unknown; seen_at?: unknown } | null;
+  const apiDetail = `GET /worker/status · ${status} · ${ms} ms`;
+  if (status !== 200 || (b?.status !== "up" && b?.status !== "down")) {
+    return { state: "unknown", detail: apiDetail };
+  }
+  if (b.status === "up") {
+    return { state: "ok", detail: "sinal recente" };
+  }
+  const seen = typeof b.seen_at === "string" ? new Date(b.seen_at) : null;
+  if (!seen || Number.isNaN(seen.getTime())) {
+    return { state: "down", detail: "nenhum sinal registrado" };
+  }
+  const minutes = Math.max(0, Math.floor((now.getTime() - seen.getTime()) / 60000));
+  return { state: "down", detail: `último sinal há ${minutes} min` };
+}
+
+export async function checkWorker(): Promise<WorkerReport> {
+  const started = Date.now();
+  let outcome: Outcome;
+  try {
+    const res = await fetch(`${apiBaseUrl()}/worker/status`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    });
+    const body = await res.json().catch(() => null);
+    outcome = { kind: "response", status: res.status, body, ms: Date.now() - started };
+  } catch (err) {
+    const timedOut = err instanceof Error && err.name === "TimeoutError";
+    outcome = { kind: "no-response", reason: timedOut ? "timeout" : "network" };
+  }
+  return interpretWorker(outcome, new Date());
+}
