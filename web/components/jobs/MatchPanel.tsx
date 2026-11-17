@@ -21,16 +21,29 @@ type MatchPanelProps = {
   now: number;
   onClose: () => void;
   onRetry: () => void;
+  /** Abre a candidatura da vaga (tecla p ou botão). Sem a prop, o botão não aparece. */
+  onPrepare?: () => void;
+  preparing?: boolean;
+  prepareError?: string | null;
 };
 
 /** Painel lateral (não modal) com a avaliação da vaga selecionada. Tudo como texto. */
-export function MatchPanel({ state, chunksUsed, now, onClose, onRetry }: MatchPanelProps) {
+export function MatchPanel({
+  state,
+  chunksUsed,
+  now,
+  onClose,
+  onRetry,
+  onPrepare,
+  preparing = false,
+  prepareError = null,
+}: MatchPanelProps) {
   if (state.name === "empty") {
     return (
       <div className="match-panel__empty">
         <p>Escolha uma vaga na lista para ver a justificativa da nota, os pontos fortes e as lacunas.</p>
         <p className="muted">
-          Atalhos: <kbd>j</kbd> próxima, <kbd>k</kbd> anterior.
+          Atalhos: <kbd>j</kbd> próxima, <kbd>k</kbd> anterior, <kbd>p</kbd> preparar candidatura.
         </p>
       </div>
     );
@@ -178,6 +191,19 @@ export function MatchPanel({ state, chunksUsed, now, onClose, onRetry }: MatchPa
           <dd className="mono">{d.country ?? "—"}</dd>
         </div>
       </dl>
+
+      {onPrepare ? (
+        <div className="actions">
+          <button type="button" className="button" disabled={preparing} onClick={onPrepare}>
+            {preparing ? "Preparando…" : "Preparar candidatura"}
+          </button>
+          {prepareError ? (
+            <p role="alert" className="match-panel__error">
+              {prepareError}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="match-panel__link">
         {href ? (

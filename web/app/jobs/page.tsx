@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ChatBar } from "@/components/jobs/ChatBar";
 import { FilterBar } from "@/components/jobs/FilterBar";
@@ -26,6 +27,7 @@ import {
   type SearchFilters,
 } from "@/lib/matching";
 import { mergeProposal, removeChip, type Chip, type ParsedQuery } from "@/lib/chatFilters";
+import { prepareApplication } from "@/lib/applications";
 import { ApiError } from "@/lib/profile";
 
 const MATCHES_PAGE_SIZE = 50;
@@ -100,6 +102,10 @@ export default function JobsPage() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [panel, setPanel] = useState<PanelState>({ name: "empty" });
   const [detailKey, setDetailKey] = useState(0);
+  const [preparing, setPreparing] = useState(false);
+  const [prepareError, setPrepareError] = useState<string | null>(null);
+  const router = useRouter();
+  const prepareRef = useRef<() => void>(() => {});
   // Só lido em handlers e efeitos: Date.now() no render quebra o prerender.
   const [now, setNow] = useState(0);
   /** Só a resposta da requisição de lista mais recente vale. */
@@ -442,12 +448,30 @@ export default function JobsPage() {
     if (id !== null) document.querySelector<HTMLElement>(`[data-job-id="${id}"]`)?.focus();
   }
 
+  async function prepareSelected() {
+    const jobId = selectedRef.current;
+    if (jobId === null || preparing) return;
+    setPreparing(true);
+    setPrepareError(null);
+    try {
+      const applicationId = await prepareApplication(jobId);
+      router.push(`/candidaturas/${applicationId}`);
+    } catch (e) {
+      setPrepareError(e instanceof ApiError ? e.message : "Não foi possível preparar a candidatura agora.");
+    } finally {
+      setPreparing(false);
+    }
+  }
+  useEffect(() => {
+    prepareRef.current = () => void prepareSelected();
+  });
+
   function retryDetail() {
     setPanel({ name: "loading" });
     setDetailKey((k) => k + 1);
   }
 
-  // Atalhos: j/k navegam; s (salvar, marco 6) e p (marco 5) estão reservados e não fazem nada.
+  // Atalhos: j/k navegam; p prepara a candidatura da vaga selecionada; s (salvar, marco 6) segue reservado.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
@@ -458,6 +482,12 @@ export default function JobsPage() {
         setSelectedId(null);
         setPanel({ name: "empty" });
         document.querySelector<HTMLElement>(`[data-job-id="${open}"]`)?.focus();
+        return;
+      }
+      if (e.key === "p") {
+        if (selectedRef.current === null) return;
+        e.preventDefault();
+        prepareRef.current();
         return;
       }
       if (e.key !== "j" && e.key !== "k") return;
@@ -717,6 +747,9 @@ export default function JobsPage() {
                   now={now}
                   onClose={closePanel}
                   onRetry={retryDetail}
+                  onPrepare={() => void prepareSelected()}
+                  preparing={preparing}
+                  prepareError={prepareError}
                 />
               </aside>
             )}

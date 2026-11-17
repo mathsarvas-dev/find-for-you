@@ -17,6 +17,10 @@ import { parseFilters } from "@/lib/chatFilters";
 import { matchDetail, matchItem, matchPage, parsedQuery } from "@/components/jobs/fixtures";
 import JobsPage from "./page";
 
+const { push, prepare } = vi.hoisted(() => ({ push: vi.fn(), prepare: vi.fn() }));
+vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
+vi.mock("@/lib/applications", () => ({ prepareApplication: prepare }));
+
 vi.mock("@/lib/chatFilters", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/chatFilters")>()),
   parseFilters: vi.fn(),
@@ -243,7 +247,21 @@ describe("JobsPage", () => {
       expect(screen.getByText(/Python e Airflow/)).toBeInTheDocument();
     });
 
-    it("j/k trocam a seleção; dentro de input não agem; s e p não fazem nada", async () => {
+    it("p prepara a candidatura da vaga selecionada e abre a página dela", async () => {
+      m.list.mockResolvedValue(matchPage([matchItem(1), matchItem(2)]));
+      prepare.mockResolvedValue(33);
+      await renderPage();
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "j" });
+      });
+      await act(async () => {
+        fireEvent.keyDown(document.body, { key: "p" });
+      });
+      expect(prepare).toHaveBeenCalledWith(1);
+      expect(push).toHaveBeenCalledWith("/candidaturas/33");
+    });
+
+    it("j/k trocam a seleção; dentro de input não agem; s não faz nada", async () => {
       m.list.mockResolvedValue(matchPage([matchItem(1), matchItem(2), matchItem(3)]));
       await renderPage();
       const current = () => rows().findIndex((r) => r.getAttribute("aria-current") === "true");
@@ -266,7 +284,6 @@ describe("JobsPage", () => {
         fireEvent.keyDown(screen.getByLabelText("Países"), { key: "j" });
         fireEvent.keyDown(document.body, { key: "j", ctrlKey: true });
         fireEvent.keyDown(document.body, { key: "s" });
-        fireEvent.keyDown(document.body, { key: "p" });
       });
       expect(current()).toBe(1);
       expect(m.put).not.toHaveBeenCalled();

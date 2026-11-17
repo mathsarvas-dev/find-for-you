@@ -98,3 +98,24 @@ describe("MatchPanel", () => {
     expect(onClose).toHaveBeenCalled();
   });
 });
+
+describe("MatchPanel candidatura", () => {
+  it("o botão Preparar candidatura chama onPrepare e some sem a prop", () => {
+    const onPrepare = vi.fn();
+    const { unmount } = render(
+      <MatchPanel
+        state={{ name: "ready", detail: matchDetail(3) }}
+        chunksUsed={1}
+        now={NOW}
+        onClose={vi.fn()}
+        onRetry={vi.fn()}
+        onPrepare={onPrepare}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Preparar candidatura" }));
+    expect(onPrepare).toHaveBeenCalledTimes(1);
+    unmount();
+    renderPanel({ name: "ready", detail: matchDetail(4) });
+    expect(screen.queryByRole("button", { name: "Preparar candidatura" })).toBeNull();
+  });
+});
