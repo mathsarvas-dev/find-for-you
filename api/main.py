@@ -15,6 +15,7 @@ from api.deps import current_user_id
 from api.discovery import router as discovery_router
 from api.feeds import router as feeds_router
 from api.funnel import router as funnel_router
+from api.highlights import router as highlights_router
 from api.interview import router as interview_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
@@ -57,6 +58,7 @@ app.include_router(portals_router)
 app.include_router(funnel_router)
 app.include_router(applications_router)
 app.include_router(pipeline_router)
+app.include_router(highlights_router)
 
 
 def _json_safe(value):

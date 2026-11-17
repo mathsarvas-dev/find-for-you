@@ -235,3 +235,31 @@ def test_report_empty_has_null_rate(env):
     r = client_as(new_user()).get("/pipeline/report").json()
     assert (r["found"], r["applied"], r["response_rate"]) == (0, 0, None)
     assert r["by_country"] == []
+
+
+def test_highlights_new_high_scores_only(env):
+    new_user, add_job, add_app, client_as = env
+    uid = new_user()
+    good = add_job(uid, score=92, title="Great")
+    add_job(uid, score=79, title="Low")
+    add_job(uid, score=95, title="Old", first_seen_at=datetime.now(UTC) - timedelta(days=30))
+    add_job(uid, score=95, title="Closed", status="closed")
+    saved = add_job(uid, score=99, title="Saved")
+    add_app(uid, saved)
+    add_job(uid, title="Unscored")
+    r = client_as(uid).get("/highlights").json()
+    assert r["min_score"] == 80 and r["days"] == 7
+    assert r["new_high_count"] == 1
+    assert [(i["job_id"], i["ai_score"]) for i in r["items"]] == [(good, 92)]
+    assert r["follow_ups_due"] == 0
+
+
+def test_highlights_follow_ups_due(env):
+    new_user, add_job, add_app, client_as = env
+    uid = new_user()
+    today = date.today()
+    add_app(uid, add_job(uid), stage="applied", follow_up_at=today)
+    add_app(uid, add_job(uid), stage="applied", follow_up_at=today - timedelta(days=3))
+    add_app(uid, add_job(uid), stage="applied", follow_up_at=today + timedelta(days=3))
+    add_app(uid, add_job(uid), stage="rejected", follow_up_at=today)  # closed: no reminder
+    assert client_as(uid).get("/highlights").json()["follow_ups_due"] == 2
