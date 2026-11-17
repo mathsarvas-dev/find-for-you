@@ -607,3 +607,17 @@ class ApplicationQuestion(UserScopedMixin, TimestampMixin, Base):
         String(8), nullable=False, server_default="empty"
     )
     bank_key: Mapped[str | None] = mapped_column(String(64))
+
+
+class LinkedinOptimization(UserScopedMixin, TimestampMixin, Base):
+    """Latest LinkedIn optimizer result of a user (one row, replaced on each run)."""
+
+    __tablename__ = "linkedin_optimizations"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_linkedin_optimizations_user"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    profile_version: Mapped[int] = mapped_column(nullable=False)
+    language: Mapped[str] = mapped_column(String(8), nullable=False)
+    data: Mapped[dict] = mapped_column(JSONB, nullable=False)

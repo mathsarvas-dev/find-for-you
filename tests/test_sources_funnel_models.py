@@ -135,4 +135,4 @@ def test_adherence_vec_floor_nullable(session):
 
 def test_migration_head_is_single(session):
     rows = session.execute(text("select version_num from alembic_version")).all()
-    assert [r[0] for r in rows] == ["0011"]
+    assert [r[0] for r in rows] == ["0012"]
