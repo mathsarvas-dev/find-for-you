@@ -119,3 +119,18 @@
 - **Salvar:** `s` e o botão criam a candidatura em rascunho; não há "remover do pipeline" nem desfazer salvar. Vagas que sumiram da fonte seguem no quadro.
 - **Destaques:** limite fixo (nota 80, 7 dias, 5 itens) em `api/highlights.py`; sem ajuste por usuário e sem link direto para abrir a vaga em /jobs. "Nova" é pela primeira vez vista, não por "desde a última visita".
 - **Kanban x candidatura:** mover um cartão para "Aplicada" sem kit gerado marca a etapa e a data, mas deixa o estado do kit como está (o contador "aplicadas" do resumo conta o estado do kit).
+
+## Perfis de busca nomeados (R11)
+- **Modelo:** o perfil ativo é a linha `is_default` de `search_profiles`; trocar só move a marca, então ranking, funil e `/search-profile` seguem lendo "o perfil". Sem migração. Máximo de 20 perfis por usuário; nome único sem diferenciar maiúsculas.
+- **Excluir o ativo:** recusado (ative outro antes). O worker `embed_queries` já vetoriza todos os perfis (o ativo primeiro), então a troca encontra a consulta de gosto pronta.
+- **Trocar refaz a coleta dos stubs:** trocar para filtros diferentes marca as fontes com stubs para reavaliação, como salvar filtros.
+- **Verificação visual não feita:** o seletor e o painel "Gerenciar perfis" em 375 px, 768 px e desktop, claro e escuro, não foram conferidos no navegador.
+- **Fora do escopo:** reordenar, duplicar um perfil que não é o ativo, e filtros por perfil na lista de candidaturas ou nos destaques.
+
+## Otimizador de LinkedIn (R10)
+- **Regra anti-invenção:** o rascunho (título, Sobre, marcadores por experiência) passa pelo mesmo validador do currículo, com um reenvio; seção que continua inválida não aparece e fica em "Seções que não foram escritas". Notas por ponto de vista e melhorias são conselho: só são descartadas se trouxerem link ou número que o perfil não tem (não há validação de termos, para não barrar palavras como ATS ou LinkedIn).
+- **Persistência:** migração `0012` guarda só o último resultado por usuário (`linkedin_optimizations`); `stale` indica que o perfil foi confirmado de novo depois. Sem histórico de execuções.
+- **Limites:** 5 gerações por hora por usuário, por processo (mesmo padrão de `/filters/parse`); tempo máximo de 90 s. Perfil provisório e perfil ausente são recusados (409).
+- **Uma chamada só:** rascunho, notas e melhorias saem de uma única resposta do modelo; se ficar pesado para perfis longos, separar em duas chamadas.
+- **Sem leitura do LinkedIn:** não há comparação com o perfil publicado; a pessoa compara à mão. Seções de formação, certificações e projetos não têm rascunho próprio.
+- **Verificação visual não feita:** a página `/linkedin` não foi conferida no navegador (375 px, 768 px, desktop, claro e escuro) nem com o modelo real.
