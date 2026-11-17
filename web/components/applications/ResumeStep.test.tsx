@@ -98,7 +98,7 @@ describe("ResumeStep", () => {
   it("lists the requirements the resume does not cover", () => {
     render(<ResumeStep detail={detail([HEADER, BULLET])} onChanged={vi.fn()} />);
     expect(screen.getByText("Não encontrei no seu perfil")).toBeInTheDocument();
-    expect(screen.getByText("Terraform")).toBeInTheDocument();
+    expect(screen.getByText(/Terraform/)).toBeInTheDocument();
   });
 });
 
@@ -140,5 +140,13 @@ describe("ResumeStep settings and downloads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Baixar PDF" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Use a versão em texto");
     dl.mockRestore();
+  });
+});
+
+describe("ResumeStep cover letter", () => {
+  it("the cover letter request is disabled until the resume is ready", () => {
+    render(<ResumeStep detail={detail([HEADER, BULLET], "valid", { state: "draft" })} onChanged={vi.fn()} />);
+    expect(screen.getByRole("button", { name: "Gerar carta" })).toBeDisabled();
+    expect(screen.getByText("Gere o currículo antes.")).toBeInTheDocument();
   });
 });

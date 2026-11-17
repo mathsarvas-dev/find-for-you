@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { applicationSteps, type ApplicationView } from "@/components/applications/applicationSteps";
 import { RequirementsStep } from "@/components/applications/RequirementsStep";
+import { QuestionsStep } from "@/components/applications/QuestionsStep";
 import { ResumeStep } from "@/components/applications/ResumeStep";
 import { useRefreshOverview } from "@/components/shell/OverviewContext";
 import { PageHeader } from "@/components/shell/PageHeader";
@@ -183,7 +184,7 @@ export default function CandidaturaPage() {
         <ResumeStep detail={detail} onChanged={() => setReloadKey((k) => k + 1)} />
       ) : null}
       {view === "questions" ? (
-        <p className="muted">Perguntas da vaga chegam no próximo passo.</p>
+        <QuestionsStep detail={detail} onChanged={() => setReloadKey((k) => k + 1)} />
       ) : null}
       {view === "kit" ? (
         <p className="muted">O kit fica pronto depois da revisão do currículo.</p>

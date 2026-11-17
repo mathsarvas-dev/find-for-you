@@ -4,6 +4,7 @@ import { useState } from "react";
 import {
   downloadArtifact,
   editLine,
+  requestCoverLetter,
   patchApplication,
   type Template,
   type ApplicationDetail,
@@ -13,6 +14,7 @@ import {
   type DocumentOut,
 } from "@/lib/applications";
 import { ApiError } from "@/lib/profile";
+import { GapItem } from "./GapItem";
 import { LineEditor } from "./LineEditor";
 import { TemplatePicker } from "./TemplatePicker";
 
@@ -77,6 +79,21 @@ export function ResumeStep({ detail, onChanged }: Props) {
   const lines = doc.lines;
   const needsFix = doc.status === "needs_fix";
   const gaps = cov ? uncovered(cov.items) : [];
+  const letterTask = (detail.tasks ?? []).find((t) => t.kind === "cover_letter");
+  const letterReady = (detail.state === "ready" || detail.state === "applied") && detail.resume !== null;
+
+  async function writeLetter() {
+    setBusy(true);
+    setSettingsError(null);
+    try {
+      await requestCoverLetter(detail.id);
+      onChanged();
+    } catch (e) {
+      setSettingsError(e instanceof ApiError ? e.message : "Não foi possível pedir a carta agora.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function changeTemplate(template: Template) {
     setBusy(true);
@@ -254,12 +271,34 @@ export function ResumeStep({ detail, onChanged }: Props) {
         })}
       </ol>
 
+      <section className="application-letter" aria-labelledby="letter-title">
+        <h3 id="letter-title">Carta de apresentação (opcional)</h3>
+        {letterTask?.state === "queued" ? <p role="status">Escrevendo a carta…</p> : null}
+        {letterTask?.state === "failed" ? (
+          <p role="alert" className="application-error">
+            {letterTask.error}
+          </p>
+        ) : null}
+        {detail.cover_letter ? (
+          <p className="muted">Carta pronta (versão {detail.cover_letter.version}).</p>
+        ) : null}
+        <button
+          type="button"
+          className="button button--secondary"
+          disabled={!letterReady || busy || letterTask?.state === "queued"}
+          onClick={writeLetter}
+        >
+          Gerar carta
+        </button>
+        {!letterReady ? <p className="muted">Gere o currículo antes.</p> : null}
+      </section>
+
       {gaps.length > 0 ? (
         <section className="application-gaps" aria-labelledby="gaps-title">
           <h3 id="gaps-title">Não encontrei no seu perfil</h3>
           <ul className="application-list">
             {gaps.map((g) => (
-              <li key={g.id}>{g.text}</li>
+              <GapItem key={g.id} applicationId={detail.id} item={g} onResolved={onChanged} />
             ))}
           </ul>
         </section>

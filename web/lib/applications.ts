@@ -96,7 +96,7 @@ export type ApplicationDetail = {
   coverage: Coverage | null;
   resume: DocumentOut | null;
   cover_letter: DocumentOut | null;
-  questions: unknown[];
+  questions: QuestionOut[];
   tasks: TaskItem[];
   can_generate: { allowed: boolean; reason: string | null };
   applied_at: string | null;
@@ -182,4 +182,63 @@ export async function downloadArtifact(id: number, kind: DocKind, fmt: "pdf" | "
   link.download = `${kind === "resume" ? "curriculo" : "carta"}-${id}.${fmt}`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+export type AnswerState = "empty" | "draft" | "edited" | "final";
+
+export type QuestionOut = {
+  id: number;
+  position: number;
+  source: "api" | "pasted";
+  label: string;
+  kind: "text" | "choice" | "bool" | "file";
+  options: string[] | null;
+  required: boolean;
+  sensitive: boolean;
+  answer: string | null;
+  answer_state: AnswerState;
+  bank_key: string | null;
+  bank_suggestion: { key: string; value: string } | null;
+  task: { state: string; error: string | null } | null;
+};
+
+export type GapResult = {
+  coverage: Coverage | null;
+  profile_version: number | null;
+  regenerated: boolean;
+};
+
+/** "Tenho isso" (have, com o texto) ou "Não tenho" (lack). */
+export function resolveGap(
+  id: number,
+  reqId: string,
+  action: "have" | "lack",
+  text?: string,
+): Promise<GapResult> {
+  return send(`/applications/${id}/gaps/${encodeURIComponent(reqId)}/resolve`, "POST",
+    action === "have" ? { action, text } : { action });
+}
+
+export function fetchQuestions(id: number): Promise<QuestionOut[]> {
+  return send(`/applications/${id}/questions/fetch`, "POST");
+}
+
+export function pasteQuestions(id: number, text: string): Promise<QuestionOut[]> {
+  return send(`/applications/${id}/questions`, "POST", { text });
+}
+
+export function updateQuestion(
+  id: number,
+  qid: number,
+  patch: { answer?: string; final?: boolean; save_to_bank?: string },
+): Promise<QuestionOut> {
+  return send(`/applications/${id}/questions/${qid}`, "PUT", patch);
+}
+
+export function draftQuestion(id: number, qid: number): Promise<QuestionOut> {
+  return send(`/applications/${id}/questions/${qid}/draft`, "POST");
+}
+
+export function requestCoverLetter(id: number): Promise<ApplicationOut> {
+  return send(`/applications/${id}/cover-letter`, "POST");
 }
