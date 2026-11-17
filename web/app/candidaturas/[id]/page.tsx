@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { applicationSteps, type ApplicationView } from "@/components/applications/applicationSteps";
 import { RequirementsStep } from "@/components/applications/RequirementsStep";
+import { ResumeStep } from "@/components/applications/ResumeStep";
 import { useRefreshOverview } from "@/components/shell/OverviewContext";
 import { PageHeader } from "@/components/shell/PageHeader";
 import { Stepper } from "@/components/stepper/Stepper";
@@ -179,7 +180,7 @@ export default function CandidaturaPage() {
 
       {view === "read" ? <RequirementsStep detail={detail} /> : null}
       {view === "resume" ? (
-        <p className="muted">Revisão do currículo chega no próximo passo.</p>
+        <ResumeStep detail={detail} onChanged={() => setReloadKey((k) => k + 1)} />
       ) : null}
       {view === "questions" ? (
         <p className="muted">Perguntas da vaga chegam no próximo passo.</p>
