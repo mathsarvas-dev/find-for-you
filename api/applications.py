@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from api.deps import current_user_id
 from api.matching import INT4_MAX, model_version
 from rumo_core.applications.coverage import compute_coverage
+from rumo_core.applications.gaps import MAX_GAP_ANSWER, add_gap_to_profile
 from rumo_core.applications.lines import DocLine, document_status, locale_for, template_for
 from rumo_core.applications.pdf import PdfUnavailable
 from rumo_core.applications.render import (
@@ -36,7 +37,7 @@ from rumo_core.db import get_session
 from rumo_core.matching.ai_score import JobView
 from rumo_core.models import Application, ApplicationDocument, Company, Job, Profile
 from rumo_core.profile.schema import CanonicalProfile
-from rumo_core.profile.service import get_current_profile
+from rumo_core.profile.service import confirm_profile, get_current_profile
 from rumo_core.matching.ranking import usable_profile
 
 router = APIRouter(tags=["applications"])
@@ -406,6 +407,80 @@ def edit_line(
         app.coverage = compute_coverage(reqs, lines, item_texts(profile), decisions)
     session.commit()
     return _doc_out(doc)
+
+
+# ---- gaps -----------------------------------------------------------------
+
+MSG_REQ_NOT_FOUND = "Requisito não encontrado."
+MSG_ALREADY_COVERED = "Este requisito já aparece no seu currículo."
+MSG_ANSWER_REQUIRED = "Escreva o que você tem nessa área."
+
+
+class ResolveIn(BaseModel):
+    action: Literal["have", "lack"]
+    text: str | None = Field(default=None, max_length=MAX_GAP_ANSWER)
+
+
+class ResolveOut(BaseModel):
+    coverage: dict | None
+    profile_version: int | None
+    regenerated: bool
+
+
+def _with_decision(coverage: dict | None, req_id: str, decision: str) -> dict:
+    cov = dict(coverage or {})
+    items = [dict(i) for i in cov.get("items", [])]
+    for item in items:
+        if item["id"] == req_id:
+            item["decision"] = decision
+    cov["items"] = items
+    return cov
+
+
+@router.post("/applications/{app_id}/gaps/{req_id}/resolve", response_model=ResolveOut)
+def resolve_gap(
+    app_id: int,
+    req_id: str,
+    body: ResolveIn,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    app = _app_or_404(session, user_id, app_id)
+    reqs = Requirements.model_validate(app.requirements or {})
+    req = next((r for r in reqs.all_reqs() if r.id == req_id), None)
+    if req is None:
+        raise HTTPException(404, MSG_REQ_NOT_FOUND)
+    item = next((i for i in (app.coverage or {}).get("items", []) if i["id"] == req_id), {})
+    if item.get("covered"):
+        raise HTTPException(409, MSG_ALREADY_COVERED)
+
+    if body.action == "lack":
+        app.coverage = _with_decision(app.coverage, req_id, "lack")
+        session.commit()
+        return ResolveOut(coverage=app.coverage, profile_version=None, regenerated=False)
+
+    answer = (body.text or "").strip()
+    if not answer:
+        raise HTTPException(422, MSG_ANSWER_REQUIRED)
+    current = get_current_profile(session, user_id)
+    if current is None:
+        raise HTTPException(409, MSG_NO_PROFILE)
+    new_profile = add_gap_to_profile(
+        CanonicalProfile.model_validate(current.data), req.text, answer
+    )
+    # a new version: only the chunks whose text changed are embedded again
+    version_row = confirm_profile(session, user_id, new_profile, current.narrative)
+    app.coverage = _with_decision(app.coverage, req_id, "have")
+    regenerated = False
+    under_limit = generated_last_24h(session) < get_settings().application_daily_limit
+    if app.state not in ("generating", "applied") and under_limit:
+        app.state = "generating"
+        app.attempts = 0
+        app.error = None
+        regenerated = True
+    session.commit()
+    return ResolveOut(coverage=app.coverage, profile_version=version_row.version,
+                      regenerated=regenerated)
 
 
 # ---- downloads ------------------------------------------------------------

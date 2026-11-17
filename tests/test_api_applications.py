@@ -334,3 +334,102 @@ def test_download_other_user_404(env):
     owner, other = new_user(), new_user()
     aid = add_application(owner, add_job(owner), lines=[_fact(), _ai()])
     assert client_as(other).get(f"/applications/{aid}/resume.txt").status_code == 404
+
+
+# ---- gaps -----------------------------------------------------------------
+
+def _with_requirement(aid, *, covered=False):
+    """Give the application one must requirement ('Terraform') and its coverage."""
+    with SessionLocal() as s:
+        a = s.get(Application, aid)
+        a.requirements = {"must": [{"id": "m1", "text": "Terraform"}], "nice": [], "keywords": []}
+        a.coverage = {
+            "must": {"covered": int(covered), "total": 1}, "nice": {"covered": 0, "total": 0},
+            "items": [{"id": "m1", "kind": "must", "text": "Terraform", "covered": covered,
+                       "line_ids": [], "decision": None}],
+        }
+        s.commit()
+
+
+def _profile_versions(uid):
+    with SessionLocal() as s:
+        return sorted(s.execute(select(Profile.version).where(Profile.user_id == uid)).scalars().all())
+
+
+def test_have_creates_new_profile_version_and_regenerates(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid)
+    r = client_as(uid).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "have", "text": "Terraform"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["profile_version"] == 2 and body["regenerated"] is True
+    assert _profile_versions(uid) == [1, 2]
+    with SessionLocal() as s:
+        assert s.get(Application, aid).state == "generating"
+
+
+def test_have_reembeds_only_changed_chunk(env):
+    new_user, add_job, add_application, client_as = env
+    from rumo_core.profile.schema import CanonicalProfile
+    from rumo_core.profile.service import confirm_profile
+
+    uid = new_user(profile=False)
+    with SessionLocal() as s:
+        confirm_profile(s, uid, CanonicalProfile.model_validate(_profile_data()), None)
+        s.execute(ProfileChunk.__table__.update().where(ProfileChunk.user_id == uid).values(
+            embedding=_vec(), model_version=MODEL_VERSION))
+        s.commit()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid)
+    r = client_as(uid).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "have", "text": "Terraform"})
+    assert r.status_code == 200 and r.json()["profile_version"] == 2
+    with SessionLocal() as s:
+        rows = {c.source_ref: c.embedding for c in s.execute(
+            select(ProfileChunk).where(ProfileChunk.user_id == uid, ProfileChunk.profile_version == 2)).scalars()}
+    assert rows["summary"] is not None and rows["exp1"] is not None  # unchanged: reused
+    assert rows["skills"] is None  # the only changed chunk is embedded again
+
+
+def test_lack_does_not_change_profile(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid)
+    r = client_as(uid).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "lack"})
+    assert r.status_code == 200
+    assert r.json()["profile_version"] is None and r.json()["regenerated"] is False
+    assert r.json()["coverage"]["items"][0]["decision"] == "lack"
+    assert _profile_versions(uid) == [1]
+
+
+def test_have_at_daily_limit_updates_profile_without_regenerating(env, monkeypatch):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid)
+    monkeypatch.setattr(api_apps, "generated_last_24h", lambda session: get_settings().application_daily_limit)
+    r = client_as(uid).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "have", "text": "Terraform"})
+    assert r.status_code == 200 and r.json()["regenerated"] is False
+    assert _profile_versions(uid) == [1, 2]
+    with SessionLocal() as s:
+        assert s.get(Application, aid).state == "ready"
+
+
+def test_resolve_covered_requirement_409(env):
+    new_user, add_job, add_application, client_as = env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid, covered=True)
+    r = client_as(uid).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "lack"})
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_ALREADY_COVERED
+
+
+def test_resolve_unknown_requirement_and_other_user_404(env):
+    new_user, add_job, add_application, client_as = env
+    owner, other = new_user(), new_user()
+    aid = add_application(owner, add_job(owner), state="ready", lines=[_fact(), _ai()])
+    _with_requirement(aid)
+    assert client_as(owner).post(f"/applications/{aid}/gaps/zz/resolve", json={"action": "lack"}).status_code == 404
+    assert client_as(other).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "lack"}).status_code == 404
