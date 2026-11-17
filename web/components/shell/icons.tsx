@@ -96,6 +96,15 @@ export function PipelineIcon(props: IconProps) {
   );
 }
 
+export function LinkedinIcon(props: IconProps) {
+  return (
+    <Svg {...props}>
+      <rect x="3" y="3" width="14" height="14" rx="2" />
+      <path d="M7 9v5M7 6.5v.01M10.5 14V9m0 2.5c0-1.4 1-2.5 2.25-2.5S15 10 15 11.5V14" />
+    </Svg>
+  );
+}
+
 export function SettingsIcon(props: IconProps) {
   return (
     <Svg {...props}>
