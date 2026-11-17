@@ -630,3 +630,62 @@ class WorkerHeartbeat(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LlmModelStatus(Base):
+    """What the worker/API last learned about one Groq model: whether it exists, the
+    quota left (from the rate-limit headers) and when the next attempt is expected."""
+
+    __tablename__ = "llm_model_status"
+
+    model: Mapped[str] = mapped_column(String(128), primary_key=True)
+    # None = never answered; False = the API said model_not_found
+    exists: Mapped[bool | None] = mapped_column(Boolean)
+    missing_since: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    limit_requests: Mapped[int | None] = mapped_column(Integer)
+    remaining_requests: Mapped[int | None] = mapped_column(Integer)
+    reset_requests_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    limit_tokens: Mapped[int | None] = mapped_column(Integer)
+    remaining_tokens: Mapped[int | None] = mapped_column(Integer)
+    reset_tokens_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # when a rate-limited task is expected to be tried again
+    next_try_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # last time a non-critical task used the fallback instead of this model
+    fallback_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class RecommendationFeedback(UserScopedMixin, TimestampMixin, Base):
+    """The user's verdict on one recommendation (R7). Explicit signal only: nothing
+    trains on it and nothing changes the ranking by itself."""
+
+    __tablename__ = "recommendation_feedback"
+    __table_args__ = (
+        UniqueConstraint("user_id", "job_id", name="uq_recommendation_feedback_user_job"),
+        CheckConstraint("verdict in ('right','wrong')", name="ck_recommendation_feedback_verdict"),
+        CheckConstraint(
+            "reason is null or reason in "
+            "('localidade','competencias','senioridade','salario','empresa','idioma')",
+            name="ck_recommendation_feedback_reason",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(
+        ForeignKey("jobs.id", ondelete="CASCADE"), nullable=False
+    )
+    verdict: Mapped[str] = mapped_column(String(8), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(16))
+    note: Mapped[str | None] = mapped_column(Text)
+
+
+class CalibrationDismissal(UserScopedMixin, TimestampMixin, Base):
+    """A calibration suggestion the user declined; it is not offered again."""
+
+    __tablename__ = "calibration_dismissals"
+    __table_args__ = (
+        UniqueConstraint("user_id", "key", name="uq_calibration_dismissals_user_key"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    key: Mapped[str] = mapped_column(String(128), nullable=False)
