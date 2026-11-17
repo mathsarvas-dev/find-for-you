@@ -98,3 +98,13 @@
 - **Páginas de vaga já conhecidas (tarefa 34):** páginas de carreira não são buscadas de novo para vagas já conhecidas; mudanças no conteúdo de uma vaga só entram quando ela sai e volta.
 - **Portal bloqueado pelo site:** o desbloqueio é manual (a aba Portais), depois que o site recusou o acesso repetidas vezes.
 
+## Marco 5 (candidatura)
+- **Verificação visual não feita:** a conferência em 375 px, 768 px e desktop, claro e escuro, e a abertura dos PDFs de cada modelo como imagem (acentos, ß, tabela `de`) não foram executadas com a pilha no ar. O que foi conferido: testes da web (767), lint, `tsc`, build do Next, e nos testes de PDF no container (texto extraível com acentos, uma página por modelo).
+- **Pipeline de geração:** um único processo do worker. Duas instâncias podem gerar a mesma candidatura (o segundo resultado é descartado na escrita); falta um arrendamento (lease) no banco.
+- **Evidência das tarefas:** carta e respostas abertas usam todas as experiências do perfil como evidência (sem seleção vetorial por requisito); a seleção vetorial só entra no currículo.
+- **Respostas:** a checagem de "pessoal, legal ou de remuneração" é só por palavras-chave (lista versionada, `SENSITIVE_KEYWORDS_VERSION = 1`); a lista precisa de revisão com perguntas reais de mais fontes além do Greenhouse.
+- **Lacunas:** "Tenho isso" com frase longa vira nota no perfil; a heurística (≤ 40 caracteres e ≤ 4 palavras, sem pontuação) é a mesma da spec, e vale rever com uso real.
+- **Layout da casca:** a raiz (`app/layout.tsx`) agora envolve a casca em `Suspense` e `/candidaturas/[id]` usa `connection()` para renderizar por requisição; o build do Next exige isso com `cacheComponents`.
+- **Testes instáveis já existentes:** `tests/matching/test_quality.py` (uma falha intermitente numa execução completa, com o banco de desenvolvimento compartilhado) e o teste de teclado "tecla b grava ruim" em `app/jobs/qualidade` (tempo de 1,1 s, falha só sob carga da suíte da web).
+- **Desvios de plano:** o arquivo de teste de lacunas foi renomeado para `tests/applications/test_application_gaps.py` (colisão de nome com `tests/interview/test_gaps.py`); a migração é `0010` (ruling); o teste de cabeçalho do PDF (`test_pdf_unavailable_wraps_errors`) usa um módulo falso, porque importar o WeasyPrint real falha no host Windows.
+- **Regra de aplicação:** "Apliquei" é recusado com perfil provisório (ruling), tanto na API (409) quanto na interface (botão desabilitado com o motivo). Gerar continua permitido com perfil provisório.
