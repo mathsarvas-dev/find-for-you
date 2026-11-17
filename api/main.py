@@ -18,6 +18,7 @@ from api.funnel import router as funnel_router
 from api.highlights import router as highlights_router
 from api.interview import router as interview_router
 from api.linkedin import router as linkedin_router
+from api.llm import router as llm_router
 from api.matching import router as matching_router
 from api.overview import router as overview_router
 from api.pipeline import router as pipeline_router
@@ -64,6 +65,7 @@ app.include_router(applications_router)
 app.include_router(pipeline_router)
 app.include_router(highlights_router)
 app.include_router(linkedin_router)
+app.include_router(llm_router)
 
 
 def _json_safe(value):
