@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, quote, urlparse
 import httpx
 
 from rumo_core.sources.base import (
+    RawQuestion,
     RawJob,
     SourceBadResponse,
     SourceNotFound,
@@ -16,6 +17,7 @@ from rumo_core.sources.base import (
 )
 
 API_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true"
+QUESTIONS_URL = "https://boards-api.greenhouse.io/v1/boards/{token}/jobs/{job_id}?questions=true"
 USER_AGENT = "Rumo/0.1 job-search-tool"
 MAX_RETRIES = 3
 # Total time one fetch may spend sleeping between retries. The worker runs its
@@ -133,9 +135,8 @@ class GreenhouseSource:
             chunks.append(chunk)
         return b"".join(chunks)
 
-    async def fetch_jobs(self, identifier: str) -> list[RawJob]:
-        token = self.normalize_identifier(identifier)
-        url = API_URL.format(token=quote(token, safe=""))
+    async def _get_bytes(self, url: str, token: str) -> bytes:
+        """GET with retries on 429/5xx (bounded sleep) and the size cap; raises the source errors."""
         headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
         slept = 0.0
         for attempt in range(MAX_RETRIES + 1):
@@ -159,8 +160,40 @@ class GreenhouseSource:
                     await self._sleep(delay)
                     continue
                 raise SourceUnavailable(f"Greenhouse unavailable (HTTP {status}) after retries")
-            return self._parse(body)
+            return body
         raise SourceUnavailable("Greenhouse unavailable after retries")  # pragma: no cover
+
+    async def fetch_jobs(self, identifier: str) -> list[RawJob]:
+        token = self.normalize_identifier(identifier)
+        url = API_URL.format(token=quote(token, safe=""))
+        return self._parse(await self._get_bytes(url, token))
+
+    async def fetch_job_questions(self, identifier: str, external_id: str) -> list[RawQuestion]:
+        """The application questions of one job (marco 5): one request, same limits as jobs."""
+        token = self.normalize_identifier(identifier)
+        if not external_id.isdigit():
+            raise ValueError("Greenhouse job id must be digits")
+        url = QUESTIONS_URL.format(token=quote(token, safe=""), job_id=external_id)
+        return self._parse_questions(await self._get_bytes(url, token))
+
+    @staticmethod
+    def _parse_questions(body: bytes) -> list[RawQuestion]:
+        try:
+            data = json.loads(body)
+        except ValueError as exc:
+            raise SourceBadResponse("Greenhouse returned invalid JSON") from exc
+        if not isinstance(data, dict):
+            raise SourceBadResponse("Unexpected Greenhouse response shape")
+        out = _questions_from(data.get("questions"), "questions")
+        for block in data.get("compliance") or []:
+            if isinstance(block, dict):
+                out += _questions_from(block.get("questions"), "compliance")
+        demo = data.get("demographic_questions")
+        if isinstance(demo, dict):
+            demo = demo.get("questions")
+        out += _questions_from(demo, "demographic")
+        out += _questions_from(data.get("location_questions"), "location")
+        return out
 
     @staticmethod
     def _parse(body: bytes) -> list[RawJob]:
@@ -172,3 +205,25 @@ class GreenhouseSource:
             raise SourceBadResponse("Unexpected Greenhouse response shape")
         jobs = (_to_raw_job(item) for item in data["jobs"])
         return [j for j in jobs if j is not None]
+
+
+def _questions_from(items, section: str) -> list[RawQuestion]:
+    out: list[RawQuestion] = []
+    for q in items if isinstance(items, list) else []:
+        if not isinstance(q, dict):
+            continue
+        fields = q.get("fields") if isinstance(q.get("fields"), list) else []
+        first = fields[0] if fields and isinstance(fields[0], dict) else {}
+        values = [
+            str(v.get("label") or "")[:200]
+            for v in (first.get("values") or [])
+            if isinstance(v, dict)
+        ]
+        out.append(RawQuestion(
+            label=str(q.get("label") or "").strip()[:500],
+            field_type=str(first.get("type") or "input_text")[:64],
+            values=values[:50],
+            required=bool(q.get("required")),
+            section=section,
+        ))
+    return out

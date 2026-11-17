@@ -14,3 +14,8 @@ as indented UTF-8 JSON). `meta.total` was left as captured (original totals), so
 no longer equals `len(jobs)`.
 
 `empty.json` and `malformed.json` are hand-written.
+
+`job_questions.json`: the job detail `GET https://boards-api.greenhouse.io/v1/boards/anthropic/jobs/5456619008?questions=true`
+(unauthenticated), captured on 2026-11-16 for the application questions (marco 5). Its 21
+`questions`, the `compliance` blocks and the rest of the response are unmodified; only the
+`content` field (the job description, 12,638 characters) was removed to keep the file small.

@@ -6,17 +6,28 @@ and the worker does the rest. Nothing leaves the computer: no form is filled
 or sent.
 """
 
+import asyncio
+import re
 from datetime import date, datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from api.deps import current_user_id
 from api.matching import INT4_MAX, model_version
+from api.sources import source_getter
+from rumo_core.applications.questions import (
+    SENSITIVE_BANK_KEYS,
+    is_sensitive,
+    map_greenhouse,
+    parse_pasted,
+    sensitive_category,
+)
+from rumo_core.sources.base import SourceError
 from rumo_core.applications.coverage import compute_coverage
 from rumo_core.applications.gaps import MAX_GAP_ANSWER, add_gap_to_profile
 from rumo_core.applications.lines import DocLine, document_status, locale_for, template_for
@@ -35,7 +46,9 @@ from rumo_core.applications.validator import build_context, validate_line
 from rumo_core.config import get_settings
 from rumo_core.db import get_session
 from rumo_core.matching.ai_score import JobView
-from rumo_core.models import Application, ApplicationDocument, Company, Job, Profile
+from rumo_core.models import (
+    AnswerBankItem, Application, ApplicationDocument, ApplicationQuestion, Company, Job, Profile,
+)
 from rumo_core.profile.schema import CanonicalProfile
 from rumo_core.profile.service import confirm_profile, get_current_profile
 from rumo_core.matching.ranking import usable_profile
@@ -124,6 +137,22 @@ class JobOut(BaseModel):
     status: str
 
 
+class QuestionOut(BaseModel):
+    id: int
+    position: int
+    source: str
+    label: str
+    kind: str
+    options: list[str] | None
+    required: bool
+    sensitive: bool
+    answer: str | None
+    answer_state: str
+    bank_key: str | None
+    bank_suggestion: dict | None = None
+    task: dict | None = None
+
+
 class ApplicationDetail(BaseModel):
     id: int
     state: str
@@ -139,7 +168,7 @@ class ApplicationDetail(BaseModel):
     coverage: dict | None
     resume: DocumentOut | None
     cover_letter: DocumentOut | None
-    questions: list[dict] = []
+    questions: list[QuestionOut] = []
     tasks: list[dict]
     can_generate: CanGenerate
     applied_at: datetime | None
@@ -314,6 +343,7 @@ def application_detail(
         requirements=app.requirements, coverage=app.coverage,
         resume=_doc_out(_latest_doc(session, app.id, "resume")),
         cover_letter=_doc_out(_latest_doc(session, app.id, "cover_letter")),
+        questions=_questions_out(session, user_id, app),
         tasks=list(app.tasks or []),
         can_generate=CanGenerate(allowed=block is None, reason=block[1] if block else None),
         applied_at=app.applied_at,
@@ -407,6 +437,168 @@ def edit_line(
         app.coverage = compute_coverage(reqs, lines, item_texts(profile), decisions)
     session.commit()
     return _doc_out(doc)
+
+
+# ---- questions ------------------------------------------------------------
+
+MSG_NOT_GREENHOUSE = "Esta vaga não informa as perguntas. Cole-as aqui."
+MSG_QUESTIONS_UNAVAILABLE = "Não foi possível buscar as perguntas agora. Cole-as aqui."
+MSG_NO_QUESTIONS = "Cole pelo menos uma pergunta."
+MSG_QUESTION_NOT_FOUND = "Pergunta não encontrada."
+MSG_NO_ANSWER_TO_SAVE = "Escreva a resposta antes de salvar no banco."
+_BANK_KEY = re.compile(r"[a-z0-9_]{1,64}")
+
+
+class PasteIn(BaseModel):
+    text: str = Field(max_length=20000)
+
+
+class QuestionPatchIn(BaseModel):
+    answer: str | None = Field(default=None, max_length=5000)
+    final: bool | None = None
+    save_to_bank: str | None = Field(default=None, max_length=64)
+
+
+def _question_out(session: Session, user_id: int, app: Application, q: ApplicationQuestion) -> QuestionOut:
+    suggestion = None
+    if q.sensitive:
+        key = SENSITIVE_BANK_KEYS.get(sensitive_category(q.label, q.options) or "")
+        if key:
+            item = session.scalar(select(AnswerBankItem).where(
+                AnswerBankItem.user_id == user_id, AnswerBankItem.key == key))
+            if item is not None:
+                suggestion = {"key": key, "value": item.value}
+    return QuestionOut(
+        id=q.id, position=q.position, source=q.source, label=q.label, kind=q.kind,
+        options=q.options, required=q.required, sensitive=q.sensitive, answer=q.answer,
+        answer_state=q.answer_state, bank_key=q.bank_key, bank_suggestion=suggestion,
+    )
+
+
+def _questions_out(session: Session, user_id: int, app: Application) -> list[QuestionOut]:
+    rows = session.scalars(select(ApplicationQuestion).where(
+        ApplicationQuestion.application_id == app.id,
+        ApplicationQuestion.user_id == user_id,
+    ).order_by(ApplicationQuestion.position)).all()
+    return [_question_out(session, user_id, app, q) for q in rows]
+
+
+def _next_position(session: Session, app_id: int) -> int:
+    return (session.scalar(select(func.max(ApplicationQuestion.position)).where(
+        ApplicationQuestion.application_id == app_id)) or 0) + 1
+
+
+def _question_or_404(session: Session, user_id: int, app: Application, qid: int) -> ApplicationQuestion:
+    q = session.scalar(select(ApplicationQuestion).where(
+        ApplicationQuestion.id == qid, ApplicationQuestion.application_id == app.id,
+        ApplicationQuestion.user_id == user_id))
+    if q is None:
+        raise HTTPException(404, MSG_QUESTION_NOT_FOUND)
+    return q
+
+
+@router.post("/applications/{app_id}/questions/fetch", response_model=list[QuestionOut])
+async def fetch_questions(
+    app_id: int,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+    get_src=Depends(source_getter),
+):
+    """The questions of a Greenhouse job, fetched once (one request). Other sources: paste."""
+    app = _app_or_404(session, user_id, app_id)
+    already = session.scalars(select(ApplicationQuestion.id).where(
+        ApplicationQuestion.application_id == app.id,
+        ApplicationQuestion.source == "api",
+    ).limit(1)).first()
+    if already is not None:  # fetched before: no network call again
+        return _questions_out(session, user_id, app)
+    row = session.execute(
+        select(Job, Company)
+        .join(Company, Company.id == Job.company_id)
+        .where(Job.id == app.job_id, Job.user_id == user_id, Company.user_id == user_id)
+    ).first()
+    if row is None:
+        raise HTTPException(404, MSG_JOB_NOT_FOUND)
+    job, company = row
+    if company.source != "greenhouse":
+        raise HTTPException(409, MSG_NOT_GREENHOUSE)
+    try:
+        raw = await asyncio.wait_for(
+            get_src("greenhouse").fetch_job_questions(company.identifier, job.external_id),
+            timeout=get_settings().greenhouse_questions_timeout,
+        )
+    except (SourceError, ValueError, TimeoutError):
+        raise HTTPException(503, MSG_QUESTIONS_UNAVAILABLE) from None
+    position = _next_position(session, app.id)
+    for parsed in map_greenhouse(raw):
+        session.add(ApplicationQuestion(
+            user_id=user_id, application_id=app.id, position=position, source="api",
+            label=parsed.label, kind=parsed.kind, options=parsed.options,
+            required=parsed.required, sensitive=parsed.sensitive,
+        ))
+        position += 1
+    session.commit()
+    return _questions_out(session, user_id, app)
+
+
+@router.post("/applications/{app_id}/questions", response_model=list[QuestionOut])
+def paste_questions(
+    app_id: int,
+    body: PasteIn,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    app = _app_or_404(session, user_id, app_id)
+    labels = parse_pasted(body.text)
+    if not labels:
+        raise HTTPException(422, MSG_NO_QUESTIONS)
+    position = _next_position(session, app.id)
+    for label in labels:
+        session.add(ApplicationQuestion(
+            user_id=user_id, application_id=app.id, position=position, source="pasted",
+            label=label, kind="text", options=None, required=False,
+            sensitive=is_sensitive(label),
+        ))
+        position += 1
+    session.commit()
+    return _questions_out(session, user_id, app)
+
+
+@router.put("/applications/{app_id}/questions/{qid}", response_model=QuestionOut)
+def update_question(
+    app_id: int,
+    qid: int,
+    body: QuestionPatchIn,
+    session: Session = Depends(get_session),
+    user_id: int = Depends(current_user_id),
+):
+    app = _app_or_404(session, user_id, app_id)
+    q = _question_or_404(session, user_id, app, qid)
+    if body.answer is not None:
+        q.answer = body.answer.strip()
+        q.answer_state = "edited"
+    if body.final:
+        if not (q.answer or "").strip():
+            raise HTTPException(422, MSG_NO_ANSWER_TO_SAVE)
+        q.answer_state = "final"
+    if body.save_to_bank is not None:
+        key = body.save_to_bank.strip()
+        value = (q.answer or "").strip()
+        if not _BANK_KEY.fullmatch(key):
+            raise HTTPException(422, "Use letras minúsculas, números e _ na chave.")
+        if not value:
+            raise HTTPException(422, MSG_NO_ANSWER_TO_SAVE)
+        session.execute(
+            insert(AnswerBankItem)
+            .values(user_id=user_id, key=key, value=value, lang=app.locale)
+            .on_conflict_do_update(
+                constraint="uq_answer_bank_user_key",
+                set_={"value": value, "lang": app.locale},
+            )
+        )
+        q.bank_key = key
+    session.commit()
+    return _question_out(session, user_id, app, q)
 
 
 # ---- gaps -----------------------------------------------------------------

@@ -11,7 +11,7 @@ from rumo_core.config import get_settings
 from rumo_core.db import SessionLocal
 from rumo_core.embeddings.bge_m3 import MODEL_VERSION
 from rumo_core.models import (
-    Application, ApplicationDocument, Company, Job, Profile, ProfileChunk, User,
+    AnswerBankItem, Application, ApplicationDocument, Company, Job, Profile, ProfileChunk, User,
 )
 from rumo_core.profile.schema import Achievement, Basics, CanonicalProfile, Experience, Skill
 
@@ -102,6 +102,7 @@ def env():
         for uid in created:
             s.execute(delete(ApplicationDocument).where(ApplicationDocument.user_id == uid))
             s.execute(delete(Application).where(Application.user_id == uid))
+            s.execute(delete(AnswerBankItem).where(AnswerBankItem.user_id == uid))
             s.execute(delete(ProfileChunk).where(ProfileChunk.user_id == uid))
             s.execute(delete(Profile).where(Profile.user_id == uid))
             s.execute(delete(Job).where(Job.user_id == uid))
@@ -433,3 +434,120 @@ def test_resolve_unknown_requirement_and_other_user_404(env):
     _with_requirement(aid)
     assert client_as(owner).post(f"/applications/{aid}/gaps/zz/resolve", json={"action": "lack"}).status_code == 404
     assert client_as(other).post(f"/applications/{aid}/gaps/m1/resolve", json={"action": "lack"}).status_code == 404
+
+
+# ---- questions ------------------------------------------------------------
+
+class FakeGreenhouse:
+    def __init__(self, raw=None, exc=None):
+        self.raw = raw or []
+        self.exc = exc
+        self.calls = 0
+
+    async def fetch_job_questions(self, identifier, external_id):
+        self.calls += 1
+        if self.exc is not None:
+            raise self.exc
+        return self.raw
+
+
+def _use_source(fake):
+    from api.sources import source_getter
+
+    app.dependency_overrides[source_getter] = lambda: (lambda name: fake)
+
+
+@pytest.fixture
+def questions_env(env):
+    new_user, add_job, add_application, client_as = env
+    yield new_user, add_job, add_application, client_as
+    from api.sources import source_getter
+
+    app.dependency_overrides.pop(source_getter, None)
+
+
+def test_fetch_questions_from_greenhouse_once(questions_env):
+    from rumo_core.sources.base import RawQuestion
+
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft")
+    fake = FakeGreenhouse(raw=[
+        RawQuestion("Why Anthropic?", "textarea", [], True, "questions"),
+        RawQuestion("Do you require visa sponsorship?", "multi_value_single_select", ["Yes", "No"], True, "questions"),
+    ])
+    _use_source(fake)
+    c = client_as(uid)
+    first = c.post(f"/applications/{aid}/questions/fetch").json()
+    second = c.post(f"/applications/{aid}/questions/fetch").json()
+    assert [q["label"] for q in first] == ["Why Anthropic?", "Do you require visa sponsorship?"]
+    assert first == second and fake.calls == 1
+    assert first[1]["sensitive"] is True and first[0]["sensitive"] is False
+
+
+def test_fetch_non_greenhouse_409(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft")
+    with SessionLocal() as s:
+        s.execute(Company.__table__.update().where(Company.user_id == uid).values(source="lever"))
+        s.commit()
+    _use_source(FakeGreenhouse())
+    r = client_as(uid).post(f"/applications/{aid}/questions/fetch")
+    assert r.status_code == 409 and r.json()["detail"] == api_apps.MSG_NOT_GREENHOUSE
+
+
+def test_fetch_failure_503_falls_back_to_paste(questions_env):
+    from rumo_core.sources.base import SourceUnavailable
+
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft")
+    _use_source(FakeGreenhouse(exc=SourceUnavailable("down")))
+    c = client_as(uid)
+    r = c.post(f"/applications/{aid}/questions/fetch")
+    assert r.status_code == 503 and r.json()["detail"] == api_apps.MSG_QUESTIONS_UNAVAILABLE
+    pasted = c.post(f"/applications/{aid}/questions", json={"text": "Por que a empresa?\n\nDescreva um projeto"})
+    assert pasted.status_code == 200 and [q["label"] for q in pasted.json()] == ["Por que a empresa?", "Descreva um projeto"]
+
+
+def test_paste_appends_positions_and_flags_sensitive(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft")
+    c = client_as(uid)
+    c.post(f"/applications/{aid}/questions", json={"text": "Primeira?"})
+    out = c.post(f"/applications/{aid}/questions", json={"text": "Qual é a sua pretensão salarial?"}).json()
+    assert [q["position"] for q in out] == [1, 2]
+    assert out[1]["sensitive"] is True and out[1]["source"] == "pasted"
+
+
+def test_save_to_bank_uses_application_locale(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    uid = new_user()
+    aid = add_application(uid, add_job(uid), state="draft", locale="de")
+    c = client_as(uid)
+    qid = c.post(f"/applications/{aid}/questions", json={"text": "Por que nós?"}).json()[0]["id"]
+    r = c.put(f"/applications/{aid}/questions/{qid}", json={"answer": "Weil ich das Team mag.", "final": True,
+                                                           "save_to_bank": "why_us"})
+    assert r.status_code == 200 and r.json()["answer_state"] == "final" and r.json()["bank_key"] == "why_us"
+    with SessionLocal() as s:
+        item = s.execute(select(AnswerBankItem).where(AnswerBankItem.user_id == uid, AnswerBankItem.key == "why_us")).scalar_one()
+        assert item.lang == "de" and item.value == "Weil ich das Team mag."
+
+
+def test_bank_suggestion_only_for_sensitive_and_only_own_bank(questions_env):
+    new_user, add_job, add_application, client_as = questions_env
+    owner, other = new_user(), new_user()
+    with SessionLocal() as s:
+        s.add(AnswerBankItem(user_id=owner, key="salary_expectation", value="R$ 8.000"))
+        s.add(AnswerBankItem(user_id=other, key="salary_expectation", value="US$ 9.000"))
+        s.commit()
+    aid = add_application(owner, add_job(owner), state="draft")
+    c = client_as(owner)
+    c.post(f"/applications/{aid}/questions", json={"text": "Qual é a sua pretensão salarial?"})
+    c.post(f"/applications/{aid}/questions", json={"text": "Por que nós?"})
+    qs = c.get(f"/applications/{aid}").json()["questions"]
+    salary, why = qs[0], qs[1]
+    assert salary["bank_suggestion"] == {"key": "salary_expectation", "value": "R$ 8.000"}
+    assert why["bank_suggestion"] is None

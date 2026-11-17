@@ -52,6 +52,17 @@ class RawJob:
     salary_hint: SalaryHint | None = None
 
 
+@dataclass(frozen=True)
+class RawQuestion:
+    """One application question of a job (marco 5). `section` says where the source listed it."""
+
+    label: str
+    field_type: str
+    values: list[str]
+    required: bool
+    section: str  # questions | compliance | demographic | location
+
+
 # Connectors whose jobs come from an applicant tracking system (rank 0).
 ATS_SOURCES: frozenset[str] = frozenset(
     {
